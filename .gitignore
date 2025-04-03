@@ -25,3 +25,36 @@ Thumbs.db
 
 # Test files
 coverage/
+
+# Secrets
+serviceAccountKey.json
+*.env*
+!.env.example
+
+# Firebase
+*.log
+*.logs
+*.pid
+*.seed
+*.pid.lock
+lib-cov/
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+*.sqlite
+
+# Firebase Functions
+functions/node_modules/
+functions/lib/
+
+# Firebase Hosting
+public/
+
+# Firebase Emulators
+emulators_data/
+.dataconnect/
+
+# Firebase Crashlytics
+*crashlytics*.dSYM.zip
+.vercel

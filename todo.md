@@ -4,16 +4,16 @@
 - [x] **Repository & Project Structure**
   - [x] Initialize a Git repository (consider a monorepo if combining frontend, backend, and Python service).
   - [x] Define branch structure and development workflow.
-- [ ] **Environment Configuration**
-  - Set up environment variables for Firebase, Anthropic API key, and any secrets.
-  - Provision a Firebase project (Firestore, Storage, Authentication).
-  - Provision a Google Cloud project for Cloud Run (Python microservice).
-  - Connect repository to Vercel for deployment.
+- [x] **Environment Configuration**
+  - [x] Set up environment variables for Firebase, Anthropic API key, and any secrets.
+  - [x] Provision a Firebase project (Firestore, Storage, Authentication).
+  - [x] Provision a Google Cloud project for Cloud Run (Python microservice).
+  - [x] Connect repository to Vercel for deployment.
 
 ## Frontend Development (Next.js)
-- [ ] **Project Initialization**
-  - Create a new Next.js project (with TypeScript if preferred).
-  - Install necessary packages: Material-UI (or alternative UI library), react-split-pane, react-pdf, Mammoth.js, SheetJS, and a React chat UI kit.
+- [x] **Project Initialization**
+  - [x] Create a new Next.js project (with TypeScript if preferred).
+  - [x] Install necessary packages: shadcn-ui, react-split-pane, react-pdf, mammoth, xlsx, ai.
 - [ ] **Authentication UI**
   - Develop a login page integrated with Firebase Authentication.
 - [ ] **Dashboard & Document Library**
