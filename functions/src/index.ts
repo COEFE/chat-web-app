@@ -9,7 +9,7 @@
 
 // import * as functions from "firebase-functions/v2";
 import {onObjectFinalized} from "firebase-functions/v2/storage";
-import {getFirestore, Timestamp} from "firebase-admin/firestore";
+import {getFirestore, Timestamp, FieldValue} from "firebase-admin/firestore";
 import {initializeApp} from "firebase-admin/app";
 import {getStorage} from "firebase-admin/storage";
 import * as logger from "firebase-functions/logger"; // Import logger
@@ -117,13 +117,18 @@ export const processDocumentUpload = onObjectFinalized(
         fileBucket,
         contentType,
         size: fileSize,
-        uploadedAt: createdAt,
+        // Use server timestamp for consistent ordering
+        uploadedAt: FieldValue.serverTimestamp(),
         createdAt,
         status: "processed", // Changed from "uploaded" to "processed"
         downloadURL: downloadURL,
       });
+      // Log timestamp creation
+      logger.info("Created document with server timestamp");
 
-      logger.info("Successfully created Firestore entry for: " + filePath);
+      // Log success with file path
+      logger.info("Successfully created Firestore entry for: " +
+        filePath);
     } catch (error) {
       logger.error("Error creating Firestore entry: " + error);
       // Consider adding retry logic or moving file to error folder

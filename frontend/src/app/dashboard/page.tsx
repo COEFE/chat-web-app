@@ -40,9 +40,41 @@ interface DocumentTableProps {
 }
 
 function DocumentTable({ documents, isLoading, onSelectDocument }: DocumentTableProps) {
-  const formatDate = (timestamp: Timestamp | null | undefined): string => {
+  const formatDate = (timestamp: any): string => {
+    // Handle null, undefined, or missing timestamp
     if (!timestamp) return 'N/A';
-    return timestamp.toDate().toLocaleDateString();
+    
+    // Handle server timestamp (which might be a different format)
+    try {
+      // If it's a Firestore Timestamp object
+      if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+        return timestamp.toDate().toLocaleDateString();
+      }
+      
+      // If it's a JavaScript Date object
+      if (timestamp instanceof Date) {
+        return timestamp.toLocaleDateString();
+      }
+      
+      // If it's a number (seconds or milliseconds since epoch)
+      if (typeof timestamp === 'number') {
+        // Assume milliseconds if > 10^12, otherwise seconds
+        const date = timestamp > 10**12 
+          ? new Date(timestamp) 
+          : new Date(timestamp * 1000);
+        return date.toLocaleDateString();
+      }
+      
+      // If it's an ISO string or other string format
+      if (typeof timestamp === 'string') {
+        return new Date(timestamp).toLocaleDateString();
+      }
+    } catch (error) {
+      console.error('Error formatting date:', error, timestamp);
+    }
+    
+    // Fallback
+    return 'Invalid Date';
   };
 
   return (
@@ -99,22 +131,52 @@ export default function DashboardPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const fetchDocuments = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      console.log('No user available for fetching documents');
+      return;
+    }
 
+    console.log('Attempting to fetch documents for user:', user.uid);
     setIsLoadingDocs(true);
     setErrorDocs(null);
 
     try {
-      const q = query(collection(db, 'users', user.uid, 'documents'), orderBy('uploadedAt', 'desc'));
+      // Log the full path we're querying
+      const path = `users/${user.uid}/documents`;
+      console.log(`Querying Firestore path: ${path}`);
+      
+      // First try to get documents without ordering to see if they exist
+      let q = query(collection(db, 'users', user.uid, 'documents'));
+      const initialSnapshot = await getDocs(q);
+      
+      console.log(`Initial query returned ${initialSnapshot.docs.length} documents without ordering`);
+      
+      // If documents exist, then try with ordering
+      if (initialSnapshot.docs.length > 0) {
+        console.log('Documents exist, trying with orderBy');
+        q = query(collection(db, 'users', user.uid, 'documents'), orderBy('uploadedAt', 'desc'));
+      }
+      console.log('Query created, fetching documents...');
+      
       const querySnapshot = await getDocs(q);
+      console.log(`Query returned ${querySnapshot.docs.length} documents`);
+      
+      // Log each document for debugging
+      querySnapshot.docs.forEach((doc, index) => {
+        console.log(`Document ${index + 1}:`, { id: doc.id, ...doc.data() });
+      });
+      
       const userDocuments = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...(doc.data() as Omit<MyDocumentData, 'id'>),
       }));
+      
+      console.log('Processed documents:', userDocuments);
       setDocuments(userDocuments);
     } catch (err) {
       console.error("Error fetching documents: ", err);
       const message = (err instanceof Error) ? err.message : 'Unknown error';
+      console.error('Detailed error:', err);
       setErrorDocs(`Failed to fetch documents: ${message}`);
     } finally {
       setIsLoadingDocs(false);
