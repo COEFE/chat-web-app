@@ -3,23 +3,16 @@ import { getAuth, Auth } from "firebase/auth";
 import { getFirestore, Firestore } from "firebase/firestore";
 import { getStorage, FirebaseStorage } from "firebase/storage";
 
-// Helper function to determine the correct authDomain based on environment
+// Always use the Firebase console configured authDomain
+// This is critical for Firebase Auth to work properly
 const getAuthDomain = () => {
-  // Default to the environment variable
-  const configuredDomain = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN;
+  // Always use the original domain configured in Firebase console
+  const firebaseAuthDomain = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN;
   
-  // Check if we're in a browser environment
-  if (typeof window !== 'undefined') {
-    // For Vercel deployments - use the current hostname
-    if (window.location.hostname.includes('vercel.app')) {
-      console.log('Using Vercel deployment domain for auth:', window.location.hostname);
-      // Allow Firebase to use the current Vercel domain
-      return window.location.hostname;
-    }
-  }
+  // Log the domain being used
+  console.log('Using Firebase auth domain:', firebaseAuthDomain);
   
-  // Fall back to configured domain for local development
-  return configuredDomain;
+  return firebaseAuthDomain;
 };
 
 // Your web app's Firebase configuration using environment variables with dynamic authDomain
