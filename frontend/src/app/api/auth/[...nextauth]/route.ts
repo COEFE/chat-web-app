@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 // Handle Firebase Auth's iframe requests
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { nextauth: string[] } }
-) {
+export async function GET(request: NextRequest) {
   // Capture any Firebase Auth iframe requests
   if (request.nextUrl.pathname.includes('/__/auth/iframe')) {
     // Firebase needs this endpoint for authentication to work
@@ -22,21 +19,16 @@ export async function GET(
   return NextResponse.json(
     {
       message: 'Firebase authentication API route',
-      path: params.nextauth.join('/'),
     },
     { status: 200 }
   );
 }
 
 // Handle POST requests to auth endpoints
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { nextauth: string[] } }
-) {
+export async function POST(request: NextRequest) {
   return NextResponse.json(
     {
       message: 'Firebase authentication API route',
-      path: params.nextauth.join('/'),
     },
     { status: 200 }
   );
