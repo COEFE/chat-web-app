@@ -7,12 +7,11 @@
  * See a full list of supported triggers at https://firebase.google.com/docs/functions
  */
 
-import {initializeApp} from "firebase-admin/app";
-import {
-  getFirestore,
-  Timestamp,
-} from "firebase-admin/firestore"; // Import Timestamp
+// import * as functions from "firebase-functions/v2";
 import {onObjectFinalized} from "firebase-functions/v2/storage";
+import {getFirestore, Timestamp} from "firebase-admin/firestore";
+import {initializeApp} from "firebase-admin/app";
+import {getStorage} from "firebase-admin/storage";
 import * as logger from "firebase-functions/logger"; // Import logger
 
 // Start writing functions
@@ -28,12 +27,14 @@ const firestore = getFirestore();
 export const processDocumentUpload = onObjectFinalized(
   {cpu: "gcf_gen1"},
   async (event) => { // Use gen1 CPU
-    const fileBucket = event.data.bucket; // Storage bucket
+    const fileBucket = event.data.bucket; // Storage bucket containing the file.
     const filePath = event.data.name; // File path in the bucket.
     const contentType = event.data.contentType; // File content type.
     const metadata = event.data.metadata; // Custom metadata (e.g., userId)
-    const size = event.data.size; // File size in bytes (string)
+    const size = event.data.size; // File size in bytes
     const timeCreated = event.data.timeCreated; // File creation time (ISO 8601)
+
+    logger.info("Received file upload with metadata:", metadata);
 
     logger.info("Processing new file:", {filePath, contentType, size});
 
@@ -49,17 +50,28 @@ export const processDocumentUpload = onObjectFinalized(
 
     // --- Extract User ID (Crucial!) ---
     // We expect the frontend to set 'userId' in the custom metadata
-    // during upload.
-    const userId = metadata?.userId;
+    // Extract userId from metadata (if available)
+    const customMetadata = metadata?.customMetadata || {};
+    // Type-safe access to customMetadata properties
+    let userId = "";
+    let originalName = filePath.split("/").pop() || "";
+
+    if (customMetadata && typeof customMetadata === "object") {
+      // Safe access with type checking
+      userId = "userId" in customMetadata ? String(customMetadata.userId) : "";
+      // Check if originalName exists in metadata
+      if ("originalName" in customMetadata) {
+        originalName = String(customMetadata.originalName);
+      }
+    }
+
+    // Basic validation
     if (!userId) {
-      logger.error(
-        "Missing 'userId' in custom metadata for file:",
-        filePath,
-      );
-      // Optional: Delete the file if userId is missing?
-      // await storage.bucket(fileBucket).file(filePath).delete();
+      logger.error("Missing userId in metadata");
       return; // Or throw an error?
     }
+
+    logger.info(`Using userId: ${userId}, originalName: ${originalName}`);
 
     logger.info(`File uploaded by user ${userId}: ${filePath}`);
 
@@ -88,18 +100,27 @@ export const processDocumentUpload = onObjectFinalized(
         }
       }
 
+      // Get the download URL for the file
+      const storage = getStorage();
+      const fileRef = storage.bucket(fileBucket).file(filePath);
+      const [downloadURL] = await fileRef.getSignedUrl({
+        action: "read",
+        expires: "03-01-2500", // Set a far future expiration
+      });
+
+      logger.info(`Generated download URL: ${downloadURL}`);
+
       await docRef.set({
         userId,
-        name: filePath.split("/").pop(), // Changed from fileName to name
-        storagePath: filePath, // Changed from filePath to storagePath
+        name: originalName, // Use the original filename from metadata
+        storagePath: filePath,
         fileBucket,
         contentType,
         size: fileSize,
-        uploadedAt: createdAt, // Added uploadedAt field matching createdAt
-        createdAt, // Keep original createdAt too
-        status: "uploaded",
-        // Add downloadURL field (will be null initially, can be updated later)
-        downloadURL: null,
+        uploadedAt: createdAt,
+        createdAt,
+        status: "processed", // Changed from "uploaded" to "processed"
+        downloadURL: downloadURL,
       });
 
       logger.info("Successfully created Firestore entry for: " + filePath);

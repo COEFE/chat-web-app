@@ -13,37 +13,41 @@
 ## Frontend Development (Next.js)
 - [x] **Project Initialization**
   - [x] Create a new Next.js project (with TypeScript if preferred).
-  - [x] Install necessary packages: shadcn-ui, react-split-pane, react-pdf, mammoth, xlsx, ai.
-- [ ] **Authentication UI**
+  - [x] Install necessary packages: shadcn-ui, react-resizable-panels, react-pdf, mammoth, xlsx, ai, react-dropzone.
+- [x] **Authentication UI**
   - Develop a login page integrated with Firebase Authentication.
-- [ ] **Dashboard & Document Library**
+- [x] **Dashboard & Document Library**
   - Create a dashboard page displaying a list/grid of uploaded documents.
   - Integrate Firestore to fetch and display document metadata.
-- [ ] **File Upload Component**
-  - Build a drag-and-drop file uploader and file-picker.
-  - Integrate the uploader with Firebase Storage and update Firestore with metadata.
+- [x] **File Upload Component**
+  - [x] Build a drag-and-drop file uploader and file-picker.
+  - [x] Integrate the uploader with Firebase Storage and update Firestore with metadata.
 - [ ] **Document Viewer & Split-Pane Layout**
-  - Implement a resizable split-pane layout:
+  - Implement a resizable split-pane layout (using react-resizable-panels):
     - **Left Pane:** Develop components for rendering:
       - PDFs using react-pdf.
       - DOCX files (using Mammoth.js or by converting DOCX to PDF).
       - Excel/CSV files using SheetJS (render as an HTML table).
       - Images with native HTML tags (plus optional zoom/pan features).
     - **Right Pane:** Create a chat interface using a pre-built React chat component.
-- [ ] **AI Chat Integration**
-  - Wire the chat interface to send queries to backend API endpoints.
-  - Display AI responses within the chat UI.
+      - [x] Implement basic chat UI component (`ChatInterface.tsx`)
+      - [x] Implement message display and state management
+      - [x] Implement input handling and sending logic
+- [x] **AI Chat Integration**
+  - [x] Wire the chat interface to send queries to backend API endpoints (using mock backend initially).
+  - [x] Display AI responses within the chat UI.
 - [ ] **Multi-Document Context**
   - Allow selection of multiple documents for comparative analysis.
   - Implement UI to list selected document names and switch the primary preview.
 
 ## Backend Development (Next.js API Routes / Firebase Functions)
-- [ ] **API for AI Queries**
+- [x] **API for AI Queries**
   - Create an API route to:
-    - Verify the admin's Firebase auth token.
-    - Retrieve document text or summaries from Firestore/Storage.
-    - Forward the query with document context to the Anthropic Claude API.
-    - Return the AI response to the frontend.
+    - [x] Receive user query and document ID (`/api/chat` created).
+    - [x] Verify the admin's Firebase auth token.
+    - [x] Retrieve document text or summaries from Firestore/Storage.
+    - [ ] Forward the query with document context to the Anthropic Claude API.
+    - [ ] Return the AI response to the frontend.
 - [ ] **Document Metadata & Version Management**
   - Create API endpoints for updating document metadata (e.g., after file uploads or edits).
   - Implement versioning logic: record each new version in Firestore and update Firebase Storage paths.
@@ -66,17 +70,17 @@
 ## AI Integration (Anthropic Claude API)
 - [ ] **Prompt Design & API Integration**
   - Design prompt templates for document Q&A and editing requests.
-  - Implement API calls from the backend (Next.js API routes) to the Anthropic Claude API.
+  - [x] Implement API calls from the backend (Next.js API routes) to the Anthropic Claude API.
 - [ ] **Multi-Document Context Handling**
   - Create logic to assemble multiple document texts into a single API request.
 - [ ] **Structured Response Parsing**
   - Develop parsers to handle structured edit responses (e.g., JSON diff) returned by Claude.
   
 ## Authentication & Security
-- [ ] **Firebase Authentication**
+- [x] **Firebase Authentication**
   - Configure Firebase Auth for admin login.
   - Implement client-side login logic in the Next.js app.
-- [ ] **Backend Auth Verification**
+- [x] **Backend Auth Verification**
   - Verify Firebase ID tokens in API routes using the Firebase Admin SDK.
 - [ ] **Security Rules**
   - Set Firestore rules to restrict read/write access to authenticated admin users.
@@ -99,10 +103,10 @@
 
 ## Testing & QA
 - [ ] **Unit & Integration Tests**
-  - Write tests for API endpoints, especially for authentication and AI query handling.
+  - [ ] Write tests for API endpoints, especially for authentication and AI query handling.
   - Test document upload and metadata storage.
 - [ ] **End-to-End Testing**
-  - Simulate a full workflow: upload document, view in split-pane, interact with AI chat, and apply an edit.
+  - [ ] Simulate a full workflow: upload document, view in split-pane, interact with AI chat, and apply an edit.
 - [ ] **Security Testing**
   - Verify authentication and authorization for all protected routes.
   - Test Firestore and Storage security rules.

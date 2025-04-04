@@ -3,7 +3,6 @@
 import React, { useCallback, useState } from 'react';
 import { useDropzone, FileRejection } from 'react-dropzone';
 import { getStorage, ref, uploadBytesResumable as firebaseUploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/context/AuthContext';
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
@@ -81,6 +80,14 @@ export function FileUpload({
       const storagePath = `users/${user.uid}/${uniqueFileName}`;
       console.log(`Using standard storage path: ${storagePath}`);
       const storageRef = ref(getStorage(), storagePath);
+      
+      // Add metadata to the upload that the Cloud Function can use
+      const metadata = {
+        customMetadata: {
+          userId: user.uid,
+          originalName: file.name
+        }
+      };
 
       try {
         setUploadingFiles((prev) =>
@@ -90,7 +97,7 @@ export function FileUpload({
         );
         
         console.log(`Starting direct upload for ${file.name}`);
-        const snapshot = await firebaseUploadBytesResumable(storageRef, file);
+        const snapshot = await firebaseUploadBytesResumable(storageRef, file, metadata);
         console.log(`Upload SUCCESS for ${file.name}`, snapshot);
 
         setUploadingFiles((prev) =>
@@ -103,21 +110,8 @@ export function FileUpload({
         const downloadURL = await getDownloadURL(snapshot.ref);
         console.log(`Got download URL for ${file.name}: ${downloadURL}`);
 
-        console.log('Attempting Firestore write for user UID:', user.uid);
-        if (!user.uid) {
-          throw new Error("CRITICAL: user.uid is null or empty before Firestore write!");
-        }
-
-        const docRef = await addDoc(collection(getFirestore(), 'users', user.uid, 'documents'), {
-          userId: user.uid,
-          name: file.name,
-          storagePath: storagePath,
-          uploadedAt: serverTimestamp(),
-          contentType: file.type,
-          size: file.size,
-          downloadURL: downloadURL,
-        });
-        console.log(`Firestore document created successfully with ID: ${docRef.id}`);
+        console.log('File uploaded successfully with download URL:', downloadURL);
+        console.log('The Cloud Function will handle creating the Firestore document.');
 
         setUploadingFiles((prev) =>
           prev.map((uf) =>
