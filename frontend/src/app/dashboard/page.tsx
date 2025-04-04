@@ -39,7 +39,7 @@ interface DocumentTableProps {
   onSelectDocument: (doc: MyDocumentData | null) => void;
 }
 
-function DocumentTable({ documents, isLoading, onSelectDocument }: DocumentTableProps) {
+function DocumentTable({ documents, isLoading, error, onSelectDocument }: DocumentTableProps) {
   const formatDate = (timestamp: any): string => {
     // Handle null, undefined, or missing timestamp
     if (!timestamp) return 'N/A';
@@ -77,46 +77,78 @@ function DocumentTable({ documents, isLoading, onSelectDocument }: DocumentTable
     return 'Invalid Date';
   };
 
+  // Prevent flashing content by maintaining previous documents while loading
+  const displayDocuments = documents.length > 0 ? documents : [];
+  
   return (
-    <Table>
-      <TableCaption>A list of your uploaded documents.</TableCaption>
-      <thead data-slot="table-header" className={"[&_tr]:border-b"}>
-        <tr
-          data-slot="table-row"
-          className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
-        ><th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-[200px]">Name</th><th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap">Upload Date</th><th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap">Status</th><th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-right">Actions</th></tr>
-      </thead>
-      <TableBody>
-        {isLoading ? (
-          <TableRow>
-            <TableCell colSpan={4} className="h-24 text-center">
-              Loading documents...
-            </TableCell>
-          </TableRow>
-        ) : documents.length === 0 ? (
-          <TableRow>
-            <TableCell colSpan={4} className="h-24 text-center">
-              No documents uploaded yet.
-            </TableCell>
-          </TableRow>
-        ) : (
-          documents.map((doc) => {
-            return (
-              <TableRow key={doc.id}>
-                <TableCell className="font-medium">{doc.name}</TableCell><TableCell>{formatDate(doc.uploadedAt)}</TableCell><TableCell>{doc.status || 'N/A'}</TableCell><TableCell className="text-right">
-                  <Button variant="ghost" size="sm" onClick={() => onSelectDocument(doc)}>
-                    View
-                  </Button>
-                  <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700 ml-2">
-                    Delete {/* TODO: Implement Delete */}
-                  </Button>
-                </TableCell>
-              </TableRow>
-            );
-          })
-        )}
-      </TableBody>
-    </Table>
+    <div>
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4" role="alert">
+          <p>{error}</p>
+        </div>
+      )}
+      
+      <Table>
+        <TableCaption>A list of your uploaded documents.</TableCaption>
+        <thead data-slot="table-header" className={"[&_tr]:border-b"}>
+          <tr
+            data-slot="table-row"
+            className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+          >
+            <th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-[200px]">Name</th>
+            <th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap">Upload Date</th>
+            <th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap">Status</th>
+            <th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-right">Actions</th>
+          </tr>
+        </thead>
+        <TableBody>
+          {isLoading && displayDocuments.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={4} className="h-24 text-center">
+                <div className="flex items-center justify-center space-x-2">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+                  <span>Loading documents...</span>
+                </div>
+              </TableCell>
+            </TableRow>
+          ) : displayDocuments.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={4} className="h-24 text-center">
+                No documents uploaded yet.
+              </TableCell>
+            </TableRow>
+          ) : (
+            displayDocuments.map((doc) => {
+              return (
+                <TableRow key={doc.id}>
+                  <TableCell className="font-medium">{doc.name}</TableCell>
+                  <TableCell>{formatDate(doc.uploadedAt)}</TableCell>
+                  <TableCell>{doc.status || 'N/A'}</TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="sm" onClick={() => onSelectDocument(doc)}>
+                      View
+                    </Button>
+                    <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700 ml-2">
+                      Delete {/* TODO: Implement Delete */}
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })
+          )}
+          {isLoading && displayDocuments.length > 0 && (
+            <TableRow>
+              <TableCell colSpan={4} className="h-10 text-center bg-muted/20">
+                <div className="flex items-center justify-center space-x-2 text-sm text-muted-foreground">
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+                  <span>Refreshing...</span>
+                </div>
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
 
@@ -131,105 +163,91 @@ export default function DashboardPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const fetchDocuments = useCallback(async () => {
+    // Create a unique request ID to handle race conditions
+    const requestId = Date.now().toString();
+    
     if (!user) {
       console.log('No user available for fetching documents');
       return;
     }
 
-    console.log('Attempting to fetch documents for user:', user.uid);
+    console.log(`[Request ${requestId}] Attempting to fetch documents for user:`, user.uid);
     setIsLoadingDocs(true);
     setErrorDocs(null);
 
     try {
       // Force token refresh to ensure we have the latest authentication
-      console.log('Refreshing auth token before querying Firestore');
+      console.log(`[Request ${requestId}] Refreshing auth token before querying Firestore`);
       await user.getIdToken(true);
-      console.log('Token refreshed successfully');
+      console.log(`[Request ${requestId}] Token refreshed successfully`);
       
       // Log the full path we're querying
       const path = `users/${user.uid}/documents`;
-      console.log(`Querying Firestore path: ${path}`);
+      console.log(`[Request ${requestId}] Querying Firestore path: ${path}`);
       
-      // IMPORTANT: First check if the collection exists
+      // Get the documents collection
       const collectionRef = collection(db, 'users', user.uid, 'documents');
       
-      try {
-        // Try a simple query first without any ordering
-        let q = query(collectionRef);
-        const initialSnapshot = await getDocs(q);
-        console.log(`Initial query returned ${initialSnapshot.docs.length} documents without ordering`);
+      // Try a simple query first without any ordering
+      let q = query(collectionRef);
+      const initialSnapshot = await getDocs(q);
+      console.log(`[Request ${requestId}] Initial query returned ${initialSnapshot.docs.length} documents without ordering`);
+      
+      // If documents exist, try with ordering if possible
+      let querySnapshot = initialSnapshot;
+      if (initialSnapshot.docs.length > 0) {
+        // Check if any documents have the uploadedAt field
+        const hasUploadedAt = initialSnapshot.docs.some(doc => doc.data().uploadedAt);
         
-        // Log the raw data of each document for debugging
-        initialSnapshot.docs.forEach((doc, index) => {
-          const data = doc.data();
-          console.log(`Raw document ${index + 1}:`, { 
-            id: doc.id, 
-            data: data,
-            uploadedAt: data.uploadedAt,
-            uploadedAtType: data.uploadedAt ? typeof data.uploadedAt : 'undefined',
-            hasToDate: data.uploadedAt && typeof data.uploadedAt.toDate === 'function'
-          });
-        });
+        if (hasUploadedAt) {
+          console.log(`[Request ${requestId}] Documents with uploadedAt exist, trying with orderBy`);
+          q = query(collectionRef, orderBy('uploadedAt', 'desc'));
+          querySnapshot = await getDocs(q);
+          console.log(`[Request ${requestId}] Ordered query returned ${querySnapshot.docs.length} documents`);
+        } else {
+          console.log(`[Request ${requestId}] No documents have uploadedAt field, skipping ordering`);
+        }
+      }
+    
+      // Process documents with careful handling of timestamps
+      const userDocuments = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        let uploadedAt = data.uploadedAt;
         
-        // If documents exist, try with ordering if possible
-        let querySnapshot = initialSnapshot;
-        if (initialSnapshot.docs.length > 0) {
-          // Check if any documents have the uploadedAt field
-          const hasUploadedAt = initialSnapshot.docs.some(doc => doc.data().uploadedAt);
-          
-          if (hasUploadedAt) {
-            console.log('Documents with uploadedAt exist, trying with orderBy');
-            q = query(collectionRef, orderBy('uploadedAt', 'desc'));
-            querySnapshot = await getDocs(q);
-            console.log(`Ordered query returned ${querySnapshot.docs.length} documents`);
-          } else {
-            console.log('No documents have uploadedAt field, skipping ordering');
+        // Handle different timestamp formats
+        if (uploadedAt) {
+          if (typeof uploadedAt.toDate === 'function') {
+            // Firestore Timestamp
+            uploadedAt = uploadedAt.toDate();
+          } else if (uploadedAt instanceof Date) {
+            // Already a Date object
+            uploadedAt = uploadedAt;
+          } else if (typeof uploadedAt === 'number') {
+            // Timestamp in milliseconds
+            uploadedAt = new Date(uploadedAt);
+          } else if (typeof uploadedAt === 'string') {
+            // ISO string or other date string
+            uploadedAt = new Date(uploadedAt);
           }
         }
-      
-        // Process documents with careful handling of timestamps
-        const userDocuments = querySnapshot.docs.map(doc => {
-          const data = doc.data();
-          let uploadedAt = data.uploadedAt;
-          
-          // Handle different timestamp formats
-          if (uploadedAt) {
-            if (typeof uploadedAt.toDate === 'function') {
-              // Firestore Timestamp
-              uploadedAt = uploadedAt.toDate();
-            } else if (uploadedAt instanceof Date) {
-              // Already a Date object
-              uploadedAt = uploadedAt;
-            } else if (typeof uploadedAt === 'number') {
-              // Timestamp in milliseconds
-              uploadedAt = new Date(uploadedAt);
-            } else if (typeof uploadedAt === 'string') {
-              // ISO string or other date string
-              uploadedAt = new Date(uploadedAt);
-            }
-          }
-          
-          return {
-            id: doc.id,
-            ...data,
-            uploadedAt: uploadedAt || null
-          } as MyDocumentData;
-        });
         
-        console.log('Processed documents with timestamp handling:', userDocuments);
-        setDocuments(userDocuments);
-      } catch (queryError) {
-        console.error("Error querying documents: ", queryError);
-        const queryErrorMessage = (queryError instanceof Error) ? queryError.message : 'Unknown query error';
-        setErrorDocs(`Failed to query documents: ${queryErrorMessage}`);
-      }
+        return {
+          id: doc.id,
+          ...data,
+          uploadedAt: uploadedAt || null
+        } as MyDocumentData;
+      });
+      
+      console.log(`[Request ${requestId}] Processed ${userDocuments.length} documents with timestamp handling`);
+      setDocuments(userDocuments);
     } catch (err) {
-      console.error("Error fetching documents: ", err);
+      console.error(`[Request ${requestId}] Error fetching documents:`, err);
       const message = (err instanceof Error) ? err.message : 'Unknown error';
-      console.error('Detailed error:', err);
+      console.error(`[Request ${requestId}] Detailed error:`, err);
       setErrorDocs(`Failed to fetch documents: ${message}`);
     } finally {
       setIsLoadingDocs(false);
+      console.log(`[Request ${requestId}] Fetch documents complete`);
     }
   }, [user]);
 
@@ -244,21 +262,19 @@ export default function DashboardPage() {
     }
   }, [user, router, authLoading]);
 
+  // Single useEffect to handle document fetching
   useEffect(() => {
-    if (user && !isLoadingDocs && !errorDocs) {
+    if (user && !authLoading) {
+      console.log('Triggering document fetch on user authentication');
       fetchDocuments();
     }
-  }, [user, fetchDocuments, isLoadingDocs, errorDocs]);
+  }, [user, authLoading, fetchDocuments]);
 
   const handleSelectDocument = (doc: MyDocumentData | null) => {
     console.log("Selected Document:", doc);
     setSelectedDocument(doc);
     // setView('chat'); // Switch view to chat interface
   };
-
-  useEffect(() => {
-    fetchDocuments();
-  }, [user, fetchDocuments]);
 
   if (authLoading) {
     return <div>Loading...</div>;
