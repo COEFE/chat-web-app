@@ -85,9 +85,12 @@ export function FileUpload({
       const metadata = {
         customMetadata: {
           userId: user.uid,
-          originalName: file.name
+          originalName: file.name,
+          timestamp: Date.now().toString() // Add timestamp to ensure uniqueness
         }
       };
+      
+      console.log(`Setting metadata for upload:`, metadata);
 
       try {
         setUploadingFiles((prev) =>
