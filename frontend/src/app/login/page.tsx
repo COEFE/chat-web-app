@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react'; // Import useEffect
 import { useRouter } from 'next/navigation'; // Import useRouter for navigation
-import { signInWithPopup } from 'firebase/auth';
+import { signInWithRedirect, getRedirectResult } from 'firebase/auth';
 import { createEnhancedGoogleProvider } from '@/lib/firebaseAuthProvider';
 import { auth } from '@/lib/firebaseConfig'; // Import the initialized auth instance
 import { Button } from '@/components/ui/button'; // Using Shadcn Button
@@ -20,51 +20,42 @@ export default function LoginPage() {
     }
   }, [user, loading, router]); // Dependencies for the effect
 
-  const handleGoogleSignIn = async () => {
-    const provider = createEnhancedGoogleProvider();
-    try {
-      const result = await signInWithPopup(auth, provider);
-      // This gives you a Google Access Token. You can use it to access the Google API.
-      // const credential = GoogleAuthProvider.credentialFromResult(result);
-      // const token = credential?.accessToken;
-      // The signed-in user info.
-      const user = result.user;
-      console.log('Signed in user:', user);
-
-      // Redirect user to dashboard after successful login
-      router.push('/dashboard');
-
-    } catch (error: unknown) {
-      // Handle Errors here.
-      let errorCode = 'unknown';
-      let errorMessage = 'An unknown error occurred during sign-in.';
-      let email = undefined;
-      let credential = undefined;
-
-      if (typeof error === 'object' && error !== null) {
-        errorCode = (error as any).code || errorCode; // Attempt to get Firebase error code
-        errorMessage = (error as any).message || errorMessage; // Attempt to get error message
-        email = (error as any).customData?.email; // Attempt to get email
-        try {
-          // This call requires the GoogleAuthProvider, so importing it back
-          const { GoogleAuthProvider } = await import('firebase/auth');
-          credential = GoogleAuthProvider.credentialFromError(error as any);
-        } catch (e) {
-          // Ignore if it's not a Google Auth error
+  // Check for redirect results on page load
+  useEffect(() => {
+    const checkRedirectResult = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result) {
+          // User successfully authenticated
+          console.log('Signed in user from redirect:', result.user);
+          router.push('/dashboard');
         }
-        
-        // Log the current domain for unauthorized domain debugging
-        if (errorCode === 'auth/unauthorized-domain') {
-          console.error('Unauthorized Domain Error Details:', {
-            currentDomain: window.location.hostname,
-            fullUrl: window.location.href,
-            errorDetail: error
-          });
-        }
+      } catch (error) {
+        console.error('Redirect sign-in error:', error);
+        setError(`${(error as any)?.code || 'unknown'}: ${(error as any)?.message || 'Unknown error'}`);
       }
-      console.error('Google Sign-In Error:', errorCode, errorMessage, email, credential);
-      setError(`${errorCode}: ${errorMessage}`); // Display more detailed error to the user
-    }
+    };
+    
+    checkRedirectResult();
+  }, [router]);
+
+  const handleGoogleSignIn = () => {
+    const provider = createEnhancedGoogleProvider();
+    // Using redirect method instead of popup to avoid domain issues
+    signInWithRedirect(auth, provider).catch(error => {
+      console.error('Error starting redirect:', error);
+      
+      // Enhanced error logging
+      if (error?.code === 'auth/unauthorized-domain') {
+        console.error('Unauthorized Domain Error Details:', {
+          currentDomain: window.location.hostname,
+          fullUrl: window.location.href,
+          errorDetail: error
+        });
+      }
+      
+      setError(`${error?.code || 'unknown'}: ${error?.message || 'Unknown error'}`);
+    });
   };
 
   // Don't render the login form if we are loading or already logged in (and about to redirect)
@@ -75,11 +66,23 @@ export default function LoginPage() {
 
   // Render login form only if not loading and not logged in
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-100">
-      <div className="p-8 bg-white rounded shadow-md w-full max-w-xs text-center">
-        <h1 className="text-2xl font-bold mb-6">Login</h1>
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <Button onClick={handleGoogleSignIn} className="w-full">
+    <div className="flex min-h-screen flex-col items-center justify-center">
+      <div className="w-full max-w-md p-8 space-y-8 rounded-xl shadow-md">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold">Welcome</h1>
+          <p className="mt-2 text-gray-600">Sign in to your account</p>
+        </div>
+        
+        {error && (
+          <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg">
+            {error}
+          </div>
+        )}
+        
+        <Button 
+          onClick={handleGoogleSignIn}
+          className="w-full flex items-center justify-center"
+        >
           Sign in with Google
         </Button>
         {/* TODO: Add other login methods if needed (e.g., Email/Password) */}
