@@ -125,7 +125,7 @@ export function FileUpload({
           )
         );
 
-      } catch (error: any) {
+      } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`Error processing file ${file.name} (ID: ${fileState.id}):`, errorMessage, error);
         allSucceeded = false;

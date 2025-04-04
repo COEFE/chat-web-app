@@ -39,7 +39,7 @@ interface DocumentTableProps {
   onSelectDocument: (doc: MyDocumentData | null) => void;
 }
 
-function DocumentTable({ documents, isLoading, error, onSelectDocument }: DocumentTableProps) {
+function DocumentTable({ documents, isLoading, onSelectDocument }: DocumentTableProps) {
   const formatDate = (timestamp: Timestamp | null | undefined): string => {
     if (!timestamp) return 'N/A';
     return timestamp.toDate().toLocaleDateString();

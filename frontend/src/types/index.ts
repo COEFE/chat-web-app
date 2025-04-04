@@ -10,6 +10,6 @@ export interface MyDocumentData {
   contentType: string;
   status: string; // e.g., 'uploading', 'complete', 'error'
   downloadURL?: string;
-  size?: number; // Optional size in bytes
-  createdAt?: Timestamp; // Optional creation timestamp
+  size: number; // Size in bytes
+  createdAt: Timestamp | null; // Creation timestamp, null if not available
 }

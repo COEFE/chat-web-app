@@ -33,7 +33,7 @@ export default function LoginPage() {
       // Redirect user to dashboard after successful login
       router.push('/dashboard');
 
-    } catch (error) {
+    } catch (error: unknown) {
       // Handle Errors here.
       let errorCode = 'unknown';
       let errorMessage = 'An unknown error occurred during sign-in.';

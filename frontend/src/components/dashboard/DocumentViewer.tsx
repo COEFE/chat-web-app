@@ -10,16 +10,8 @@ import { Loader2 } from 'lucide-react';
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
 
-// Document interface (consider moving to a shared types file)
-interface MyDocumentData {
-  id: string;
-  name: string;
-  contentType: string;
-  size: number;
-  userId: string;
-  createdAt: Timestamp;
-  downloadURL: string;
-}
+// Use the shared document interface
+import { MyDocumentData } from '@/types';
 
 // Dynamically import PDFViewer component to isolate PDF.js related code
 const PDFViewer = dynamic(() => import('./PDFViewer'), {
@@ -42,7 +34,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   // Fetch text content for plain text files
   useEffect(() => {
     const fetchTextContent = async () => {
-      if (document.contentType === 'text/plain') {
+      if (document.contentType === 'text/plain' && document.downloadURL) {
         try {
           setIsLoading(true);
           setError(null);
@@ -83,7 +75,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       )}
 
       {/* PDF Viewer */}
-      {document.contentType === 'application/pdf' && (
+      {document.contentType === 'application/pdf' && document.downloadURL && (
         <PDFViewer documentUrl={document.downloadURL} />
       )}
 
