@@ -33,11 +33,34 @@ function initializeFirebaseAdmin() {
   }
 
   // Define the credentials object using environment variables
+  let formattedPrivateKey = privateKey;
+  
+  // Handle different private key formats and ensure proper PEM format
+  if (privateKey) {
+    // First, normalize the private key by handling different escape patterns
+    formattedPrivateKey = privateKey
+      .replace(/\\n/g, '\n')  // Replace \n with actual newlines
+      .replace(/"|'/g, '')     // Remove any quotes that might be present
+      .trim();                 // Trim any extra whitespace
+    
+    // Ensure the key has the proper PEM format with header and footer
+    if (!formattedPrivateKey.includes('-----BEGIN PRIVATE KEY-----')) {
+      formattedPrivateKey = `-----BEGIN PRIVATE KEY-----\n${formattedPrivateKey}\n-----END PRIVATE KEY-----`;
+    }
+    
+    // Ensure there are newlines after the header and before the footer
+    formattedPrivateKey = formattedPrivateKey
+      .replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
+      .replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----');
+      
+    console.log('Private key format prepared (showing first/last 10 chars):', 
+      formattedPrivateKey.substring(0, 10) + '...' + formattedPrivateKey.substring(formattedPrivateKey.length - 10));
+  }
+  
   const serviceAccount: ServiceAccount = {
     projectId,
     clientEmail,
-    // Replace escaped newlines in the private key from the env variable
-    privateKey: privateKey.replace(/\\n/g, '\n'),
+    privateKey: formattedPrivateKey,
   };
 
   // Initialize Firebase Admin SDK only if it hasn't been initialized yet
