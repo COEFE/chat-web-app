@@ -2,19 +2,38 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // Allow reads for any user (adjust if needed for privacy later)
-    match /{allPaths=**} {
-      allow read;
+    // Helper function to validate metadata
+    function hasValidMetadata() {
+      return request.resource.metadata != null && 
+             request.resource.metadata.customMetadata != null &&
+             request.resource.metadata.customMetadata.userId == request.auth.uid;
     }
 
-    // Allow authenticated users to write to their own folders with any filename
-    match /users/{userId}/{anyFile} {
-      allow write: if request.auth != null && request.auth.uid == userId;
+    // Allow user-specific reads for better security
+    match /users/{userId}/{allPaths=**} {
+      // Only allow users to read their own files
+      allow read: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow uploads with proper metadata
+      allow create: if request.auth != null && 
+                     request.auth.uid == userId && 
+                     (hasValidMetadata() || true); // Make metadata optional but preferred
+      
+      // Allow updates and deletes for file owners
+      allow update, delete: if request.auth != null && request.auth.uid == userId;
     }
     
-    // Allow authenticated users to write to any subfolder in their directory
-    match /users/{userId}/{anyFolder}/{allPaths=**} {
-      allow write: if request.auth != null && request.auth.uid == userId;
+    // Public files section (if needed)
+    match /public/{allPublicPaths=**} {
+      // Anyone can read public files
+      allow read;
+      
+      // Only authenticated users can upload to public folder
+      // And we still track who uploaded it
+      allow write: if request.auth != null && 
+                    request.resource.metadata != null && 
+                    request.resource.metadata.customMetadata != null &&
+                    request.resource.metadata.customMetadata.userId == request.auth.uid;
     }
   }
 }
