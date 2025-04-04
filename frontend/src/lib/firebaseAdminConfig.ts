@@ -89,14 +89,19 @@ function initializeFirebaseAdmin() {
     }
   }
   
-  // Create a clean service account object with a hardcoded key as a last resort
-  // This is a temporary solution to bypass the key parsing issue
+  // Create a clean service account object
+  // Using the most reliable method for handling private keys in environment variables
   const serviceAccount: ServiceAccount = {
     projectId,
     clientEmail,
-    // Use a simple direct assignment without any processing
-    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n') || '',
+    // Use String.raw to properly handle newlines in the private key
+    // This is a more reliable approach based on Stack Overflow solutions
+    privateKey: process.env.FIREBASE_PRIVATE_KEY ? 
+      process.env.FIREBASE_PRIVATE_KEY.split(String.raw`\n`).join('\n') : '',
   };
+  
+  // Log successful key formatting
+  console.log('Private key formatted using String.raw split/join method');
   
   // Log service account info (without revealing the full key)
   console.log('Service account configured with:');
