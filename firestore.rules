@@ -5,8 +5,8 @@ service cloud.firestore {
 
     // Match any document in the 'users' collection
     match /users/{userId} {
-      // Allow reading/listing user documents (if needed elsewhere, optional)
-      // allow read: if request.auth != null && request.auth.uid == userId;
+      // Allow reading/listing user documents
+      allow read: if request.auth != null && request.auth.uid == userId;
 
       // Now match the 'documents' subcollection within a user's path
       match /documents/{docId} {

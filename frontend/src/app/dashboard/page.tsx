@@ -150,34 +150,73 @@ export default function DashboardPage() {
       const path = `users/${user.uid}/documents`;
       console.log(`Querying Firestore path: ${path}`);
       
-      // First try to get documents without ordering to see if they exist
-      let q = query(collection(db, 'users', user.uid, 'documents'));
+      // IMPORTANT: First check if the collection exists
+      const collectionRef = collection(db, 'users', user.uid, 'documents');
       
       try {
+        // Try a simple query first without any ordering
+        let q = query(collectionRef);
         const initialSnapshot = await getDocs(q);
         console.log(`Initial query returned ${initialSnapshot.docs.length} documents without ordering`);
         
-        // If documents exist, then try with ordering
-        if (initialSnapshot.docs.length > 0) {
-          console.log('Documents exist, trying with orderBy');
-          q = query(collection(db, 'users', user.uid, 'documents'), orderBy('uploadedAt', 'desc'));
-        }
-        console.log('Query created, fetching documents...');
-        
-        const querySnapshot = await getDocs(q);
-        console.log(`Query returned ${querySnapshot.docs.length} documents`);
-      
-        // Log each document for debugging
-        querySnapshot.docs.forEach((doc, index) => {
-          console.log(`Document ${index + 1}:`, { id: doc.id, ...doc.data() });
+        // Log the raw data of each document for debugging
+        initialSnapshot.docs.forEach((doc, index) => {
+          const data = doc.data();
+          console.log(`Raw document ${index + 1}:`, { 
+            id: doc.id, 
+            data: data,
+            uploadedAt: data.uploadedAt,
+            uploadedAtType: data.uploadedAt ? typeof data.uploadedAt : 'undefined',
+            hasToDate: data.uploadedAt && typeof data.uploadedAt.toDate === 'function'
+          });
         });
         
-        const userDocuments = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...(doc.data() as Omit<MyDocumentData, 'id'>),
-        }));
+        // If documents exist, try with ordering if possible
+        let querySnapshot = initialSnapshot;
+        if (initialSnapshot.docs.length > 0) {
+          // Check if any documents have the uploadedAt field
+          const hasUploadedAt = initialSnapshot.docs.some(doc => doc.data().uploadedAt);
+          
+          if (hasUploadedAt) {
+            console.log('Documents with uploadedAt exist, trying with orderBy');
+            q = query(collectionRef, orderBy('uploadedAt', 'desc'));
+            querySnapshot = await getDocs(q);
+            console.log(`Ordered query returned ${querySnapshot.docs.length} documents`);
+          } else {
+            console.log('No documents have uploadedAt field, skipping ordering');
+          }
+        }
+      
+        // Process documents with careful handling of timestamps
+        const userDocuments = querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          let uploadedAt = data.uploadedAt;
+          
+          // Handle different timestamp formats
+          if (uploadedAt) {
+            if (typeof uploadedAt.toDate === 'function') {
+              // Firestore Timestamp
+              uploadedAt = uploadedAt.toDate();
+            } else if (uploadedAt instanceof Date) {
+              // Already a Date object
+              uploadedAt = uploadedAt;
+            } else if (typeof uploadedAt === 'number') {
+              // Timestamp in milliseconds
+              uploadedAt = new Date(uploadedAt);
+            } else if (typeof uploadedAt === 'string') {
+              // ISO string or other date string
+              uploadedAt = new Date(uploadedAt);
+            }
+          }
+          
+          return {
+            id: doc.id,
+            ...data,
+            uploadedAt: uploadedAt || null
+          } as MyDocumentData;
+        });
         
-        console.log('Processed documents:', userDocuments);
+        console.log('Processed documents with timestamp handling:', userDocuments);
         setDocuments(userDocuments);
       } catch (queryError) {
         console.error("Error querying documents: ", queryError);
