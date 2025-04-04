@@ -49,9 +49,18 @@ export default function LoginPage() {
         } catch (e) {
           // Ignore if it's not a Google Auth error
         }
+        
+        // Log the current domain for unauthorized domain debugging
+        if (errorCode === 'auth/unauthorized-domain') {
+          console.error('Unauthorized Domain Error Details:', {
+            currentDomain: window.location.hostname,
+            fullUrl: window.location.href,
+            errorDetail: error
+          });
+        }
       }
       console.error('Google Sign-In Error:', errorCode, errorMessage, email, credential);
-      setError(errorMessage); // Display error message to the user
+      setError(`${errorCode}: ${errorMessage}`); // Display more detailed error to the user
     }
   };
 
