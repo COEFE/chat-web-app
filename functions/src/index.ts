@@ -90,13 +90,16 @@ export const processDocumentUpload = onObjectFinalized(
 
       await docRef.set({
         userId,
-        fileName: filePath.split("/").pop(),
-        filePath,
+        name: filePath.split("/").pop(), // Changed from fileName to name
+        storagePath: filePath, // Changed from filePath to storagePath
         fileBucket,
         contentType,
         size: fileSize,
-        createdAt,
+        uploadedAt: createdAt, // Added uploadedAt field matching createdAt
+        createdAt, // Keep original createdAt too
         status: "uploaded",
+        // Add downloadURL field (will be null initially, can be updated later)
+        downloadURL: null,
       });
 
       logger.info("Successfully created Firestore entry for: " + filePath);
