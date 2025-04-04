@@ -9,23 +9,35 @@ function initializeFirebaseAdmin() {
     return adminInstance;
   }
 
-  // Ensure the necessary environment variables are set
-  if (!process.env.FIREBASE_PROJECT_ID) {
-    throw new Error('FIREBASE_PROJECT_ID environment variable is not set.');
+  // Log environment variables for debugging (excluding sensitive data)
+  console.log('Environment variables check:');
+  console.log('- FIREBASE_PROJECT_ID exists:', !!process.env.FIREBASE_PROJECT_ID);
+  console.log('- FIREBASE_CLIENT_EMAIL exists:', !!process.env.FIREBASE_CLIENT_EMAIL);
+  console.log('- FIREBASE_PRIVATE_KEY exists:', !!process.env.FIREBASE_PRIVATE_KEY);
+  console.log('- NEXT_PUBLIC_FIREBASE_PROJECT_ID:', process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
+
+  // Use environment variables with fallbacks to public versions
+  const projectId = process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+  // Validate required credentials
+  if (!projectId) {
+    throw new Error('FIREBASE_PROJECT_ID or NEXT_PUBLIC_FIREBASE_PROJECT_ID environment variable is not set.');
   }
-  if (!process.env.FIREBASE_CLIENT_EMAIL) {
+  if (!clientEmail) {
     throw new Error('FIREBASE_CLIENT_EMAIL environment variable is not set.');
   }
-  if (!process.env.FIREBASE_PRIVATE_KEY) {
+  if (!privateKey) {
     throw new Error('FIREBASE_PRIVATE_KEY environment variable is not set.');
   }
 
   // Define the credentials object using environment variables
   const serviceAccount: ServiceAccount = {
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    projectId,
+    clientEmail,
     // Replace escaped newlines in the private key from the env variable
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    privateKey: privateKey.replace(/\\n/g, '\n'),
   };
 
   // Initialize Firebase Admin SDK only if it hasn't been initialized yet
