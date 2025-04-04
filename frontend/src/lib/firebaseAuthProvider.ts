@@ -1,5 +1,6 @@
 // Enhanced Firebase Authentication Provider
 import { GoogleAuthProvider } from 'firebase/auth';
+import { authorizedDomains } from "./authDomainConfig";
 
 /**
  * Creates a custom Google Auth Provider that can work across different domains
@@ -12,13 +13,19 @@ export function createEnhancedGoogleProvider(): GoogleAuthProvider {
   provider.addScope('profile');
   provider.addScope('email');
   
-  // Set custom parameters that may help with domain authorization
+  // Always show Google account selection dialog
   provider.setCustomParameters({
-    // Allow sign in for any host domain
-    'hd': '*',
-    // Forces account selection even when one account is available
-    'prompt': 'select_account'
+    prompt: 'select_account'
   });
+  
+  // Add logging for troubleshooting
+  console.log('Firebase Auth Provider created');
+  console.log('Current authorized domains:', authorizedDomains);
+  
+  if (typeof window !== 'undefined') {
+    console.log('Current hostname:', window.location.hostname);
+    console.log('Is in authorized domains:', authorizedDomains.includes(window.location.hostname));
+  }
   
   return provider;
 }
