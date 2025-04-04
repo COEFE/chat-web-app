@@ -10,7 +10,7 @@ import {
   TableBody,
   TableCaption,
   TableCell,
-  TableRow,
+  TableRow
 } from "@/components/ui/table"
 import {
   ResizableHandle,
@@ -28,7 +28,7 @@ import {
   query,
   orderBy,
   getDocs,
-  Timestamp,
+  Timestamp
 } from 'firebase/firestore';
 import { MyDocumentData } from '@/types';
 
@@ -131,6 +131,12 @@ export default function DashboardPage() {
       router.push('/login');
     }
   }, [user, router, authLoading]);
+
+  useEffect(() => {
+    if (user && !isLoadingDocs && !errorDocs) {
+      fetchDocuments();
+    }
+  }, [user, fetchDocuments, isLoadingDocs, errorDocs]);
 
   const handleSelectDocument = (doc: MyDocumentData | null) => {
     console.log("Selected Document:", doc);

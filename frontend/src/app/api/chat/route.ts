@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       console.error('Error fetching document info or content:', error);
        // Check if the error is specifically a storage 'object not found' error (404)
-      if (isFirebaseStorageError(error, 404)) {
+      if (isFirebaseStorageError(error as unknown, 404)) {
           console.error(`Storage object not found at path: ${storagePath}`);
           return NextResponse.json({ error: `File not found in storage at path: ${storagePath}` }, { status: 404 });
        }
