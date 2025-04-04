@@ -7,6 +7,13 @@ import {
 import { File } from '@google-cloud/storage';
 import { extractText } from 'unpdf'; // Import unpdf's extractText function
 import Anthropic from '@anthropic-ai/sdk';
+import { FirebaseError } from 'firebase-admin/app';
+
+// Type guard to check if an error is a Firebase Storage error with a specific code
+function isFirebaseStorageError(error: unknown, code: number): error is FirebaseError {
+  return typeof error === 'object' && error !== null && (error as FirebaseError).code === `storage/object-not-found` && code === 404;
+  // Adjust `storage/object-not-found` if the actual code string differs
+}
 
 export async function POST(req: NextRequest) {
   console.log('Received request at /api/chat');
@@ -117,11 +124,11 @@ export async function POST(req: NextRequest) {
 
     } catch (error) {
       console.error('Error fetching document info or content:', error);
-      // Check if the error is specifically a storage 'object not found' error
-      if ((error as any)?.code === 404) {
-         console.error(`Storage object not found at path: ${storagePath}`);
-         return NextResponse.json({ error: `File not found in storage at path: ${storagePath}` }, { status: 404 });
-      }
+       // Check if the error is specifically a storage 'object not found' error (404)
+      if (isFirebaseStorageError(error, 404)) {
+          console.error(`Storage object not found at path: ${storagePath}`);
+          return NextResponse.json({ error: `File not found in storage at path: ${storagePath}` }, { status: 404 });
+       }
       return NextResponse.json({ error: 'Failed to fetch document data' }, { status: 500 });
     }
     // --- End Document Fetching ---

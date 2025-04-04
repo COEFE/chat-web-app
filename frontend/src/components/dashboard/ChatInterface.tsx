@@ -6,25 +6,13 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils'; 
 import { useAuth } from '@/context/AuthContext'; 
 import { Timestamp } from 'firebase/firestore'; 
+import { MyDocumentData } from '@/types'; 
 
 // Define the structure of a chat message
 interface ChatMessage {
   id: string;
   role: 'user' | 'ai';
   content: string;
-}
-
-// Define the structure of a document passed as a prop
-interface MyDocumentData {
-  id: string;
-  userId: string;
-  name: string;
-  storagePath: string;
-  uploadedAt: Timestamp;
-  contentType: string;
-  status: string;
-  downloadURL?: string;
-  size?: number; 
 }
 
 interface ChatInterfaceProps {

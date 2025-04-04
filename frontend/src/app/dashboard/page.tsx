@@ -1,18 +1,15 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { FileUpload } from '@/components/dashboard/FileUpload';
 import {
   Table,
   TableBody,
   TableCaption,
   TableCell,
-  TableHead,
-  TableHeader,
   TableRow,
 } from "@/components/ui/table"
 import {
@@ -20,52 +17,37 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
-import DocumentViewer from '@/components/dashboard/DocumentViewer'; // Import the new DocumentViewer component
-import ChatInterface from '@/components/dashboard/ChatInterface'; // Placeholder
+import DocumentViewer from '@/components/dashboard/DocumentViewer';
+import ChatInterface from '@/components/dashboard/ChatInterface';
+import { FileUpload } from '@/components/dashboard/FileUpload';
 
 // Import Firestore functions and db instance
 import { db } from '@/lib/firebaseConfig';
 import {
   collection,
   query,
-  where,
   orderBy,
-  onSnapshot, // Real-time listener
-  Timestamp,  // Firestore Timestamp type
   getDocs,
+  Timestamp,
 } from 'firebase/firestore';
-
-// Define the structure of a document from Firestore
-interface MyDocumentData {
-  id: string; // Firestore document ID
-  userId: string;
-  name: string;
-  storagePath: string;
-  uploadedAt: Timestamp;
-  contentType: string;
-  status: string;
-  downloadURL?: string;
-  size?: number;
-  createdAt?: Timestamp; // Add optional createdAt based on lint error
-}
+import { MyDocumentData } from '@/types';
 
 interface DocumentTableProps {
-  documents: MyDocumentData[]; // Use specific type
+  documents: MyDocumentData[];
   isLoading: boolean;
   error: string | null;
-  onSelectDocument: (doc: MyDocumentData) => void; // Add callback prop
+  onSelectDocument: (doc: MyDocumentData | null) => void;
 }
 
 function DocumentTable({ documents, isLoading, error, onSelectDocument }: DocumentTableProps) {
   const formatDate = (timestamp: Timestamp | null | undefined): string => {
     if (!timestamp) return 'N/A';
-    return timestamp.toDate().toLocaleDateString(); // Adjust formatting as needed
+    return timestamp.toDate().toLocaleDateString();
   };
 
   return (
     <Table>
       <TableCaption>A list of your uploaded documents.</TableCaption>
-      {/* Custom hardcoded table header to avoid whitespace issues */}
       <thead data-slot="table-header" className={"[&_tr]:border-b"}>
         <tr
           data-slot="table-row"
@@ -89,10 +71,7 @@ function DocumentTable({ documents, isLoading, error, onSelectDocument }: Docume
           documents.map((doc) => {
             return (
               <TableRow key={doc.id}>
-                {/* Ensure we are accessing doc.name */}
-                {/* Remove whitespace between TableCell components */}
                 <TableCell className="font-medium">{doc.name}</TableCell><TableCell>{formatDate(doc.uploadedAt)}</TableCell><TableCell>{doc.status || 'N/A'}</TableCell><TableCell className="text-right">
-                  {/* Call onSelectDocument when View button is clicked */}
                   <Button variant="ghost" size="sm" onClick={() => onSelectDocument(doc)}>
                     View
                   </Button>
@@ -110,83 +89,85 @@ function DocumentTable({ documents, isLoading, error, onSelectDocument }: Docume
 }
 
 export default function DashboardPage() {
-  const { user, loading: authLoading, logout } = useAuth(); // Renamed loading to authLoading
+  const { user, loading: authLoading, logout } = useAuth();
   const router = useRouter();
-  const [documents, setDocuments] = useState<MyDocumentData[]>([]); // State for documents
-  const [isLoadingDocs, setIsLoadingDocs] = useState(true); // Loading state for documents
+  const [documents, setDocuments] = useState<MyDocumentData[]>([]);
+  const [isLoadingDocs, setIsLoadingDocs] = useState(true);
   const [errorDocs, setErrorDocs] = useState<string | null>(null);
-  const [selectedDocument, setSelectedDocument] = useState<MyDocumentData | null>(null); // State for selected doc
+  const [selectedDocument, setSelectedDocument] = useState<MyDocumentData | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
-  // Callback for when upload completes to refresh list
-  const handleUploadComplete = useCallback(() => {
-    fetchDocuments();
-  }, [user, router, authLoading]);
-
-  // Handler to update the selected document state
-  const handleSelectDocument = (doc: MyDocumentData | null) => {
-    setSelectedDocument(doc);
-  };
-
-  useEffect(() => {
-    fetchDocuments();
-  }, [user]);
-
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
     if (!user) return;
 
     setIsLoadingDocs(true);
     setErrorDocs(null);
 
     try {
-      const docsRef = collection(db, 'users', user.uid, 'documents');
-      const q = query(docsRef, orderBy('uploadedAt', 'desc'));
-
+      const q = query(collection(db, 'users', user.uid, 'documents'), orderBy('uploadedAt', 'desc'));
       const querySnapshot = await getDocs(q);
       const userDocuments = querySnapshot.docs.map(doc => ({
         id: doc.id,
-        ...(doc.data() as Omit<MyDocumentData, 'id'>), // Spread data, ensuring type safety
+        ...(doc.data() as Omit<MyDocumentData, 'id'>),
       }));
       setDocuments(userDocuments);
-    } catch (error) {
-      console.error("Error fetching documents: ", error);
-      setErrorDocs('Failed to fetch documents');
+    } catch (err) {
+      console.error("Error fetching documents: ", err);
+      const message = (err instanceof Error) ? err.message : 'Unknown error';
+      setErrorDocs(`Failed to fetch documents: ${message}`);
     } finally {
       setIsLoadingDocs(false);
     }
+  }, [user]);
+
+  const handleUploadComplete = useCallback(() => {
+    console.log("Upload complete signal received, fetching documents...");
+    fetchDocuments();
+  }, [fetchDocuments]);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/login');
+    }
+  }, [user, router, authLoading]);
+
+  const handleSelectDocument = (doc: MyDocumentData | null) => {
+    console.log("Selected Document:", doc);
+    setSelectedDocument(doc);
+    // setView('chat'); // Switch view to chat interface
   };
 
-  // Show loading indicator while checking auth state
+  useEffect(() => {
+    fetchDocuments();
+  }, [user, fetchDocuments]);
+
   if (authLoading) {
     return <div>Loading...</div>;
   }
 
-  // Display loading state if auth is loading or user is not available yet
   if (!user) {
     return <div>Loading...</div>;
   }
 
   return (
     <div className="flex h-screen flex-col bg-muted/40">
-      {/* Restore original header structure */}
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-4">
-         <h1 className="text-2xl font-semibold">My Documents Dashboard</h1>
-         <div className="ml-auto flex items-center gap-4">
-            {user && <span className="text-sm text-muted-foreground">Welcome, {user.displayName || user.email}</span>}
-            <Button variant="outline" size="sm" onClick={logout}>Logout</Button>
-         </div>
+        <h1 className="text-2xl font-semibold">My Documents Dashboard</h1>
+        <div className="ml-auto flex items-center gap-4">
+          {user && <span className="text-sm text-muted-foreground">Welcome, {user.displayName || user.email}</span>}
+          <Button variant="outline" size="sm" onClick={logout}>Logout</Button>
+        </div>
       </header>
 
-      {/* **MODIFIED**: Main content now uses ResizablePanelGroup */}
-      <main className="flex-1 overflow-hidden p-6 pt-4"> {/* Ensure overflow-hidden for panels */}
+      <main className="flex-1 overflow-hidden p-6 pt-4">
         <ResizablePanelGroup
           direction="horizontal"
-          className="h-full rounded-lg border" // Use h-full for panel group
+          className="h-full rounded-lg border"
         >
-          {/* === Left Panel: Document List / Viewer === */}
-          <ResizablePanel defaultSize={60}> {/* Adjust size as needed */}
-            <div className="flex h-full flex-col p-6 overflow-auto"> {/* Add overflow-auto */}
+          <ResizablePanel defaultSize={60}>
+            <div className="flex h-full flex-col p-6 overflow-auto">
               {selectedDocument ? (
-                // Document Viewer View
                 <div className="flex h-full flex-col">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-xl font-semibold">Viewing: {selectedDocument.name}</h2>
@@ -194,27 +175,30 @@ export default function DashboardPage() {
                       Back to List
                     </Button>
                   </div>
-                  <div className="flex-1 overflow-hidden"> {/* Ensure viewer area takes remaining space */}
-                    <DocumentViewer document={selectedDocument} />
+                  <div className="flex-1 overflow-hidden">
+                    {/* Explicit check to ensure selectedDocument is not null */}
+                    {selectedDocument && <DocumentViewer document={selectedDocument} />}
                   </div>
                 </div>
               ) : (
-                // Document List/Upload View
-                <><h1 className="text-2xl font-semibold mb-4">My Documents</h1>
+                <>
+                  <h1 className="text-2xl font-semibold mb-4">My Documents</h1>
                   <Card className="mb-6">
                     <CardHeader>
                       <CardTitle>Upload New Document</CardTitle>
                       <CardDescription>Drag & drop files here or click to select files.</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <FileUpload onUploadComplete={handleUploadComplete} />
+                      <FileUpload
+                        onUploadComplete={handleUploadComplete}
+                      />
                     </CardContent>
                   </Card>
                   <DocumentTable
                     documents={documents}
                     isLoading={isLoadingDocs}
                     error={errorDocs}
-                    onSelectDocument={handleSelectDocument}
+                    onSelectDocument={(doc: MyDocumentData | null) => handleSelectDocument(doc)}
                   />
                 </>
               )}
@@ -223,8 +207,7 @@ export default function DashboardPage() {
 
           <ResizableHandle withHandle />
 
-          {/* === Right Panel: Chat Interface === */}
-          <ResizablePanel defaultSize={40}> {/* Adjust size as needed */}
+          <ResizablePanel defaultSize={40}>
             <div className="flex h-full flex-col p-6">
               {selectedDocument ? (
                 <ChatInterface document={selectedDocument} />

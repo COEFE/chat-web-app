@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
-import { useDropzone } from 'react-dropzone';
+import { useDropzone, FileRejection } from 'react-dropzone';
 import { getStorage, ref, uploadBytesResumable as firebaseUploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/context/AuthContext';
@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { UploadCloud, File as FileIcon, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { MyDocumentData } from '@/types';
 
 interface UploadingFile {
   file: File;
@@ -18,22 +19,7 @@ interface UploadingFile {
   id: string;
 }
 
-interface MyDocumentData {
-  id: string; 
-  userId: string;
-  name: string;
-  storagePath: string;
-  uploadedAt: any; 
-  contentType: string;
-  status: string; 
-  downloadURL?: string;
-  size?: number;
-}
-
 interface FileUploadProps {
-  setDocuments: React.Dispatch<React.SetStateAction<MyDocumentData[]>>; 
-  setUploadError: React.Dispatch<React.SetStateAction<string | null>>;
-  setUploadProgress: React.Dispatch<React.SetStateAction<number | null>>;
   className?: string;
   onUploadComplete?: () => void;
 }
@@ -50,9 +36,6 @@ const acceptedFileTypes = {
 };
 
 export function FileUpload({ 
-  setDocuments,
-  setUploadError,
-  setUploadProgress,
   className,
   onUploadComplete
 }: FileUploadProps) {
@@ -143,11 +126,12 @@ export function FileUpload({
         );
 
       } catch (error: any) {
-        console.error(`Error processing file ${file.name} (ID: ${fileState.id}):`, error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`Error processing file ${file.name} (ID: ${fileState.id}):`, errorMessage, error);
         allSucceeded = false;
         setUploadingFiles((prev) =>
           prev.map((uf) =>
-            uf.id === fileState.id ? { ...uf, status: 'error', error: error.message || 'Upload failed' } : uf
+            uf.id === fileState.id ? { ...uf, status: 'error', error: errorMessage || 'Upload failed' } : uf
           )
         );
       }
@@ -163,10 +147,10 @@ export function FileUpload({
   }, [user, onUploadComplete]); 
 
   const onDrop = useCallback(
-    (acceptedFiles: File[], rejectedFiles: any[]) => {
+    (acceptedFiles: File[], fileRejections: FileRejection[]) => {
       console.log('Accepted files:', acceptedFiles);
-      console.log('Rejected files:', rejectedFiles);
-
+      console.log('Rejected files:', fileRejections);
+ 
       const newUploadingFilesState: UploadingFile[] = acceptedFiles.map(file => ({
         file,
         status: 'pending',
@@ -178,7 +162,7 @@ export function FileUpload({
       setUploadingFiles((prev) => [...prev, ...newUploadingFilesState]);
       setRejectedFiles((prev) => [
         ...prev,
-        ...rejectedFiles.map((r: any) => r.file),
+        ...fileRejections.map((rejection) => rejection.file),
       ]);
 
       if (newUploadingFilesState.length > 0) {
@@ -193,7 +177,7 @@ export function FileUpload({
     useDropzone({
       onDrop,
       accept: acceptedFileTypes,
-      maxSize: 10 * 1024 * 1024,
+      maxSize: 10 * 1024 * 1024, // 10MB
       disabled: !user,
     });
 
