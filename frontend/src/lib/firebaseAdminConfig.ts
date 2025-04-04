@@ -16,52 +16,96 @@ function initializeFirebaseAdmin() {
   console.log('- FIREBASE_PRIVATE_KEY exists:', !!process.env.FIREBASE_PRIVATE_KEY);
   console.log('- NEXT_PUBLIC_FIREBASE_PROJECT_ID:', process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
 
-  // Use environment variables with fallbacks to public versions
+  // Get environment variables for Firebase Admin SDK
   const projectId = process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+  let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+  
+  // Log environment variable availability (without revealing sensitive data)
+  console.log('Firebase Admin SDK Environment Variables:');
+  console.log(`- FIREBASE_PROJECT_ID: ${projectId ? 'Set' : 'Not set'}`);
+  console.log(`- FIREBASE_CLIENT_EMAIL: ${clientEmail ? 'Set' : 'Not set'}`);
+  console.log(`- FIREBASE_PRIVATE_KEY: ${privateKey ? 'Set' : 'Not set'}`);
 
-  // Validate required credentials
+  // Check if required environment variables are present
   if (!projectId) {
-    throw new Error('FIREBASE_PROJECT_ID or NEXT_PUBLIC_FIREBASE_PROJECT_ID environment variable is not set.');
+    console.error('FIREBASE_PROJECT_ID environment variable is not set.');
+    throw new Error('FIREBASE_PROJECT_ID environment variable is not set.');
   }
+
   if (!clientEmail) {
+    console.error('FIREBASE_CLIENT_EMAIL environment variable is not set.');
     throw new Error('FIREBASE_CLIENT_EMAIL environment variable is not set.');
   }
+
   if (!privateKey) {
+    console.error('FIREBASE_PRIVATE_KEY environment variable is not set.');
     throw new Error('FIREBASE_PRIVATE_KEY environment variable is not set.');
   }
 
-  // Define the credentials object using environment variables
-  let formattedPrivateKey = privateKey;
+  // Define a variable to hold the formatted private key
+  let formattedPrivateKey = '';
   
-  // Handle different private key formats and ensure proper PEM format
+  // Handle the private key with a completely different approach
   if (privateKey) {
-    // First, normalize the private key by handling different escape patterns
-    formattedPrivateKey = privateKey
-      .replace(/\\n/g, '\n')  // Replace \n with actual newlines
-      .replace(/"|'/g, '')     // Remove any quotes that might be present
-      .trim();                 // Trim any extra whitespace
-    
-    // Ensure the key has the proper PEM format with header and footer
-    if (!formattedPrivateKey.includes('-----BEGIN PRIVATE KEY-----')) {
-      formattedPrivateKey = `-----BEGIN PRIVATE KEY-----\n${formattedPrivateKey}\n-----END PRIVATE KEY-----`;
-    }
-    
-    // Ensure there are newlines after the header and before the footer
-    formattedPrivateKey = formattedPrivateKey
-      .replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
-      .replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----');
+    try {
+      // Extract the raw key content without any formatting
+      // First remove quotes and trim whitespace
+      let rawKey = privateKey
+        .replace(/^"|"$/g, '')  // Remove surrounding quotes if present
+        .trim();                 // Trim any extra whitespace
       
-    console.log('Private key format prepared (showing first/last 10 chars):', 
-      formattedPrivateKey.substring(0, 10) + '...' + formattedPrivateKey.substring(formattedPrivateKey.length - 10));
+      // Replace escaped newlines with actual newlines
+      rawKey = rawKey.replace(/\\n/g, '\n');
+      
+      // Log the raw key format (safely)
+      console.log('Raw key format (first 15 chars):', rawKey.substring(0, 15) + '...');
+      
+      // For Firebase Admin SDK, the key must be in the exact PEM format
+      // We'll manually construct it with the correct format
+      if (rawKey.includes('-----BEGIN PRIVATE KEY-----')) {
+        // The key already has PEM headers, extract just the base64 content
+        const base64Content = rawKey
+          .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+          .replace(/-----END PRIVATE KEY-----/g, '')
+          .replace(/\s/g, '');
+        
+        // Reconstruct with proper PEM format
+        formattedPrivateKey = `-----BEGIN PRIVATE KEY-----\n${base64Content}\n-----END PRIVATE KEY-----`;
+      } else {
+        // The key is just the base64 content, add the PEM headers
+        formattedPrivateKey = `-----BEGIN PRIVATE KEY-----\n${rawKey}\n-----END PRIVATE KEY-----`;
+      }
+      
+      console.log('Private key properly formatted with PEM headers');
+      
+      // Additional check: ensure there are no extra newlines or spaces that could cause issues
+      formattedPrivateKey = formattedPrivateKey
+        .replace(/\n\s*\n/g, '\n')  // Replace multiple newlines with a single newline
+        .replace(/\s+$/gm, '');     // Remove trailing whitespace on each line
+    } catch (error) {
+      console.error('Error formatting private key:', error);
+      throw new Error('Failed to format private key properly');
+    }
   }
   
+  // Create a clean service account object with a hardcoded key as a last resort
+  // This is a temporary solution to bypass the key parsing issue
   const serviceAccount: ServiceAccount = {
     projectId,
     clientEmail,
-    privateKey: formattedPrivateKey,
+    // Use a simple direct assignment without any processing
+    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n') || '',
   };
+  
+  // Log service account info (without revealing the full key)
+  console.log('Service account configured with:');
+  console.log(`- Project ID: ${serviceAccount.projectId}`);
+  console.log(`- Client Email: ${serviceAccount.clientEmail}`);
+  console.log(`- Private Key present: ${serviceAccount.privateKey ? 'Yes' : 'No'}`);
+  if (serviceAccount.privateKey) {
+    console.log(`- Private Key starts with: ${serviceAccount.privateKey.substring(0, 27)}...`);
+  }
 
   // Initialize Firebase Admin SDK only if it hasn't been initialized yet
   // Note: The admin.apps.length check might be redundant with the adminInstance check,
