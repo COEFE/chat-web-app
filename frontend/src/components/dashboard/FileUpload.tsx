@@ -1,17 +1,44 @@
 'use client';
 
-import React, { useCallback, useState, useContext } from 'react';
-import { useDropzone, Accept } from 'react-dropzone';
-import { cn } from '@/lib/utils';
-import { UploadCloud, File as FileIcon, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Progress } from "@/components/ui/progress";
+import React, { useCallback, useState } from 'react';
+import { useDropzone } from 'react-dropzone';
+import { getStorage, ref, uploadBytesResumable as firebaseUploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/context/AuthContext';
-import { storage, db } from '@/lib/firebaseConfig';
-import { ref, uploadBytes, getDownloadURL, uploadBytesResumable, UploadTaskSnapshot } from 'firebase/storage';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
+import { UploadCloud, File as FileIcon, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-const acceptedFileTypes: Accept = {
+interface UploadingFile {
+  file: File;
+  status: 'pending' | 'uploading' | 'success' | 'error';
+  progress: number;
+  error?: string | null;
+  id: string;
+}
+
+interface MyDocumentData {
+  id: string; 
+  userId: string;
+  name: string;
+  storagePath: string;
+  uploadedAt: any; 
+  contentType: string;
+  status: string; 
+  downloadURL?: string;
+  size?: number;
+}
+
+interface FileUploadProps {
+  setDocuments: React.Dispatch<React.SetStateAction<MyDocumentData[]>>; 
+  setUploadError: React.Dispatch<React.SetStateAction<string | null>>;
+  setUploadProgress: React.Dispatch<React.SetStateAction<number | null>>;
+  className?: string;
+  onUploadComplete?: () => void;
+}
+
+const acceptedFileTypes = {
   'application/pdf': ['.pdf'],
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
@@ -22,30 +49,13 @@ const acceptedFileTypes: Accept = {
   'image/webp': ['.webp'],
 };
 
-interface UploadingFile {
-  file: File;
-  status: 'pending' | 'uploading' | 'success' | 'error';
-  progress: number;
-  error?: string | null;
-  id: string;
-}
-
-interface UploadedFile {
-  id: string;
-  userId: string;
-  fileName: string;
-  fileType: string;
-  size: number;
-  url: string;
-  uploadedAt: any;
-}
-
-interface FileUploadProps {
-  className?: string;
-  onUploadComplete?: () => void;
-}
-
-export function FileUpload({ className, onUploadComplete }: FileUploadProps) {
+export function FileUpload({ 
+  setDocuments,
+  setUploadError,
+  setUploadProgress,
+  className,
+  onUploadComplete
+}: FileUploadProps) {
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
   const [rejectedFiles, setRejectedFiles] = useState<File[]>([]);
   const { user } = useAuth();
@@ -54,7 +64,7 @@ export function FileUpload({ className, onUploadComplete }: FileUploadProps) {
     console.log('======== FILE UPLOAD ATTEMPT (Sequential with Direct State) ========');
     console.log('Auth state:', user ? 'Authenticated' : 'Not authenticated');
     console.log('User info:', user);
-    console.log('Storage bucket:', storage.app.options.storageBucket || 'DEFAULT');
+    console.log('Storage bucket:', getStorage().app.options.storageBucket || 'DEFAULT');
     console.log('Files to process:', filesToProcess.map(f => ({ name: f.file.name, id: f.id, status: f.status })));
 
     if (!user) {
@@ -87,7 +97,7 @@ export function FileUpload({ className, onUploadComplete }: FileUploadProps) {
 
       const storagePath = `users/${user.uid}/${uniqueFileName}`;
       console.log(`Using standard storage path: ${storagePath}`);
-      const storageRef = ref(storage, storagePath);
+      const storageRef = ref(getStorage(), storagePath);
 
       try {
         setUploadingFiles((prev) =>
@@ -97,7 +107,7 @@ export function FileUpload({ className, onUploadComplete }: FileUploadProps) {
         );
         
         console.log(`Starting direct upload for ${file.name}`);
-        const snapshot = await uploadBytes(storageRef, file);
+        const snapshot = await firebaseUploadBytesResumable(storageRef, file);
         console.log(`Upload SUCCESS for ${file.name}`, snapshot);
 
         setUploadingFiles((prev) =>
@@ -115,14 +125,14 @@ export function FileUpload({ className, onUploadComplete }: FileUploadProps) {
           throw new Error("CRITICAL: user.uid is null or empty before Firestore write!");
         }
 
-        const docRef = await addDoc(collection(db, 'users', user.uid, 'documents'), {
+        const docRef = await addDoc(collection(getFirestore(), 'users', user.uid, 'documents'), {
+          userId: user.uid,
           name: file.name,
           storagePath: storagePath,
-          downloadURL: downloadURL,
+          uploadedAt: serverTimestamp(),
           contentType: file.type,
           size: file.size,
-          uploadedAt: serverTimestamp(),
-          userId: user.uid,
+          downloadURL: downloadURL,
         });
         console.log(`Firestore document created successfully with ID: ${docRef.id}`);
 

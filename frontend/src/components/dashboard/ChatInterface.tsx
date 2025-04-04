@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area'; 
 import { cn } from '@/lib/utils'; 
 import { useAuth } from '@/context/AuthContext'; 
+import { Timestamp } from 'firebase/firestore'; 
 
 // Define the structure of a chat message
 interface ChatMessage {
@@ -19,7 +20,7 @@ interface MyDocumentData {
   userId: string;
   name: string;
   storagePath: string;
-  uploadedAt: any; 
+  uploadedAt: Timestamp;
   contentType: string;
   status: string;
   downloadURL?: string;

@@ -124,7 +124,7 @@ export default function PDFViewer({ documentUrl }: PDFViewerProps) {
       
       {/* Fallback message */}
       <div className="mt-2 text-sm text-muted-foreground text-center">
-        If the PDF doesn't display correctly, try toggling between view modes or use the Download option.
+        If the PDF doesn&apos;t display correctly, try toggling between view modes or use the Download option.
       </div>
     </div>
   );
