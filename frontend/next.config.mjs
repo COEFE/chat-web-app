@@ -1,17 +1,21 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import copyFilePlugin from 'copy-webpack-plugin';
+import { createRequire } from 'module';
 
 // Helper to get __dirname in ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Create a require function for this module
+const require = createRequire(import.meta.url);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   webpack: (config, { isServer }) => {
     // Configuration for pdf.js worker
     // Find the pdfjs-dist directory
-    const pdfjsDistPath = path.dirname(require.resolve('pdfjs-dist/package.json'));
+    const pdfjsDistPath = path.dirname(require('pdfjs-dist/package.json'));
     const pdfWorkerPath = path.join(pdfjsDistPath, 'build', 'pdf.worker.js');
 
     // Copy the worker file to the static directory
