@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from 'react'; // Import useEffect
 import { useRouter } from 'next/navigation'; // Import useRouter for navigation
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { signInWithPopup } from 'firebase/auth';
+import { createEnhancedGoogleProvider } from '@/lib/firebaseAuthProvider';
 import { auth } from '@/lib/firebaseConfig'; // Import the initialized auth instance
 import { Button } from '@/components/ui/button'; // Using Shadcn Button
 import { useAuth } from '@/context/AuthContext'; // Import the useAuth hook
@@ -20,7 +21,7 @@ export default function LoginPage() {
   }, [user, loading, router]); // Dependencies for the effect
 
   const handleGoogleSignIn = async () => {
-    const provider = new GoogleAuthProvider();
+    const provider = createEnhancedGoogleProvider();
     try {
       const result = await signInWithPopup(auth, provider);
       // This gives you a Google Access Token. You can use it to access the Google API.
@@ -45,6 +46,8 @@ export default function LoginPage() {
         errorMessage = (error as any).message || errorMessage; // Attempt to get error message
         email = (error as any).customData?.email; // Attempt to get email
         try {
+          // This call requires the GoogleAuthProvider, so importing it back
+          const { GoogleAuthProvider } = await import('firebase/auth');
           credential = GoogleAuthProvider.credentialFromError(error as any);
         } catch (e) {
           // Ignore if it's not a Google Auth error
