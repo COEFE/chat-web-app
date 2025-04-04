@@ -141,38 +141,49 @@ export default function DashboardPage() {
     setErrorDocs(null);
 
     try {
+      // Force token refresh to ensure we have the latest authentication
+      console.log('Refreshing auth token before querying Firestore');
+      await user.getIdToken(true);
+      console.log('Token refreshed successfully');
+      
       // Log the full path we're querying
       const path = `users/${user.uid}/documents`;
       console.log(`Querying Firestore path: ${path}`);
       
       // First try to get documents without ordering to see if they exist
       let q = query(collection(db, 'users', user.uid, 'documents'));
-      const initialSnapshot = await getDocs(q);
       
-      console.log(`Initial query returned ${initialSnapshot.docs.length} documents without ordering`);
+      try {
+        const initialSnapshot = await getDocs(q);
+        console.log(`Initial query returned ${initialSnapshot.docs.length} documents without ordering`);
+        
+        // If documents exist, then try with ordering
+        if (initialSnapshot.docs.length > 0) {
+          console.log('Documents exist, trying with orderBy');
+          q = query(collection(db, 'users', user.uid, 'documents'), orderBy('uploadedAt', 'desc'));
+        }
+        console.log('Query created, fetching documents...');
+        
+        const querySnapshot = await getDocs(q);
+        console.log(`Query returned ${querySnapshot.docs.length} documents`);
       
-      // If documents exist, then try with ordering
-      if (initialSnapshot.docs.length > 0) {
-        console.log('Documents exist, trying with orderBy');
-        q = query(collection(db, 'users', user.uid, 'documents'), orderBy('uploadedAt', 'desc'));
+        // Log each document for debugging
+        querySnapshot.docs.forEach((doc, index) => {
+          console.log(`Document ${index + 1}:`, { id: doc.id, ...doc.data() });
+        });
+        
+        const userDocuments = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...(doc.data() as Omit<MyDocumentData, 'id'>),
+        }));
+        
+        console.log('Processed documents:', userDocuments);
+        setDocuments(userDocuments);
+      } catch (queryError) {
+        console.error("Error querying documents: ", queryError);
+        const queryErrorMessage = (queryError instanceof Error) ? queryError.message : 'Unknown query error';
+        setErrorDocs(`Failed to query documents: ${queryErrorMessage}`);
       }
-      console.log('Query created, fetching documents...');
-      
-      const querySnapshot = await getDocs(q);
-      console.log(`Query returned ${querySnapshot.docs.length} documents`);
-      
-      // Log each document for debugging
-      querySnapshot.docs.forEach((doc, index) => {
-        console.log(`Document ${index + 1}:`, { id: doc.id, ...doc.data() });
-      });
-      
-      const userDocuments = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...(doc.data() as Omit<MyDocumentData, 'id'>),
-      }));
-      
-      console.log('Processed documents:', userDocuments);
-      setDocuments(userDocuments);
     } catch (err) {
       console.error("Error fetching documents: ", err);
       const message = (err instanceof Error) ? err.message : 'Unknown error';
