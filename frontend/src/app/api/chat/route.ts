@@ -124,12 +124,30 @@ export async function POST(req: NextRequest) {
 
     } catch (error) {
       console.error('Error fetching document info or content:', error);
-       // Check if the error is specifically a storage 'object not found' error (404)
+      
+      // Log detailed error information
+      if (error instanceof Error) {
+        console.error(`Error name: ${error.name}`);
+        console.error(`Error message: ${error.message}`);
+        console.error(`Error stack: ${error.stack}`);
+      }
+      
+      // Log environment and context information
+      console.error('Context information:');
+      console.error(`- User ID: ${userId}`);
+      console.error(`- Document ID: ${documentId}`);
+      console.error(`- Storage path (if available): ${storagePath || 'N/A'}`);
+      console.error(`- Firebase project ID: ${process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'Not set'}`);
+      
+      // Check if the error is specifically a storage 'object not found' error (404)
       if (isFirebaseStorageError(error as unknown, 404)) {
-          console.error(`Storage object not found at path: ${storagePath}`);
-          return NextResponse.json({ error: `File not found in storage at path: ${storagePath}` }, { status: 404 });
-       }
-      return NextResponse.json({ error: 'Failed to fetch document data' }, { status: 500 });
+        console.error(`Storage object not found at path: ${storagePath}`);
+        return NextResponse.json({ error: `File not found in storage at path: ${storagePath}` }, { status: 404 });
+      }
+      
+      // Return a more descriptive error message
+      const errorMessage = error instanceof Error ? `Failed to fetch document data: ${error.message}` : 'Failed to fetch document data';
+      return NextResponse.json({ error: errorMessage }, { status: 500 });
     }
     // --- End Document Fetching ---
 
