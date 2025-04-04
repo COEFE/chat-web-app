@@ -65,8 +65,9 @@ export const processDocumentUpload = onObjectFinalized(
 
     // --- Create Firestore Entry ---
     try {
-      // Auto-generate ID for the new document
-      const docRef = firestore.collection("documents").doc();
+      // Construct the path: /users/{userId}/documents/{newDocId}
+      const docRef = firestore.collection("users").doc(userId)
+        .collection("documents").doc(); // Auto-generate ID
 
       // Prepare data, handling potential undefined values
       let fileSize = 0;
