@@ -14,8 +14,8 @@ const require = createRequire(import.meta.url);
 const nextConfig = {
   webpack: (config, { isServer }) => {
     // Configuration for pdf.js worker
-    // Find the pdfjs-dist directory
-    const pdfjsDistPath = path.dirname(require('pdfjs-dist/package.json'));
+    // Find the pdfjs-dist directory using the created require function
+    const pdfjsDistPath = path.dirname(require.resolve('pdfjs-dist/package.json')); // Use require.resolve to get the path string
     const pdfWorkerPath = path.join(pdfjsDistPath, 'build', 'pdf.worker.js');
 
     // Copy the worker file to the static directory
