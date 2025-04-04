@@ -70,27 +70,45 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ document }) => {
       console.log('- OK:', fetchResponse.ok);
       console.log('- Headers:', Object.fromEntries(fetchResponse.headers.entries()));
 
-      // Attempt to read as text first for debugging
-      try {
-        const rawText = await fetchResponse.text();
-        console.log('- Raw Response Text:', rawText);
+        // Attempt to read as text first for debugging
+        try {
+          const rawText = await fetchResponse.text();
+          console.log('- Raw Response Text:', rawText);
 
-        // Now try to parse the raw text as JSON
-        const aiData = JSON.parse(rawText); 
-        console.log('- Parsed JSON data:', aiData);
+          // Now try to parse the raw text as JSON
+          const aiData = JSON.parse(rawText); 
+          console.log('- Parsed JSON data:', aiData);
 
-        // Original check:
-        if (aiData && aiData.response && aiData.response.role === 'ai') {
-          const aiResponse: ChatMessage = { 
-            id: aiData.response.id || Date.now().toString(), 
-            role: 'ai', 
-            content: aiData.response.content 
-          };
-          setMessages((prev) => [...prev, aiResponse]);
-        } else {
-          console.error("Invalid AI response structure after parsing:", aiData);
-          setMessages((prev) => [...prev, {id: Date.now().toString(), role: 'ai', content: "Sorry, I received an invalid response structure."}]);
-        }
+          // Handle the response structure
+          if (aiData && aiData.response) {
+            const aiResponse: ChatMessage = { 
+              id: aiData.response.id || Date.now().toString(), 
+              role: 'ai', 
+              content: aiData.response.content 
+            };
+            setMessages((prev) => [...prev, aiResponse]);
+          } else if (aiData && typeof aiData === 'object') {
+            // Try to extract content from different possible structures
+            let content = '';
+            
+            if (typeof aiData.content === 'string') {
+              content = aiData.content;
+            } else if (aiData.error) {
+              content = `Error: ${aiData.error}`;
+            } else {
+              console.error("Unknown response structure:", aiData);
+              content = "Sorry, I received a response in an unexpected format.";
+            }
+            
+            setMessages((prev) => [...prev, {
+              id: Date.now().toString(), 
+              role: 'ai', 
+              content: content
+            }]);
+          } else {
+            console.error("Invalid AI response structure after parsing:", aiData);
+            setMessages((prev) => [...prev, {id: Date.now().toString(), role: 'ai', content: "Sorry, I received an invalid response structure."}]);
+          }
       } catch (parseError) {
         console.error('Error parsing response JSON:', parseError);
         setMessages((prev) => [

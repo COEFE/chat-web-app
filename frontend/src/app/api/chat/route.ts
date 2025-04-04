@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
         role: 'ai',
         content: aiResponseContent,
       }
-    });
+    }, { status: 200 });
 
   } catch (error) {
     console.error('Error in /api/chat:', error);
