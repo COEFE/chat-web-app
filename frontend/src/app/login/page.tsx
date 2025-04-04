@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from 'react'; // Import useEffect
 import { useRouter } from 'next/navigation'; // Import useRouter for navigation
-import { signInWithRedirect, getRedirectResult } from 'firebase/auth';
-import { createEnhancedGoogleProvider } from '@/lib/firebaseAuthProvider';
+import { getRedirectResult } from 'firebase/auth';
+import { signInWithGoogleEnhanced } from '@/lib/customAuthProvider';
 import { auth } from '@/lib/firebaseConfig'; // Import the initialized auth instance
 import { Button } from '@/components/ui/button'; // Using Shadcn Button
 import { useAuth } from '@/context/AuthContext'; // Import the useAuth hook
@@ -39,23 +39,28 @@ export default function LoginPage() {
     checkRedirectResult();
   }, [router]);
 
-  const handleGoogleSignIn = () => {
-    const provider = createEnhancedGoogleProvider();
-    // Using redirect method instead of popup to avoid domain issues
-    signInWithRedirect(auth, provider).catch(error => {
-      console.error('Error starting redirect:', error);
+  const handleGoogleSignIn = async () => {
+    try {
+      // Try the popup method first with our enhanced provider
+      await signInWithGoogleEnhanced(false); // false = use popup
+      // If successful, router.push will happen in the redirect useEffect
+    } catch (error: any) {
+      console.error('Error during sign-in:', error);
       
-      // Enhanced error logging
-      if (error?.code === 'auth/unauthorized-domain') {
-        console.error('Unauthorized Domain Error Details:', {
-          currentDomain: window.location.hostname,
-          fullUrl: window.location.href,
-          errorDetail: error
-        });
+      if (error?.code === 'auth/unauthorized-domain' || error?.code === 'auth/popup-closed-by-user') {
+        console.log('Trying redirect method instead after popup failed...');
+        try {
+          // Fall back to redirect method
+          await signInWithGoogleEnhanced(true); // true = use redirect
+        } catch (redirectError) {
+          console.error('Error during redirect sign-in:', redirectError);
+          setError(`${(redirectError as any)?.code || 'unknown'}: ${(redirectError as any)?.message || 'Unknown error'}`);
+        }
+      } else {
+        // For other errors, show to the user
+        setError(`${error?.code || 'unknown'}: ${error?.message || 'Unknown error'}`);
       }
-      
-      setError(`${error?.code || 'unknown'}: ${error?.message || 'Unknown error'}`);
-    });
+    }
   };
 
   // Don't render the login form if we are loading or already logged in (and about to redirect)

@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { auth } from '@/lib/firebaseConfig';
-import { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
+import { getRedirectResult } from 'firebase/auth';
+import { signInWithGoogleEnhanced } from '@/lib/customAuthProvider';
 import { Button } from '@/components/ui/button';
 
 export default function AuthTestPage() {
@@ -48,27 +49,26 @@ export default function AuthTestPage() {
   const testPopupSignIn = async () => {
     try {
       setTestResults(prev => [...prev, { 
-        type: 'popup_attempt',
+        type: 'enhanced_popup_attempt',
         timestamp: new Date().toISOString() 
       }]);
       
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({
-        prompt: 'select_account'
-      });
+      // Use our enhanced provider with popup mode
+      const result = await signInWithGoogleEnhanced(false);
       
-      const result = await signInWithPopup(auth, provider);
-      setTestResults(prev => [...prev, { 
-        type: 'popup_success', 
-        user: result.user.email,
-        timestamp: new Date().toISOString() 
-      }]);
-      setError(null);
+      if (result && result.user) {
+        setTestResults(prev => [...prev, { 
+          type: 'enhanced_popup_success', 
+          user: result.user.email,
+          timestamp: new Date().toISOString() 
+        }]);
+        setError(null);
+      }
     } catch (err) {
-      console.error('Popup sign-in error:', err);
-      setError(`Popup error: ${(err as any)?.code || 'unknown'}`);
+      console.error('Enhanced popup sign-in error:', err);
+      setError(`Enhanced popup error: ${(err as any)?.code || 'unknown'}`);
       setTestResults(prev => [...prev, { 
-        type: 'popup_error', 
+        type: 'enhanced_popup_error', 
         error: (err as any)?.code || 'unknown',
         fullError: JSON.stringify(err, null, 2),
         timestamp: new Date().toISOString() 
@@ -79,22 +79,18 @@ export default function AuthTestPage() {
   const testRedirectSignIn = async () => {
     try {
       setTestResults(prev => [...prev, { 
-        type: 'redirect_attempt',
+        type: 'enhanced_redirect_attempt',
         timestamp: new Date().toISOString() 
       }]);
       
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({
-        prompt: 'select_account'
-      });
-      
-      await signInWithRedirect(auth, provider);
+      // Use our enhanced provider with redirect mode
+      await signInWithGoogleEnhanced(true);
       // Note: Result will be handled in the useEffect when the page reloads
     } catch (err) {
-      console.error('Redirect sign-in error:', err);
-      setError(`Redirect error: ${(err as any)?.code || 'unknown'}`);
+      console.error('Enhanced redirect sign-in error:', err);
+      setError(`Enhanced redirect error: ${(err as any)?.code || 'unknown'}`);
       setTestResults(prev => [...prev, { 
-        type: 'redirect_error', 
+        type: 'enhanced_redirect_error', 
         error: (err as any)?.code || 'unknown',
         fullError: JSON.stringify(err, null, 2),
         timestamp: new Date().toISOString() 
