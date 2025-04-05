@@ -147,11 +147,59 @@ export async function POST(req: NextRequest) {
               }
             }
             
-            // Convert to CSV format with headers
-            const csv = XLSX.utils.sheet_to_csv(worksheet);
+            // Convert to JSON with header: 1 option to preserve row structure
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as any[][];
             
-            // Add sheet name and content to the array
-            excelContent.push(`Sheet: ${sheetName}\n${csv}`);
+            // Create a more structured text representation with column letters and row numbers
+            let sheetContent = `Sheet: ${sheetName}\n\n`;
+            
+            // Add column headers (A, B, C, etc.)
+            let headerRow = '    | ';
+            for (let c = range.s.c; c <= range.e.c; ++c) {
+              const colLetter = XLSX.utils.encode_col(c);
+              headerRow += ` ${colLetter.padEnd(10)} |`;
+            }
+            sheetContent += headerRow + '\n';
+            
+            // Add separator row
+            let separatorRow = '----|';
+            for (let c = range.s.c; c <= range.e.c; ++c) {
+              separatorRow += '------------|';
+            }
+            sheetContent += separatorRow + '\n';
+            
+            // Add data rows with row numbers
+            for (let r = 0; r < jsonData.length; r++) {
+              const rowNum = r + 1; // 1-based row numbers like in Excel
+              let rowContent = `${String(rowNum).padStart(3)} | `;
+              
+              const row = jsonData[r];
+              for (let c = 0; c < (row?.length || 0); c++) {
+                const cellValue = row?.[c] || '';
+                // Truncate long cell values and ensure proper padding
+                const displayValue = String(cellValue).substring(0, 10).padEnd(10);
+                rowContent += ` ${displayValue} |`;
+              }
+              
+              sheetContent += rowContent + '\n';
+            }
+            
+            // Add raw data representation for accurate cell lookup
+            sheetContent += '\nRaw Data (for accurate cell lookup):\n';
+            for (let r = 0; r < jsonData.length; r++) {
+              const rowNum = r + 1; // 1-based row numbers
+              const row = jsonData[r];
+              
+              for (let c = 0; c < (row?.length || 0); c++) {
+                const colLetter = XLSX.utils.encode_col(c);
+                const cellValue = row?.[c];
+                if (cellValue !== '') { // Only include non-empty cells
+                  sheetContent += `Cell ${colLetter}${rowNum}: ${cellValue}\n`;
+                }
+              }
+            }
+            
+            excelContent.push(sheetContent);
           });
           
           // Join all sheets with clear separation
