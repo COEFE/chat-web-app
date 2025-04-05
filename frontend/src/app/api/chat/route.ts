@@ -306,7 +306,7 @@ To create a new Excel file, include the following JSON in your response:
 }
 \`\`\`
 
-To edit an existing Excel file, include the following JSON in your response:
+To edit an existing Excel file, you must include the following JSON in your response WITHOUT ANY EXPLANATION BEFORE OR AFTER IT. Just output the raw JSON directly:
 
 \`\`\`json
 {
@@ -325,7 +325,11 @@ To edit an existing Excel file, include the following JSON in your response:
 
 IMPORTANT: When editing the Excel file that the user is currently viewing, you should automatically use the current document ID that was provided to you in the context. Do not ask the user for the document ID if they are asking to edit the current file.
 
-IMPORTANT: For the "documentId" field when editing a file, you MUST use the actual document ID, not the file name. The document ID is a unique identifier that looks like "abc123xyz". If the user refers to a document by name, you should explain that you need the document ID to make edits. The user can find the document ID in the URL when viewing the document or in the document list.
+IMPORTANT: When the user asks you to edit an Excel file, DO NOT explain what you're going to do or show them the JSON. Just execute the operation by outputting the JSON directly. The system will automatically process it and replace it with a user-friendly message.
+
+IMPORTANT: For the "documentId" field when editing a file, you MUST use the actual document ID, not the file name. The document ID is a unique identifier that looks like "abc123xyz". If the user refers to a document by name and you don't have the document ID in context, explain that you need the document ID to make edits. The user can find the document ID in the URL when viewing the document or in the document list.
+
+REMEMBER: If the user is asking to edit the current Excel file they are viewing, you already have the document ID in your context. Use it automatically without asking for it.
 
 User Question: ${message}`,
           },
@@ -351,18 +355,36 @@ User Question: ${message}`,
     let excelOperationResult = null;
     
     // Check for Excel operation JSON in the response
-    const jsonRegex = /```json\s*({[\s\S]*?})\s*```/g;
-    const jsonMatches = [...aiResponseContent.matchAll(jsonRegex)];
+    // Try multiple regex patterns to catch different ways Claude might format the JSON
+    const jsonCodeBlockRegex = /```(?:json)?\s*({[\s\S]*?})\s*```/g;
+    const jsonRawRegex = /^\s*({\s*"excel_operation"[\s\S]*?})\s*$/g;
+    
+    // Try code block format first (most common)
+    let jsonMatches = [...aiResponseContent.matchAll(jsonCodeBlockRegex)];
+    
+    // If no matches, try raw JSON format
+    if (jsonMatches.length === 0) {
+      jsonMatches = [...aiResponseContent.matchAll(jsonRawRegex)];
+      console.log('Trying raw JSON regex, found matches:', jsonMatches.length);
+    }
+    
+    // Log the full AI response for debugging
+    console.log('Full AI response content:', aiResponseContent);
+    console.log('JSON matches found:', jsonMatches.length);
     
     if (jsonMatches.length > 0) {
       // Process the first JSON block that contains an Excel operation
       for (const match of jsonMatches) {
         try {
           const jsonStr = match[1];
+          console.log('Extracted JSON string:', jsonStr);
+          
           const jsonData = JSON.parse(jsonStr);
+          console.log('Parsed JSON data:', jsonData);
           
           if (jsonData.excel_operation) {
             console.log('Detected Excel operation in AI response:', jsonData.excel_operation);
+            console.log('Document ID in operation:', jsonData.documentId);
             
             // Call the Excel API to perform the operation
             const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
