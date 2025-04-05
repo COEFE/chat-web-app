@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import * as XLSX from 'xlsx'; // Import xlsx library
 import mammoth from 'mammoth'; // Import mammoth for DOCX handling
-import { HotTable } from '@handsontable/react'; // Import HotTable
+import { HotTable, HotTableClass } from '@handsontable/react'; // Import HotTable AND HotTableClass for ref type
 import 'handsontable/dist/handsontable.full.min.css'; // Import Handsontable CSS
 import { registerAllModules } from 'handsontable/registry'; // Needed for features
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"; // Import Shadcn Tabs
@@ -48,8 +48,9 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [rotation, setRotation] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [dragStart, setDragStart] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
   const imageContainerRef = useRef<HTMLDivElement>(null);
+  const hotTableRef = useRef<HotTableClass>(null); // Use HotTableClass for the ref type
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -149,6 +150,24 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     fetchDocumentContent();
   }, [document]); // Re-run when the document prop changes
 
+  // Effect to re-render Handsontable when the active sheet changes
+  useEffect(() => {
+    // Get the Handsontable core instance from the ref
+    const hotInstance = hotTableRef.current?.hotInstance;
+
+    if (hotInstance && workbookData) {
+      // Use requestAnimationFrame to ensure render call happens after DOM update
+      requestAnimationFrame(() => {
+        // Check if instance still exists before calling methods
+        if (hotTableRef.current?.hotInstance) {
+          hotTableRef.current.hotInstance.render();
+          hotTableRef.current.hotInstance.updateSettings({}); // Force re-evaluation
+          console.log('Handsontable re-rendered due to sheet change.');
+        }
+      });
+    }
+  }, [activeSheetName, workbookData]); // Depend on activeSheetName and workbookData
+
   // Define supported types for clarity
   const isPdf = document?.contentType === 'application/pdf';
   const isText = document?.contentType === 'text/plain';
@@ -206,8 +225,9 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               ))}
             </TabsList>
           </Tabs>
-          <div className="flex-1 overflow-auto border border-t-0 rounded-b-md">
+          <div className="flex-1 overflow-auto border border-t-0 rounded-b-md relative">
             <HotTable
+              ref={hotTableRef} // Assign ref
               data={workbookData.find(sheet => sheet.sheetName === activeSheetName)?.data || []}
               rowHeaders={true}
               colHeaders={true}
