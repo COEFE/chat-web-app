@@ -8,6 +8,7 @@ import { File } from '@google-cloud/storage';
 import { extractText } from 'unpdf'; // Import unpdf's extractText function
 import Anthropic from '@anthropic-ai/sdk';
 import { FirebaseError } from 'firebase-admin/app';
+import * as XLSX from 'xlsx'; // Import xlsx library for Excel processing
 
 // Type guard to check if an error is a Firebase Storage error with a specific code
 function isFirebaseStorageError(error: unknown, code: number): error is FirebaseError {
@@ -115,6 +116,51 @@ export async function POST(req: NextRequest) {
         } catch (extractError) {
           console.error('Error extracting PDF text:', extractError);
           documentContent = `[Error extracting PDF text: ${ (extractError instanceof Error) ? extractError.message : 'Unknown error'}]`;
+        }
+      } else if (
+        contentType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || // .xlsx
+        contentType === 'application/vnd.ms-excel' || // .xls
+        contentType === 'text/csv' // .csv
+      ) {
+        console.log('Attempting to parse Excel/CSV content...');
+        try {
+          // Process Excel file using SheetJS
+          const workbook = XLSX.read(contentBuffer, { type: 'buffer', sheetStubs: true });
+          
+          // Create a text representation of all sheets
+          let excelContent: string[] = [];
+          
+          workbook.SheetNames.forEach(sheetName => {
+            const worksheet = workbook.Sheets[sheetName];
+            
+            // Get the range of the worksheet
+            const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+            
+            // Fill in any missing cells in the worksheet
+            for (let r = range.s.r; r <= range.e.r; ++r) {
+              for (let c = range.s.c; c <= range.e.c; ++c) {
+                const cellAddress = XLSX.utils.encode_cell({ r, c });
+                if (!worksheet[cellAddress]) {
+                  // Add empty cell
+                  worksheet[cellAddress] = { t: 's', v: '' };
+                }
+              }
+            }
+            
+            // Convert to CSV format with headers
+            const csv = XLSX.utils.sheet_to_csv(worksheet);
+            
+            // Add sheet name and content to the array
+            excelContent.push(`Sheet: ${sheetName}\n${csv}`);
+          });
+          
+          // Join all sheets with clear separation
+          documentContent = excelContent.join('\n\n---\n\n');
+          
+          console.log(`Successfully parsed Excel content, length: ${documentContent.length}`);
+        } catch (excelError) {
+          console.error('Error extracting Excel content:', excelError);
+          documentContent = `[Error extracting Excel content: ${(excelError instanceof Error) ? excelError.message : 'Unknown error'}]`;
         }
       } else {
         // Basic handling for non-text - might need libraries like pdf-parse, mammoth
