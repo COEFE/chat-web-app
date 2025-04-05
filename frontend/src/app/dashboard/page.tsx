@@ -255,6 +255,8 @@ export default function DashboardPage() {
           id: doc.id,
           name: doc.filename || 'Untitled', // Use filename from API
           uploadedAt: uploadedAt,
+          contentType: doc.contentType || 'unknown', 
+          downloadURL: doc.downloadURL || null,
         } as MyDocumentData; // Cast to your frontend type
       });
       

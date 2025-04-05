@@ -40,7 +40,9 @@ export async function GET(req: NextRequest) {
 
     const documents = snapshot.docs.map((doc) => ({
       id: doc.id,
-      filename: doc.data().filename || 'Untitled Document', 
+      filename: doc.data().filename || 'Untitled Document',
+      contentType: doc.data().contentType || 'unknown',
+      downloadURL: doc.data().downloadURL || null,
       createdAt: doc.data().createdAt?.toDate ? doc.data().createdAt.toDate() : doc.data().createdAt, // Handle potential timestamp format
       // Add other fields like storagePath if stored and needed
     }));
