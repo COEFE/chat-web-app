@@ -380,17 +380,42 @@ User Question: ${message}`,
               excelOperationResult = excelResult;
               
               // Replace the JSON block with a success message
-              const successMessage = jsonData.excel_operation === 'create' 
-                ? `I've created a new Excel file named "${jsonData.fileName}" for you.` 
-                : `I've updated the Excel file as requested.`;
+              let successMessage = '';
+              
+              if (jsonData.excel_operation === 'create') {
+                successMessage = `I've created a new Excel file named "${jsonData.fileName}" for you. ${excelResult.url ? 'You can download it using the link below.' : ''}`;
+              } else if (jsonData.excel_operation === 'edit') {
+                // Create a more detailed message for edit operations
+                const cellUpdates = jsonData.data.flatMap((sheet: { sheetName: string; cellUpdates: Array<{ cell: string; value: string }> }) => 
+                  sheet.cellUpdates.map((update: { cell: string; value: string }) => 
+                    `${update.cell} in sheet "${sheet.sheetName}" to "${update.value}"`
+                  )
+                );
+                
+                const cellUpdateText = cellUpdates.length > 1 
+                  ? `updated ${cellUpdates.length} cells` 
+                  : `updated ${cellUpdates[0]}`;
+                  
+                successMessage = `I've ${cellUpdateText} in the Excel file "${excelResult.fileName || 'your document'}".`;
+              } else {
+                successMessage = `I've successfully performed the ${jsonData.excel_operation} operation on the Excel file.`;
+              }
               
               processedResponse = processedResponse.replace(match[0], successMessage);
             } else {
               // Replace the JSON block with an error message
-              processedResponse = processedResponse.replace(
-                match[0], 
-                `I tried to ${jsonData.excel_operation} an Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`
-              );
+              let errorMessage = `I tried to ${jsonData.excel_operation} an Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`;
+              
+              // Add suggestions if available documents were returned
+              if (excelResult.availableDocuments && excelResult.availableDocuments.length > 0) {
+                errorMessage += '\n\nHere are some available documents you can use instead:\n';
+                excelResult.availableDocuments.forEach((doc: { name: string; id: string }) => {
+                  errorMessage += `- "${doc.name}" (ID: ${doc.id})\n`;
+                });
+                errorMessage += '\nPlease try again with one of these document IDs.';
+              }
+              
+              processedResponse = processedResponse.replace(match[0], errorMessage);
             }
             
             // Only process the first valid Excel operation
