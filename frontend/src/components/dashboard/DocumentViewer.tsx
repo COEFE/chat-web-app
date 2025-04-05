@@ -34,6 +34,22 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Extract the storage path from the downloadURL
+  const getStoragePath = (url: string): string | null => {
+    try {
+      // Parse the URL to extract the path parameter
+      const parsedUrl = new URL(url);
+      const objectPath = parsedUrl.pathname.split('/o/')[1];
+      if (!objectPath) return null;
+      
+      // URL decode the path
+      return decodeURIComponent(objectPath);
+    } catch (e) {
+      console.error('Failed to parse storage URL:', e);
+      return null;
+    }
+  };
+
   // Fetch content based on document type
   useEffect(() => {
     const fetchDocumentContent = async () => {
@@ -49,9 +65,20 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       setSheetHtml(null);  // Reset other content types
 
       try {
-        const response = await fetch(document.downloadURL);
+        // Extract the storage path from the downloadURL
+        const storagePath = getStoragePath(document.downloadURL);
+        if (!storagePath) {
+          throw new Error('Could not extract storage path from URL');
+        }
+
+        // Use our proxy API instead of direct Firebase Storage URL
+        const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(storagePath)}`;
+        console.log('Using proxy URL:', proxyUrl);
+        
+        const response = await fetch(proxyUrl);
         if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+          const errorText = await response.text();
+          throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
         }
 
         // Handle different content types
@@ -119,7 +146,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
 
       {/* PDF Viewer */} 
       {!isLoading && !error && isPdf && document.downloadURL && (
-        <PDFViewer documentUrl={document.downloadURL} />
+        <PDFViewer documentUrl={`/api/file-proxy?path=${encodeURIComponent(getStoragePath(document.downloadURL) || '')}`} />
       )}
 
       {/* Text Viewer */}
