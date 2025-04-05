@@ -222,14 +222,22 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                         <th className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground sticky left-0 z-20"></th>
                         
                         {/* Column headers - using first row data to determine columns */}
-                        {sheet.data[0]?.map((_, colIndex) => (
-                          <th 
-                            key={colIndex}
-                            className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground min-w-[100px]"
-                          >
-                            {XLSX.utils.encode_col(colIndex)}
-                          </th>
-                        ))}
+                        {sheet.data[0]?.map((_, colIndex) => {
+                          // Generate Excel-style column headers (A, B, C, ... Z, AA, AB, etc.)
+                          const colName = colIndex < 26 ? 
+                            String.fromCharCode(65 + colIndex) : // A-Z
+                            String.fromCharCode(65 + Math.floor(colIndex / 26) - 1) + 
+                            String.fromCharCode(65 + (colIndex % 26)); // AA-ZZ
+                          
+                          return (
+                            <th 
+                              key={colIndex}
+                              className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground min-w-[100px]"
+                            >
+                              {colName}
+                            </th>
+                          );
+                        })}
                       </tr>
                     </thead>
                     <tbody>
