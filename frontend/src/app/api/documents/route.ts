@@ -112,12 +112,22 @@ export async function DELETE(req: NextRequest) {
     // Delete from storage if storagePath exists
     if (docData?.storagePath) {
       try {
-        const bucket = storage.bucket();
+        // Explicitly specify the bucket name
+        const bucketName = 'web-chat-app-fa7f0.firebasestorage.app';
+        const bucket = storage.bucket(bucketName);
+        console.log(`DELETE /api/documents - Using bucket: ${bucketName}`);
+        
         await bucket.file(docData.storagePath).delete();
         console.log(`DELETE /api/documents - Deleted file from storage: ${docData.storagePath}`);
       } catch (storageError: any) {
         // Log but continue - we still want to delete the document record
         console.error(`DELETE /api/documents - Error deleting file from storage: ${docData.storagePath}`, storageError);
+        console.error('Storage error details:', { 
+          message: storageError.message, 
+          stack: storageError.stack,
+          code: storageError.code,
+          errorInfo: storageError.errorInfo
+        });
       }
     }
     
