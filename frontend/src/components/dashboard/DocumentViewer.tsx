@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { Timestamp } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
+import * as XLSX from 'xlsx'; // Import xlsx library
 
 // Import CSS for PDF rendering
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
@@ -28,74 +29,126 @@ const PDFViewer = dynamic(() => import('./PDFViewer'), {
 export default function DocumentViewer({ document }: { document: MyDocumentData }) {
   // For text files
   const [textContent, setTextContent] = useState<string | null>(null);
+  // === NEW: State for Excel/CSV HTML content ===
+  const [sheetHtml, setSheetHtml] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch text content for plain text files
+  // Fetch content based on document type
   useEffect(() => {
-    const fetchTextContent = async () => {
-      if (document.contentType === 'text/plain' && document.downloadURL) {
-        try {
-          setIsLoading(true);
-          setError(null);
-          
-          const response = await fetch(document.downloadURL);
-          if (!response.ok) {
-            throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
-          }
-          
+    const fetchDocumentContent = async () => {
+      if (!document || !document.downloadURL) {
+        setError('Document data or download URL is missing.');
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(true);
+      setError(null);
+      setTextContent(null); // Reset other content types
+      setSheetHtml(null);  // Reset other content types
+
+      try {
+        const response = await fetch(document.downloadURL);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        // Handle different content types
+        if (document.contentType === 'text/plain') {
           const text = await response.text();
           setTextContent(text);
-        } catch (err) {
-          console.error('Error fetching text file:', err);
-          setError(`Failed to load text: ${err instanceof Error ? err.message : String(err)}`);
-        } finally {
-          setIsLoading(false);
+        } else if ([
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+            'application/vnd.ms-excel', // .xls
+            'text/csv' // .csv
+          ].includes(document.contentType)) 
+        {
+          const arrayBuffer = await response.arrayBuffer();
+          const workbook = XLSX.read(arrayBuffer, { type: 'buffer' });
+          // Get the first sheet name
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          // Convert sheet to HTML table
+          const html = XLSX.utils.sheet_to_html(worksheet);
+          setSheetHtml(html);
+        } else if (document.contentType !== 'application/pdf') {
+          // If it's not PDF and not handled above, set an error or specific state
+          console.log(`Unsupported preview for contentType: ${document.contentType}`);
+          //setError(`Preview not available for ${document.contentType}`);
         }
+        // PDF is handled by the dynamic PDFViewer component, no fetch needed here
+
+      } catch (err) {
+        console.error('Error fetching document content:', err);
+        setError(`Failed to load document content: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    fetchTextContent();
-  }, [document]);
+    fetchDocumentContent();
+  }, [document]); // Re-run when the document prop changes
+
+  // Define supported types for clarity
+  const isPdf = document?.contentType === 'application/pdf';
+  const isText = document?.contentType === 'text/plain';
+  const isSheet = document && [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+      'application/vnd.ms-excel', 
+      'text/csv'
+    ].includes(document.contentType);
+  const isPreviewSupported = isPdf || isText || isSheet;
 
   return (
     <div className="flex flex-col h-full">
-      {/* Loading state for text files */}
-      {isLoading && document.contentType === 'text/plain' && (
+      {/* Loading state */}
+      {isLoading && (
         <div className="flex-1 flex justify-center items-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <span className="ml-2">Loading preview...</span>
         </div>
       )}
 
       {/* Error display */}
-      {error && (
+      {!isLoading && error && (
         <div className="p-4 text-destructive bg-destructive/10 border border-destructive rounded-md mb-4">
           {error}
         </div>
       )}
 
-      {/* PDF Viewer */}
-      {document.contentType === 'application/pdf' && document.downloadURL && (
+      {/* PDF Viewer */} 
+      {!isLoading && !error && isPdf && document.downloadURL && (
         <PDFViewer documentUrl={document.downloadURL} />
       )}
 
       {/* Text Viewer */}
-      {document.contentType === 'text/plain' && !isLoading && !error && textContent && (
+      {!isLoading && !error && isText && textContent && (
         <div className="flex-1 overflow-auto border rounded-md p-4 whitespace-pre-wrap font-mono text-sm">
           {textContent}
         </div>
       )}
 
-      {/* Unsupported format */}
-      {!['application/pdf', 'text/plain'].includes(document.contentType) && (
+      {/* === NEW: Excel/CSV Viewer === */}
+      {!isLoading && !error && isSheet && sheetHtml && (
+        <div 
+          className="flex-1 overflow-auto border rounded-md p-4 [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:p-2 [&_th]:text-left [&_th]:bg-muted [&_td]:border [&_td]:p-2"
+          dangerouslySetInnerHTML={{ __html: sheetHtml }}
+        />
+      )}
+
+      {/* Unsupported format / No content */} 
+      {!isLoading && !error && !isPreviewSupported && (
         <div className="flex-1 flex items-center justify-center border rounded-md bg-muted/10">
           <div className="text-center p-4">
-            <p className="text-muted-foreground mb-2">Preview not available for {document.contentType}</p>
-            <Button asChild variant="outline">
-              <a href={document.downloadURL} target="_blank" rel="noopener noreferrer">
-                Download File
-              </a>
-            </Button>
+            <p className="text-muted-foreground mb-2">Preview not available for {document?.contentType || 'this file type'}</p>
+            {document?.downloadURL && (
+              <Button asChild variant="outline">
+                <a href={document.downloadURL} target="_blank" rel="noopener noreferrer">
+                  Download File
+                </a>
+              </Button>
+            )}
           </div>
         </div>
       )}
