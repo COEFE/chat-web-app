@@ -96,22 +96,46 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             'text/csv' // .csv
           ].includes(document.contentType)) 
         {
-          const arrayBuffer = await response.arrayBuffer();
-          const workbook = XLSX.read(arrayBuffer, { type: 'buffer' });
-          
-          // Process all sheets
-          const sheetNames = workbook.SheetNames;
-          if (sheetNames.length > 0) {
-            const allSheetData = sheetNames.map(sheetName => {
-              const worksheet = workbook.Sheets[sheetName];
-              // Use header: 1 to get array of arrays, better for Handsontable
-              const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
-              return { sheetName, data };
-            });
-            setWorkbookData(allSheetData);
-            setActiveSheetName(sheetNames[0]); // Set first sheet as active
-          } else {
-            setError('Excel file contains no sheets.');
+          const data = await response.arrayBuffer();
+          if (data) {
+            try {
+              // Read the workbook with sheetStubs option to include empty cells
+              const workbook = XLSX.read(new Uint8Array(data), { type: 'array', sheetStubs: true });
+              
+              const sheets = workbook.SheetNames.map(sheetName => {
+                const worksheet = workbook.Sheets[sheetName];
+                
+                // Get the range of the worksheet
+                const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+                
+                // Fill in any missing cells in the worksheet
+                for (let r = range.s.r; r <= range.e.r; ++r) {
+                  for (let c = range.s.c; c <= range.e.c; ++c) {
+                    const cellAddress = XLSX.utils.encode_cell({ r, c });
+                    if (!worksheet[cellAddress]) {
+                      // Add empty cell
+                      worksheet[cellAddress] = { t: 's', v: '' };
+                    }
+                  }
+                }
+                
+                // Convert to JSON with defval option to handle empty cells
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+                  header: 1,
+                  defval: '' // Use empty string for blank cells
+                }) as any[][];
+                
+                return { sheetName, data: jsonData };
+              });
+              
+              setWorkbookData(sheets);
+              if (sheets.length > 0) {
+                setActiveSheetName(sheets[0].sheetName);
+              }
+            } catch (error) {
+              console.error('Error parsing Excel file:', error);
+              setError('Error parsing Excel file. The file may be corrupted or in an unsupported format.');
+            }
           }
         } else if (document.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
           // Handle DOCX files using Mammoth.js
