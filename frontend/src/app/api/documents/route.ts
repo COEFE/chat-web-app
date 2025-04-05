@@ -98,6 +98,9 @@ export async function GET(req: NextRequest) {
         uploadedAt: uploadedAt,
         createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt,
         storagePath: data.storagePath || null,
+        status: data.status || 'unknown', 
+        userId: data.userId || userId, // Fallback to the authenticated userId if needed
+        size: data.size || 0
       };
     });
 
