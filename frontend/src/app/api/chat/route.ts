@@ -138,7 +138,7 @@ async function handleExcelOperation(authToken: string, userId: string, message: 
       const excelResult = await excelResponse.json();
       console.log('processExcelOperation Response Parsed Body:', excelResult);
 
-      if (excelResult.success) { // Check the success flag from the result
+      if (excelResult && excelResult.success) {
         // Create a success message
         const successMessage = `I've updated ${cellRef} to "${cellValue}" in your Excel file "${currentDocument.name || 'document'}".`;
         
@@ -672,38 +672,48 @@ User Question: ${message}`,
     console.log('--- START AI Response Content ---');
     console.log(aiResponseContent);
     console.log('--- END AI Response Content ---');
- 
-    // Improved Regex to find JSON object possibly embedded in text
-    // It looks for '{' potentially preceded by whitespace/newline, 
-    // captures everything until the matching '}', handling nested objects.
-    const jsonExtractRegex = /(?:\s|^)(\{["\w\s:,\{}\[\]\-()]*\})(?:\s|$)/;
-    const match = aiResponseContent.match(jsonExtractRegex);
 
-    let aiContentString: string | null = null;
-
-    // First, try parsing the entire aiResponseContent as the outer JSON object
+    let parsedJson: any = null;
+    
+    // First, try parsing the entire aiResponseContent directly as JSON
     try {
-      const outerResponse = JSON.parse(aiResponseContent);
-      if (outerResponse && typeof outerResponse.content === 'string') {
-        aiContentString = outerResponse.content;
-        console.log('Successfully parsed outer AI response, extracted content string.');
+      parsedJson = JSON.parse(aiResponseContent);
+      console.log('Successfully parsed AI response as JSON directly');
+    } catch (directParseError) {
+      console.log('Could not parse aiResponseContent directly as JSON. Trying to extract JSON from text.', directParseError);
+      
+      // Try to extract JSON from the text using regex
+      const jsonRegex = /(\{[\s\S]*?\})(?=\s*$|\n)/;
+      const jsonMatch = aiResponseContent.match(jsonRegex);
+      
+      if (jsonMatch && jsonMatch[1]) {
+        try {
+          parsedJson = JSON.parse(jsonMatch[1]);
+          console.log('Successfully extracted and parsed JSON from text');
+        } catch (extractedParseError) {
+          console.log('Failed to parse extracted JSON:', extractedParseError);
+        }
       } else {
-        console.log('Parsed outer AI response, but content field is not a string or missing.');
+        // Try to find JSON in code blocks
+        const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
+        const codeMatch = aiResponseContent.match(codeBlockRegex);
+        
+        if (codeMatch && codeMatch[1]) {
+          try {
+            parsedJson = JSON.parse(codeMatch[1]);
+            console.log('Successfully extracted and parsed JSON from code block');
+          } catch (codeBlockParseError) {
+            console.log('Failed to parse JSON from code block:', codeBlockParseError);
+          }
+        }
       }
-    } catch (outerParseError) {
-      console.log('Could not parse aiResponseContent as an outer JSON object. Assuming raw content.', outerParseError);
-      // Fallback: Treat aiResponseContent as the raw string potentially containing JSON
-      aiContentString = aiResponseContent.trim();
     }
+    
+    // If we have parsed JSON, proceed with Excel operation
+    if (parsedJson) {
+      console.log("Successfully parsed JSON object:", parsedJson);
 
-    // Now, try to parse the extracted (or fallback) content string as the inner JSON
-    if (aiContentString) {
-      console.log('Attempting to parse inner JSON string:', aiContentString);
       try {
-        // Attempt to parse the inner content string
-        const parsedJson = JSON.parse(aiContentString);
-        console.log("Successfully parsed inner JSON object:", parsedJson);
-
         // --- Normalization & API Call --- 
 
         // Normalize key: Check for 'excel_operation' and rename to 'operation'
@@ -714,9 +724,19 @@ User Question: ${message}`,
         }
 
         // Ensure essential fields are present after parsing
-        if (!parsedJson || !parsedJson.operation || !parsedJson.documentId || !parsedJson.data) {
-          console.error('Parsed JSON is missing required fields (operation, documentId, data)');
-          throw new Error('Parsed inner JSON is missing required fields.');
+        if (!parsedJson.operation && !parsedJson.excel_operation) {
+          console.error('Parsed JSON is missing operation field');
+          throw new Error('Parsed JSON is missing operation field');
+        }
+        
+        if (!parsedJson.documentId) {
+          console.error('Parsed JSON is missing documentId field');
+          throw new Error('Parsed JSON is missing documentId field');
+        }
+        
+        if (!parsedJson.data) {
+          console.error('Parsed JSON is missing data field');
+          throw new Error('Parsed JSON is missing data field');
         }
 
         console.log('Calling processExcelOperation with parsed/normalized data:', parsedJson);
