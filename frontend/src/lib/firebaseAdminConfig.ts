@@ -7,6 +7,19 @@ const isVercel = process.env.VERCEL === '1';
 const environment = isVercel ? 'Vercel' : 'Local';
 console.log(`Running in ${environment} environment`);
 
+// Log all environment variables related to Firebase (without exposing sensitive values)
+const envVars = {
+  FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID ? 'Set' : 'Not set',
+  FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL ? 'Set' : 'Not set',
+  FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY ? `Set (length: ${process.env.FIREBASE_PRIVATE_KEY.length})` : 'Not set',
+  GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS ? 'Set' : 'Not set',
+  FIREBASE_DATABASE_URL: process.env.FIREBASE_DATABASE_URL ? 'Set' : 'Not set',
+  FIREBASE_STORAGE_BUCKET: process.env.FIREBASE_STORAGE_BUCKET ? 'Set' : 'Not set',
+  NODE_ENV: process.env.NODE_ENV || 'Not set'
+};
+
+console.log('Firebase-related environment variables:', envVars);
+
 /**
  * Initializes the Firebase Admin SDK if it hasn't been initialized yet.
  * Uses environment variables for configuration.
@@ -37,12 +50,21 @@ export function initializeFirebaseAdmin(): admin.app.App {
     const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
     let privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
+    console.log('Firebase environment variables values (partial):');
+    console.log(`- FIREBASE_PROJECT_ID: ${projectId ? projectId : 'Not set'}`);
+    console.log(`- FIREBASE_CLIENT_EMAIL: ${clientEmail ? clientEmail.substring(0, 5) + '...' : 'Not set'}`);
+    console.log(`- FIREBASE_PRIVATE_KEY length: ${privateKey ? privateKey.length : 0}`);
+
     // Validate required environment variables
     if (!projectId || !clientEmail || !privateKey) {
-      throw new Error('Required Firebase environment variables are not set.');
+      const missing = [];
+      if (!projectId) missing.push('FIREBASE_PROJECT_ID');
+      if (!clientEmail) missing.push('FIREBASE_CLIENT_EMAIL');
+      if (!privateKey) missing.push('FIREBASE_PRIVATE_KEY');
+      throw new Error(`Required Firebase environment variables are not set: ${missing.join(', ')}`);
     }
 
-    console.log('Found Firebase environment variables');
+    console.log('Found all required Firebase environment variables');
 
     // Process the private key if needed
     if (privateKey && privateKey.startsWith('"') && privateKey.endsWith('"')) {
@@ -86,17 +108,33 @@ export function initializeFirebaseAdmin(): admin.app.App {
         const rawClientEmail = process.env.FIREBASE_CLIENT_EMAIL;
         const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
         
+        console.log('Vercel environment variables check:');
+        console.log(`- Raw FIREBASE_PROJECT_ID: ${rawProjectId ? rawProjectId : 'Not set'}`);
+        console.log(`- Raw FIREBASE_CLIENT_EMAIL: ${rawClientEmail ? 'Set' : 'Not set'}`);
+        console.log(`- Raw FIREBASE_PRIVATE_KEY length: ${rawPrivateKey ? rawPrivateKey.length : 0}`);
+        
         if (!rawProjectId || !rawClientEmail || !rawPrivateKey) {
-          throw new Error('Missing required Firebase credentials');
+          const missing = [];
+          if (!rawProjectId) missing.push('FIREBASE_PROJECT_ID');
+          if (!rawClientEmail) missing.push('FIREBASE_CLIENT_EMAIL');
+          if (!rawPrivateKey) missing.push('FIREBASE_PRIVATE_KEY');
+          throw new Error(`Missing required Firebase credentials: ${missing.join(', ')}`);
         }
+        
+        // Try with explicit configuration object
+        const certConfig = {
+          projectId: rawProjectId,
+          clientEmail: rawClientEmail,
+          privateKey: rawPrivateKey,
+        };
+        
+        console.log('Initializing with explicit cert configuration');
         
         // Use the raw private key directly without processing
         firebaseAdminInstance = admin.initializeApp({
-          credential: admin.credential.cert({
-            projectId: rawProjectId,
-            clientEmail: rawClientEmail,
-            privateKey: rawPrivateKey,
-          } as ServiceAccount),
+          credential: admin.credential.cert(certConfig as ServiceAccount),
+          projectId: rawProjectId, // Explicitly set project ID at the app level too
+          storageBucket: `${rawProjectId}.appspot.com` // Explicitly set storage bucket
         });
         
         console.log('Firebase Admin SDK initialized with alternative approach for Vercel.');

@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { initializeFirebaseAdmin, getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig'; // Ensure admin app is initialized
 
-// Initialize Firebase Admin SDK (handles checking if already initialized)
-initializeFirebaseAdmin();
+// Initialize Firebase Admin SDK at the module level
+try {
+  console.log('Initializing Firebase Admin SDK in documents API route');
+  const app = initializeFirebaseAdmin();
+  console.log(`Firebase Admin SDK initialized successfully with app name: ${app.name}`);
+} catch (error) {
+  console.error('Failed to initialize Firebase Admin SDK in documents API route:', error);
+}
 
 // Helper function to authenticate user from token
 async function authenticateUser(req: NextRequest) {
@@ -15,6 +21,14 @@ async function authenticateUser(req: NextRequest) {
   const idToken = authorization.split('Bearer ')[1];
   
   try {
+    // Ensure Firebase Admin is initialized before getting auth
+    try {
+      initializeFirebaseAdmin();
+    } catch (initError: any) {
+      console.error('Failed to initialize Firebase Admin in authenticateUser:', initError);
+      throw new Error(`Firebase initialization error: ${initError.message}`);
+    }
+    
     const auth = getAdminAuth();
     const decodedToken = await auth.verifyIdToken(idToken);
     return { userId: decodedToken.uid };
@@ -38,9 +52,20 @@ export async function GET(req: NextRequest) {
 
   // User is authenticated, proceed to fetch documents
   try {
+    // Ensure Firebase Admin is initialized before getting the database
+    try {
+      initializeFirebaseAdmin();
+    } catch (initError: any) {
+      console.error('Failed to initialize Firebase Admin in GET handler:', initError);
+      throw new Error(`Firebase initialization error: ${initError.message}`);
+    }
+    
     const db = getAdminDb();
+    console.log('Successfully got Firestore DB instance');
+    
     // Assuming documents are stored under users/{userId}/documents
     const documentsRef = db.collection('users').doc(userId).collection('documents');
+    console.log(`Querying documents for user: ${userId}`);
     const snapshot = await documentsRef.get();
 
     if (snapshot.empty) {
@@ -136,8 +161,17 @@ export async function DELETE(req: NextRequest) {
   }
   
   try {
+    // Ensure Firebase Admin is initialized before getting services
+    try {
+      initializeFirebaseAdmin();
+    } catch (initError: any) {
+      console.error('Failed to initialize Firebase Admin in DELETE handler:', initError);
+      throw new Error(`Firebase initialization error: ${initError.message}`);
+    }
+    
     const db = getAdminDb();
     const storage = getAdminStorage();
+    console.log('Successfully got Firestore DB and Storage instances');
     
     // Get the document reference
     const docRef = db.collection('users').doc(userId).collection('documents').doc(documentId);
