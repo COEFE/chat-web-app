@@ -7,6 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Loader2, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import * as XLSX from 'xlsx'; // Import xlsx library
 import mammoth from 'mammoth'; // Import mammoth for DOCX handling
+import { HotTable } from '@handsontable/react'; // Import HotTable
+import 'handsontable/dist/handsontable.full.min.css'; // Import Handsontable CSS
+import { registerAllModules } from 'handsontable/registry'; // Needed for features
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"; // Import Shadcn Tabs
+
+// Register Handsontable modules
+registerAllModules();
 
 // Import CSS for PDF rendering
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
@@ -30,8 +37,9 @@ const PDFViewer = dynamic(() => import('./PDFViewer'), {
 export default function DocumentViewer({ document }: { document: MyDocumentData }) {
   // For text files
   const [textContent, setTextContent] = useState<string | null>(null);
-  // State for Excel/CSV HTML content
-  const [sheetHtml, setSheetHtml] = useState<string | null>(null);
+  // State for workbook data and active sheet
+  const [workbookData, setWorkbookData] = useState<{ sheetName: string; data: any[][] }[] | null>(null);
+  const [activeSheetName, setActiveSheetName] = useState<string | null>(null);
   // State for DOCX HTML content
   const [docxHtml, setDocxHtml] = useState<string | null>(null);
   // State for image viewing
@@ -58,7 +66,8 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       setIsLoading(true);
       setError(null);
       setTextContent(null); // Reset other content types
-      setSheetHtml(null);  // Reset other content types
+      setWorkbookData(null); // Reset workbook data
+      setActiveSheetName(null); // Reset active sheet
       setDocxHtml(null);   // Reset DOCX content
       setImageUrl(null);   // Reset image content
       setZoom(1);          // Reset zoom level
@@ -94,12 +103,21 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         {
           const arrayBuffer = await response.arrayBuffer();
           const workbook = XLSX.read(arrayBuffer, { type: 'buffer' });
-          // Get the first sheet name
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-          // Convert sheet to HTML table
-          const html = XLSX.utils.sheet_to_html(worksheet);
-          setSheetHtml(html);
+          
+          // Process all sheets
+          const sheetNames = workbook.SheetNames;
+          if (sheetNames.length > 0) {
+            const allSheetData = sheetNames.map(sheetName => {
+              const worksheet = workbook.Sheets[sheetName];
+              // Use header: 1 to get array of arrays, better for Handsontable
+              const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+              return { sheetName, data };
+            });
+            setWorkbookData(allSheetData);
+            setActiveSheetName(sheetNames[0]); // Set first sheet as active
+          } else {
+            setError('Excel file contains no sheets.');
+          }
         } else if (document.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
           // Handle DOCX files using Mammoth.js
           const arrayBuffer = await response.arrayBuffer();
@@ -173,41 +191,38 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       )}
 
       {/* Excel/CSV Viewer */}
-      {!isLoading && !error && isSheet && sheetHtml && (
-        <>
-          <div 
-            className="excel-viewer-table flex-1 overflow-auto border rounded-md" 
-            dangerouslySetInnerHTML={{ __html: sheetHtml }}
-          />
-          <style jsx>{`
-            .excel-viewer-table table {
-              border-collapse: collapse;
-              width: 100%;
-              font-size: 0.875rem; /* text-sm */
-              border: 1px solid #e5e7eb; /* border-gray-200 */
-            }
-            .excel-viewer-table th,
-            .excel-viewer-table td {
-              border: 1px solid #e5e7eb; /* border-gray-200 */
-              padding: 0.5rem 0.75rem; 
-              text-align: left;
-              vertical-align: top;
-            }
-            .excel-viewer-table th {
-              background-color: #f3f4f6; /* bg-gray-100 */
-              font-weight: 600; /* font-semibold */
-              position: sticky; /* Sticky header */
-              top: 0;
-              z-index: 10; 
-            }
-            .excel-viewer-table tr:nth-child(even) td {
-              background-color: #f9fafb; /* bg-gray-50 - Zebra stripes */
-            }
-            .excel-viewer-table tr:hover td {
-              background-color: #eff6ff; /* bg-blue-50 - Hover effect */
-            }
-          `}</style>
-        </>
+      {!isLoading && !error && isSheet && workbookData && activeSheetName && (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <Tabs value={activeSheetName} onValueChange={setActiveSheetName} className="flex-shrink-0">
+            <TabsList className="bg-muted p-1 rounded-t-md h-auto justify-start overflow-x-auto">
+              {workbookData.map((sheet) => (
+                <TabsTrigger 
+                  key={sheet.sheetName} 
+                  value={sheet.sheetName}
+                  className="text-xs px-2 py-1 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  {sheet.sheetName}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          <div className="flex-1 overflow-auto border border-t-0 rounded-b-md">
+            <HotTable
+              data={workbookData.find(sheet => sheet.sheetName === activeSheetName)?.data || []}
+              rowHeaders={true}
+              colHeaders={true}
+              readOnly={true}
+              contextMenu={true} // Enable context menu (copy, etc.)
+              dropdownMenu={true} // Enable dropdown for columns
+              manualColumnResize={true}
+              manualRowResize={true}
+              width="100%"
+              height="100%" // Let the container handle height
+              stretchH="all" // Stretch columns to fill width
+              licenseKey="non-commercial-and-evaluation" // Use the non-commercial key
+            />
+          </div>
+        </div>
       )}
       
       {/* DOCX Viewer */}
