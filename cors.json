@@ -1,0 +1,10 @@
+[
+  {
+    "origin": [
+      "https://chat-web-5sqbppio1-coefes-projects.vercel.app",
+      "http://localhost:3000"
+    ],
+    "method": ["GET"],
+    "maxAgeSeconds": 3600
+  }
+]
