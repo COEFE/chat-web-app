@@ -44,14 +44,14 @@ export function initializeFirebaseAdmin(): admin.app.App {
   console.log(`- FIREBASE_PRIVATE_KEY starts with: ${privateKey.substring(0, 50)}...`);
   console.log(`- FIREBASE_PRIVATE_KEY ends with: ${privateKey.slice(-50)}`);
 
-  // IMPORTANT: Replace the literal \n characters in the private key ENV var
-  // with actual newline characters for the SDK to parse correctly.
+  // IMPORTANT: Replace the literal \n characters (and potentially escaped \\n)
+  // in the private key ENV var with actual newline characters for the SDK.
   // The key from ENV is expected to be like: "-----BEGIN PRIVATE KEY-----\nMIIE...\n...\n-----END PRIVATE KEY-----\n"
-  // We need to convert the \n sequences to actual newlines.
-  // Also remove surrounding quotes if present (Vercel might add them)
-  privateKey = privateKey.replace(/^"|"$/g, '').replace(/\n/g, '\n');
+  // First, remove surrounding quotes if present.
+  // Then, replace both \\n (escaped backslash + n) and \n (literal backslash + n) with actual newlines.
+  privateKey = privateKey.replace(/^"|"$/g, '').replace(/\\n/g, '\n').replace(/\n/g, '\n');
 
-  console.log('Private Key after replacing \\n and removing quotes:');
+  console.log('Private Key after replacing \\n/\n and removing quotes:');
   console.log(`- Length: ${privateKey.length}`);
   console.log(`- Starts with: ${privateKey.substring(0, 50)}...`);
   console.log(`- Ends with: ${privateKey.slice(-50)}`);
