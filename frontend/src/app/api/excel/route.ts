@@ -159,33 +159,58 @@ export async function POST(req: NextRequest) {
       let docRef = adminDb.collection('users').doc(userId).collection('documents').doc(documentId);
       let docSnap = await docRef.get();
       
-      // If document not found by ID, try to find it by name
+      // If document not found by ID, try multiple fallback strategies
       if (!docSnap.exists) {
-        console.log(`Document with ID ${documentId} not found, trying to find by name`);
-        
-        // Query documents by name
+        console.log(`Document with ID ${documentId} not found, trying fallback strategies`);
         const documentsRef = adminDb.collection('users').doc(userId).collection('documents');
-        const nameQuery = await documentsRef.where('name', '==', documentId).get();
         
-        if (nameQuery.empty) {
-          // Get a list of available documents to provide helpful guidance
-          const allDocsQuery = await documentsRef.limit(5).get();
-          const availableDocs = allDocsQuery.docs.map(doc => ({
-            id: doc.id,
-            name: doc.data().name
-          }));
+        // Strategy 1: Exact name match
+        console.log(`Trying to find document by exact name: "${documentId}"`);
+        const exactNameQuery = await documentsRef.where('name', '==', documentId).get();
+        
+        if (!exactNameQuery.empty) {
+          docSnap = exactNameQuery.docs[0];
+          docRef = docSnap.ref;
+          console.log(`Found document by exact name match: ${docSnap.id}`);
+        } else {
+          // Strategy 2: Case-insensitive name contains (get all docs and filter in memory)
+          console.log(`Trying to find document by partial name match`);
+          const allDocsQuery = await documentsRef.get();
           
-          return NextResponse.json({ 
-            error: 'Document not found', 
-            details: `No document found with the provided ID or name: "${documentId}". Please use a valid document ID, not the document name.`,
-            availableDocuments: availableDocs.length > 0 ? availableDocs : undefined
-          }, { status: 404 });
+          // First try exact match ignoring case
+          const caseInsensitiveMatch = allDocsQuery.docs.find(doc => 
+            doc.data().name?.toLowerCase() === documentId.toLowerCase()
+          );
+          
+          if (caseInsensitiveMatch) {
+            docSnap = caseInsensitiveMatch;
+            docRef = caseInsensitiveMatch.ref;
+            console.log(`Found document by case-insensitive name match: ${docSnap.id}`);
+          } else {
+            // Try partial match
+            const partialMatch = allDocsQuery.docs.find(doc => 
+              doc.data().name?.toLowerCase().includes(documentId.toLowerCase())
+            );
+            
+            if (partialMatch) {
+              docSnap = partialMatch;
+              docRef = partialMatch.ref;
+              console.log(`Found document by partial name match: ${docSnap.id}`);
+            } else {
+              // No matches found, return helpful error with available documents
+              const availableDocs = allDocsQuery.docs.map(doc => ({
+                id: doc.id,
+                name: doc.data().name
+              })).slice(0, 5); // Limit to 5 documents
+              
+              return NextResponse.json({ 
+                error: 'Document not found', 
+                details: `No document found with the provided ID or name: "${documentId}". Please use a valid document ID, not the document name.`,
+                availableDocuments: availableDocs.length > 0 ? availableDocs : undefined
+              }, { status: 404 });
+            }
+          }
         }
-        
-        // Use the first document that matches the name
-        docSnap = nameQuery.docs[0];
-        docRef = docSnap.ref;
-        console.log(`Found document by name: ${docSnap.id}`);
       }
       
       const docData = docSnap.data();
