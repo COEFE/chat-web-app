@@ -38,14 +38,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ documents: [] }, { status: 200 });
     }
 
-    const documents = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      filename: doc.data().filename || 'Untitled Document',
-      contentType: doc.data().contentType || 'unknown',
-      downloadURL: doc.data().downloadURL || null,
-      createdAt: doc.data().createdAt?.toDate ? doc.data().createdAt.toDate() : doc.data().createdAt, // Handle potential timestamp format
-      // Add other fields like storagePath if stored and needed
-    }));
+    const documents = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      console.log(`Document data for ${doc.id}:`, data);
+      return {
+        id: doc.id,
+        filename: data.name || data.filename || data.originalName || doc.id,
+        contentType: data.contentType || 'unknown',
+        downloadURL: data.downloadURL || null,
+        createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt, // Handle potential timestamp format
+        // Add other fields like storagePath if stored and needed
+      };
+    });
 
     console.log(`GET /api/documents - Found ${documents.length} documents for user: ${userId}`);
     return NextResponse.json({ documents }, { status: 200 });

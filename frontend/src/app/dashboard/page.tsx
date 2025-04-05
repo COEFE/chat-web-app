@@ -253,7 +253,7 @@ export default function DashboardPage() {
 
         return {
           id: doc.id,
-          name: doc.filename || 'Untitled', // Use filename from API
+          name: doc.filename || doc.name || doc.id, // Try multiple possible field names
           uploadedAt: uploadedAt,
           contentType: doc.contentType || 'unknown', 
           downloadURL: doc.downloadURL || null,
