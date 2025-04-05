@@ -268,6 +268,9 @@ export async function POST(req: NextRequest) {
     // --- Call AI API ---
     let aiResponseContent = 'Sorry, I could not get a response from the AI.'; // Default error message
     try {
+      // Log the API key status (without revealing the key)
+      console.log(`ANTHROPIC_API_KEY is ${process.env.ANTHROPIC_API_KEY ? 'set' : 'NOT SET'}`); 
+      
       const anthropic = new Anthropic({
         apiKey: process.env.ANTHROPIC_API_KEY, // Ensure this is set in .env.local
       });
@@ -320,6 +323,12 @@ If the user asks you to edit this Excel file, you should automatically use this 
       // If it's an edit request and we have a document ID, directly process it
       if (isEditExcelRequest && currentDocument && currentDocument.id) {
         console.log('Detected Excel edit request for current document:', currentDocument.id);
+        console.log('Current document details:', {
+          id: currentDocument.id,
+          name: currentDocument.name,
+          contentType: currentDocument.contentType,
+          storagePath: currentDocument.storagePath
+        });
         
         // Extract the cell and value from the message using multiple regex patterns
         const patterns = [
@@ -362,7 +371,7 @@ If the user asks you to edit this Excel file, you should automatically use this 
           
           // Create the Excel operation JSON
           const excelOperation = {
-            excel_operation: "edit",
+            operation: "edit", // This needs to match the parameter name in the Excel API
             documentId: currentDocument.id,
             data: [
               {
@@ -375,6 +384,9 @@ If the user asks you to edit this Excel file, you should automatically use this 
             ]
           };
           
+          // Log the Excel operation being sent
+          console.log('Sending Excel operation to API:', JSON.stringify(excelOperation));
+          
           // Call the Excel API to perform the operation
           const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
             method: 'POST',
@@ -386,6 +398,8 @@ If the user asks you to edit this Excel file, you should automatically use this 
           });
           
           const excelResult = await excelResponse.json();
+          console.log('Excel API response status:', excelResponse.status);
+          console.log('Excel API response result:', excelResult);
           
           if (excelResponse.ok) {
             // Create a success message
@@ -486,8 +500,24 @@ User Question: ${message}`,
         aiResponseContent = "Received a response, but couldn't extract the text.";
       }
     } catch (aiError) {
-      console.error('Error calling Anthropic API:', aiError);
-      // Keep the default error message for aiResponseContent
+      console.error('Error calling Anthropic API:');
+      if (aiError instanceof Error) {
+        console.error(`- Error name: ${aiError.name}`);
+        console.error(`- Error message: ${aiError.message}`);
+        console.error(`- Error stack: ${aiError.stack}`);
+      } else {
+        console.error('- Unknown error type:', aiError);
+      }
+      
+      // Check for specific error types
+      if (aiError instanceof Error && aiError.message.includes('API key')) {
+        aiResponseContent = "There was an issue with the AI service authentication. Please contact support.";
+      } else if (aiError instanceof Error && aiError.message.includes('timeout')) {
+        aiResponseContent = "The AI service took too long to respond. Please try again.";
+      } else if (aiError instanceof Error && aiError.message.includes('network')) {
+        aiResponseContent = "There was a network issue connecting to the AI service. Please check your connection and try again.";
+      }
+      // Keep the default error message for other cases
     }
     // --- End AI Call ---
 
@@ -498,7 +528,8 @@ User Question: ${message}`,
     // Check for Excel operation JSON in the response
     // Try multiple regex patterns to catch different ways Claude might format the JSON
     const jsonCodeBlockRegex = /```(?:json)?\s*({[\s\S]*?})\s*```/g;
-    const jsonRawRegex = /^\s*({\s*"excel_operation"[\s\S]*?})\s*$/g;
+    const jsonRawRegex = /({\s*"(?:excel_operation|operation)"[\s\S]*?})/g;
+    const jsonOperationRegex = /\{[^\}]*"(?:excel_operation|operation)"\s*:\s*"(?:create|edit)"[^\}]*\}/g;
     
     // Try code block format first (most common)
     let jsonMatches = [...aiResponseContent.matchAll(jsonCodeBlockRegex)];
@@ -507,6 +538,12 @@ User Question: ${message}`,
     if (jsonMatches.length === 0) {
       jsonMatches = [...aiResponseContent.matchAll(jsonRawRegex)];
       console.log('Trying raw JSON regex, found matches:', jsonMatches.length);
+    }
+    
+    // If still no matches, try the operation-specific regex
+    if (jsonMatches.length === 0) {
+      jsonMatches = [...aiResponseContent.matchAll(jsonOperationRegex)];
+      console.log('Trying operation-specific regex, found matches:', jsonMatches.length);
     }
     
     // Log the full AI response for debugging
