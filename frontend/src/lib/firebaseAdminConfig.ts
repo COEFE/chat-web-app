@@ -22,41 +22,27 @@ function initializeFirebaseAdmin() {
     // Decode the Base64 string to get the JSON service account key
     const decodedServiceAccount = Buffer.from(base64EncodedServiceAccount, 'base64').toString('utf-8');
     
-    // Parse the JSON string into a raw object (since keys are snake_case)
+    // Parse the JSON string into a raw object (using snake_case keys as in the JSON)
     const rawServiceAccount = JSON.parse(decodedServiceAccount);
 
-    // Map snake_case keys from JSON to camelCase keys for ServiceAccount type
-    const serviceAccount: ServiceAccount = {
-      projectId: rawServiceAccount.project_id,
-      clientEmail: rawServiceAccount.client_email,
-      privateKey: rawServiceAccount.private_key,
-      // Include other potential fields if necessary, mapping them similarly
-      // client_id: rawServiceAccount.client_id,
-      // auth_uri: rawServiceAccount.auth_uri, 
-      // etc.
-    };
+    // Detailed logging of the *raw* service account structure (as parsed from JSON)
+    console.log('Raw Service Account Object Structure (from JSON):');
+    console.log(`- Type: ${typeof rawServiceAccount}`);
+    console.log(`- Keys: ${Object.keys(rawServiceAccount).join(', ')}`);
+    console.log(`- project_id: ${rawServiceAccount.project_id}`); 
+    console.log(`- client_email: ${rawServiceAccount.client_email}`); 
+    console.log(`- private_key type: ${typeof rawServiceAccount.private_key}`);
+    console.log(`- private_key length: ${rawServiceAccount.private_key?.length}`);
+    console.log(`- private_key starts with: ${rawServiceAccount.private_key?.substring(0, 30)}...`);
+    console.log(`- private_key ends with: ${rawServiceAccount.private_key?.slice(-30)}`);
 
-    // Detailed logging of the *mapped* service account structure
-    console.log('Mapped Service Account Object Structure (for SDK): ');
-    console.log(`- Type: ${typeof serviceAccount}`);
-    console.log(`- Keys: ${Object.keys(serviceAccount).join(', ')}`);
-    console.log(`- projectId: ${serviceAccount.projectId}`); // Use mapped camelCase
-    console.log(`- clientEmail: ${serviceAccount.clientEmail}`); // Use mapped camelCase
-    console.log(`- privateKey type: ${typeof serviceAccount.privateKey}`);
-    console.log(`- privateKey length: ${serviceAccount.privateKey?.length}`);
-    console.log(`- privateKey starts with: ${serviceAccount.privateKey?.substring(0, 30)}...`); // Check start
-    console.log(`- privateKey ends with: ${serviceAccount.privateKey?.slice(-30)}`); // Check end
+    console.log('Attempting to initialize Firebase Admin with raw snake_case object...');
 
-    // Log basic info for verification (avoid logging the full key)
-    console.log('Successfully decoded and parsed service account from Base64 variable.');
-    console.log(`- Project ID: ${serviceAccount.projectId}`);
-    console.log(`- Client Email: ${serviceAccount.clientEmail}`);
-    
-    // Initialize Firebase Admin with the decoded service account object
+    // Initialize Firebase Admin SDK with the credential object
+    // Pass the raw object directly, as the error asks for 'project_id'
     firebaseAdminInstance = admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-      // Optionally add databaseURL if needed, typically inferred
-      // databaseURL: `https://${serviceAccount.projectId}.firebaseio.com` 
+      credential: admin.credential.cert(rawServiceAccount as any), // Use raw object, cast to any to bypass TS type check
+      // databaseURL: `https://${rawServiceAccount.project_id}.firebaseio.com` // Adjust if needed
     });
 
     console.log('Firebase Admin SDK initialized successfully using Base64 encoded service account.');
