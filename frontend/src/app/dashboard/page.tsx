@@ -5,6 +5,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { useToast } from '@/components/ui/use-toast';
 import {
   Table,
   TableBody,
@@ -38,9 +40,13 @@ interface DocumentTableProps {
   isLoading: boolean;
   error: string | null;
   onSelectDocument: (doc: MyDocumentData | null) => void;
+  onDeleteDocument: (docId: string) => Promise<void>;
 }
 
-function DocumentTable({ documents, isLoading, error, onSelectDocument }: DocumentTableProps) {
+function DocumentTable({ documents, isLoading, error, onSelectDocument, onDeleteDocument }: DocumentTableProps) {
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const { toast } = useToast();
   const formatDate = (timestamp: any): string => {
     // Handle null, undefined, or missing timestamp
     if (!timestamp) return 'N/A';
@@ -129,9 +135,63 @@ function DocumentTable({ documents, isLoading, error, onSelectDocument }: Docume
                     <Button variant="ghost" size="sm" onClick={() => onSelectDocument(doc)}>
                       View
                     </Button>
-                    <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700 ml-2">
-                      Delete {/* TODO: Implement Delete */}
-                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-red-600 hover:text-red-700 ml-2"
+                          disabled={isDeleting && deletingId === doc.id}
+                        >
+                          {isDeleting && deletingId === doc.id ? (
+                            <>
+                              <div className="h-3 w-3 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                              Deleting...
+                            </>
+                          ) : (
+                            'Delete'
+                          )}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will permanently delete the document "{doc.name}". This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
+                              e.preventDefault();
+                              setDeletingId(doc.id);
+                              setIsDeleting(true);
+                              try {
+                                await onDeleteDocument(doc.id);
+                                toast({
+                                  title: "Document deleted",
+                                  description: `${doc.name} has been successfully deleted.`,
+                                });
+                              } catch (error) {
+                                console.error('Error deleting document:', error);
+                                toast({
+                                  variant: "destructive",
+                                  title: "Error",
+                                  description: `Failed to delete document: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                                });
+                              } finally {
+                                setIsDeleting(false);
+                                setDeletingId(null);
+                              }
+                            }}
+                            className="bg-red-600 hover:bg-red-700"
+                          >
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </TableCell>
                 </TableRow>
               );
@@ -164,6 +224,7 @@ export default function DashboardPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const currentRequestIdRef = useRef<string | null>(null);
+  const { toast } = useToast();
 
   const fetchDocuments = useCallback(async () => {
     // Create a unique request ID to handle race conditions
@@ -277,6 +338,56 @@ export default function DashboardPage() {
     console.log("Upload complete signal received, fetching documents...");
     fetchDocuments();
   }, [fetchDocuments]);
+  
+  const handleDeleteDocument = useCallback(async (docId: string) => {
+    if (!user) {
+      console.error('No user available for deleting document');
+      throw new Error('Authentication required');
+    }
+    
+    let token: string | null = null;
+    try {
+      token = await user.getIdToken();
+    } catch (tokenError) {
+      console.error("Failed to get ID token for delete operation", tokenError);
+      throw new Error('Authentication error. Please refresh and try again.');
+    }
+    
+    try {
+      const response = await fetch(`/api/documents?id=${docId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      
+      if (!response.ok) {
+        let errorMsg = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMsg = errorData.error || errorData.message || errorMsg;
+        } catch (e) {
+          // Ignore if response body isn't JSON
+        }
+        console.error(`Error deleting document: ${errorMsg}`);
+        throw new Error(errorMsg);
+      }
+      
+      // If delete was successful, update the documents list
+      setDocuments(prevDocs => prevDocs.filter(doc => doc.id !== docId));
+      
+      // If the deleted document was selected, clear the selection
+      if (selectedDocumentId === docId) {
+        setSelectedDocument(null);
+        setSelectedDocumentId(null);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error('Error in handleDeleteDocument:', error);
+      throw error;
+    }
+  }, [user, selectedDocumentId]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -374,6 +485,7 @@ export default function DashboardPage() {
                     isLoading={isLoadingDocs}
                     error={errorDocs}
                     onSelectDocument={(doc: MyDocumentData | null) => handleSelectDocument(doc)}
+                    onDeleteDocument={handleDeleteDocument}
                   />
                   {documents.length === 0 && (
                     <p className="mt-4 text-center text-muted-foreground">No documents uploaded yet. Upload a file to start chatting.</p>

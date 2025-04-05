@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, MouseEvent, WheelEvent } from 'react';
 import dynamic from 'next/dynamic';
 import { Timestamp } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import * as XLSX from 'xlsx'; // Import xlsx library
+import mammoth from 'mammoth'; // Import mammoth for DOCX handling
 
 // Import CSS for PDF rendering
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
@@ -29,8 +30,19 @@ const PDFViewer = dynamic(() => import('./PDFViewer'), {
 export default function DocumentViewer({ document }: { document: MyDocumentData }) {
   // For text files
   const [textContent, setTextContent] = useState<string | null>(null);
-  // === NEW: State for Excel/CSV HTML content ===
+  // State for Excel/CSV HTML content
   const [sheetHtml, setSheetHtml] = useState<string | null>(null);
+  // State for DOCX HTML content
+  const [docxHtml, setDocxHtml] = useState<string | null>(null);
+  // State for image viewing
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const imageContainerRef = useRef<HTMLDivElement>(null);
+  
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,6 +81,11 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       setError(null);
       setTextContent(null); // Reset other content types
       setSheetHtml(null);  // Reset other content types
+      setDocxHtml(null);   // Reset DOCX content
+      setImageUrl(null);   // Reset image content
+      setZoom(1);          // Reset zoom level
+      setRotation(0);      // Reset rotation
+      setPosition({ x: 0, y: 0 }); // Reset position
 
       try {
         // Extract the storage path from the downloadURL
@@ -105,6 +122,19 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
           // Convert sheet to HTML table
           const html = XLSX.utils.sheet_to_html(worksheet);
           setSheetHtml(html);
+        } else if (document.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          // Handle DOCX files using Mammoth.js
+          const arrayBuffer = await response.arrayBuffer();
+          try {
+            const result = await mammoth.convertToHtml({ arrayBuffer });
+            setDocxHtml(result.value);
+          } catch (mammothError) {
+            console.error('Error converting DOCX:', mammothError);
+            setError(`Failed to convert DOCX file: ${mammothError instanceof Error ? mammothError.message : String(mammothError)}`);
+          }
+        } else if (['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'].includes(document.contentType)) {
+          // Handle image files
+          setImageUrl(proxyUrl);
         } else if (document.contentType !== 'application/pdf') {
           // If it's not PDF and not handled above, set an error or specific state
           console.log(`Unsupported preview for contentType: ${document.contentType}`);
@@ -131,7 +161,9 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       'application/vnd.ms-excel', 
       'text/csv'
     ].includes(document.contentType);
-  const isPreviewSupported = isPdf || isText || isSheet;
+  const isDocx = document?.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const isImage = document && ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'].includes(document.contentType);
+  const isPreviewSupported = isPdf || isText || isSheet || isDocx || isImage;
 
   return (
     <div className="flex flex-col h-full">
@@ -162,12 +194,101 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         </div>
       )}
 
-      {/* === NEW: Excel/CSV Viewer === */}
+      {/* Excel/CSV Viewer */}
       {!isLoading && !error && isSheet && sheetHtml && (
         <div 
           className="flex-1 overflow-auto border rounded-md p-4 [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:p-2 [&_th]:text-left [&_th]:bg-muted [&_td]:border [&_td]:p-2"
           dangerouslySetInnerHTML={{ __html: sheetHtml }}
         />
+      )}
+      
+      {/* DOCX Viewer */}
+      {!isLoading && !error && isDocx && docxHtml && (
+        <div 
+          className="flex-1 overflow-auto border rounded-md p-4 prose prose-sm max-w-none"
+          dangerouslySetInnerHTML={{ __html: docxHtml }}
+        />
+      )}
+      
+      {/* Image Viewer */}
+      {!isLoading && !error && isImage && imageUrl && (
+        <div className="flex flex-col h-full">
+          <div className="flex justify-center gap-2 p-2 bg-muted/20 border-b">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setZoom(prev => Math.min(prev + 0.1, 3))}
+              title="Zoom In"
+            >
+              <ZoomIn className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setZoom(prev => Math.max(prev - 0.1, 0.5))}
+              title="Zoom Out"
+            >
+              <ZoomOut className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setRotation(prev => (prev + 90) % 360)}
+              title="Rotate"
+            >
+              <RotateCw className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => {
+                setZoom(1);
+                setRotation(0);
+                setPosition({ x: 0, y: 0 });
+              }}
+              title="Reset"
+            >
+              Reset
+            </Button>
+          </div>
+          <div 
+            ref={imageContainerRef}
+            className="flex-1 overflow-hidden relative"
+            onMouseDown={(e: MouseEvent) => {
+              if (e.button === 0) { // Left click only
+                setIsDragging(true);
+                setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
+              }
+            }}
+            onMouseMove={(e: MouseEvent) => {
+              if (isDragging) {
+                setPosition({
+                  x: e.clientX - dragStart.x,
+                  y: e.clientY - dragStart.y
+                });
+              }
+            }}
+            onMouseUp={() => setIsDragging(false)}
+            onMouseLeave={() => setIsDragging(false)}
+            onWheel={(e: WheelEvent) => {
+              e.preventDefault();
+              const delta = e.deltaY * -0.01;
+              setZoom(prev => Math.max(0.5, Math.min(3, prev + delta)));
+            }}
+          >
+            <img 
+              src={imageUrl} 
+              alt={document.name || 'Document image'}
+              style={{
+                transform: `translate(${position.x}px, ${position.y}px) scale(${zoom}) rotate(${rotation}deg)`,
+                transformOrigin: 'center',
+                transition: isDragging ? 'none' : 'transform 0.2s ease-out',
+                cursor: isDragging ? 'grabbing' : 'grab'
+              }}
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 max-w-none"
+            />
+          </div>
+        </div>
       )}
 
       {/* Unsupported format / No content */} 

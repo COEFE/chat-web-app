@@ -22,13 +22,13 @@
 - [x] **File Upload Component**
   - [x] Build a drag-and-drop file uploader and file-picker.
   - [x] Integrate the uploader with Firebase Storage and update Firestore with metadata.
-- [ ] **Document Viewer & Split-Pane Layout**
-  - Implement a resizable split-pane layout (using react-resizable-panels):
+- [x] **Document Viewer & Split-Pane Layout**
+  - [x] Implement a resizable split-pane layout (using react-resizable-panels):
     - **Left Pane:** Develop components for rendering:
-      - PDFs using react-pdf.
-      - DOCX files (using Mammoth.js or by converting DOCX to PDF).
-      - Excel/CSV files using SheetJS (render as an HTML table).
-      - Images with native HTML tags (plus optional zoom/pan features).
+      - [x] PDFs using react-pdf.
+      - [x] DOCX files (using Mammoth.js or by converting DOCX to PDF).
+      - [x] Excel/CSV files using SheetJS (render as an HTML table).
+      - [x] Images with native HTML tags (plus optional zoom/pan features).
     - **Right Pane:** Create a chat interface using a pre-built React chat component.
       - [x] Implement basic chat UI component (`ChatInterface.tsx`)
       - [x] Implement message display and state management

@@ -7,30 +7,26 @@ service cloud.firestore {
     match /users/{userId} {
       // Allow reading/listing user documents
       allow read: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow write operations on the user document itself
+      allow write: if request.auth != null && request.auth.uid == userId;
 
-      // Now match the 'documents' subcollection within a user's path
+      // Match the 'documents' subcollection within a user's path
       match /documents/{docId} {
-        // Allow creating a document if the user is authenticated and the
-        // document's userId field matches their UID.
-        allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-
-        // Allow reading, updating, deleting if the user is authenticated and
-        // the existing document's userId matches their UID.
-        allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+        // Allow all operations if the user is authenticated and matches the userId
+        allow read, write: if request.auth != null && request.auth.uid == userId;
       }
-
-      // You could add other rules for the top-level user document itself here if needed
-      // e.g., allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow access to all subcollections under a user's document
+      match /{allSubcollections=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
 
-    // Keep your original /documents/{docId} rules here ONLY if you
-    // also have a separate top-level 'documents' collection you need to secure.
-    // If not, you can remove the block below:
-    /*
-    match /documents/{docId} {
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    // For debugging purposes only - remove in production
+    // This allows you to see if documents exist at all
+    match /{document=**} {
+      allow read: if request.auth != null;
     }
-    */
   }
 }

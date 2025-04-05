@@ -1,30 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { initializeFirebaseAdmin, getAdminAuth, getAdminDb } from '@/lib/firebaseAdminConfig'; // Ensure admin app is initialized
+import { initializeFirebaseAdmin, getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig'; // Ensure admin app is initialized
 
 // Initialize Firebase Admin SDK (handles checking if already initialized)
 initializeFirebaseAdmin();
 
-export async function GET(req: NextRequest) {
-  console.log('GET /api/documents called');
-
+// Helper function to authenticate user from token
+async function authenticateUser(req: NextRequest) {
   const authorization = req.headers.get('Authorization');
   if (!authorization?.startsWith('Bearer ')) {
-    console.error('GET /api/documents - Unauthorized: No Bearer token');
-    return NextResponse.json({ error: 'Unauthorized: Missing Bearer token' }, { status: 401 });
+    console.error('API /documents - Unauthorized: No Bearer token');
+    return { error: 'Unauthorized: Missing Bearer token', status: 401 };
   }
 
   const idToken = authorization.split('Bearer ')[1];
-  let userId: string;
-
+  
   try {
     const auth = getAdminAuth();
     const decodedToken = await auth.verifyIdToken(idToken);
-    userId = decodedToken.uid;
-    console.log(`GET /api/documents - Authenticated user ID from token: ${userId}`);
+    return { userId: decodedToken.uid };
   } catch (error: any) {
-    console.error('GET /api/documents - Unauthorized: Invalid token', error);
-    return NextResponse.json({ error: 'Unauthorized: Invalid token', details: error.message }, { status: 401 });
+    console.error('API /documents - Unauthorized: Invalid token', error);
+    return { error: 'Unauthorized: Invalid token', details: error.message, status: 401 };
   }
+}
+
+export async function GET(req: NextRequest) {
+  console.log('GET /api/documents called');
+
+  const auth = await authenticateUser(req);
+  
+  if ('error' in auth) {
+    return NextResponse.json({ error: auth.error, details: auth.details }, { status: auth.status });
+  }
+  
+  const userId = auth.userId;
+  console.log(`GET /api/documents - Authenticated user ID from token: ${userId}`);
 
   // User is authenticated, proceed to fetch documents
   try {
@@ -58,5 +68,67 @@ export async function GET(req: NextRequest) {
     console.error(`GET /api/documents - Error fetching documents for user ${userId}:`, error);
     console.error('Error details:', { message: error.message, stack: error.stack });
     return NextResponse.json({ error: 'Failed to fetch documents', details: error.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  console.log('DELETE /api/documents called');
+  
+  const auth = await authenticateUser(req);
+  
+  if ('error' in auth) {
+    return NextResponse.json({ error: auth.error, details: auth.details }, { status: auth.status });
+  }
+  
+  const userId = auth.userId;
+  console.log(`DELETE /api/documents - Authenticated user ID from token: ${userId}`);
+  
+  // Get document ID from URL or request body
+  const url = new URL(req.url);
+  const documentId = url.searchParams.get('id');
+  
+  if (!documentId) {
+    console.error('DELETE /api/documents - Bad request: Missing document ID');
+    return NextResponse.json({ error: 'Bad request: Missing document ID' }, { status: 400 });
+  }
+  
+  try {
+    const db = getAdminDb();
+    const storage = getAdminStorage();
+    
+    // Get the document reference
+    const docRef = db.collection('users').doc(userId).collection('documents').doc(documentId);
+    
+    // Get the document data to find storage path
+    const docSnapshot = await docRef.get();
+    
+    if (!docSnapshot.exists) {
+      console.error(`DELETE /api/documents - Document not found: ${documentId}`);
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+    }
+    
+    const docData = docSnapshot.data();
+    
+    // Delete from storage if storagePath exists
+    if (docData?.storagePath) {
+      try {
+        const bucket = storage.bucket();
+        await bucket.file(docData.storagePath).delete();
+        console.log(`DELETE /api/documents - Deleted file from storage: ${docData.storagePath}`);
+      } catch (storageError: any) {
+        // Log but continue - we still want to delete the document record
+        console.error(`DELETE /api/documents - Error deleting file from storage: ${docData.storagePath}`, storageError);
+      }
+    }
+    
+    // Delete the document from Firestore
+    await docRef.delete();
+    console.log(`DELETE /api/documents - Deleted document: ${documentId}`);
+    
+    return NextResponse.json({ success: true, message: 'Document deleted successfully' }, { status: 200 });
+  } catch (error: any) {
+    console.error(`DELETE /api/documents - Error deleting document ${documentId}:`, error);
+    console.error('Error details:', { message: error.message, stack: error.stack });
+    return NextResponse.json({ error: 'Failed to delete document', details: error.message }, { status: 500 });
   }
 }
