@@ -189,6 +189,32 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
 
   return (
     <div className="flex flex-col h-full">
+      {/* Document ID display for Excel files */}
+      {isSheet && document.id && (
+        <div className="mb-2 p-2 bg-muted/20 border rounded-md">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="text-sm font-medium">Document ID:</div>
+            <div className="flex items-center gap-2">
+              <code className="px-2 py-1 bg-primary/10 rounded text-xs">{document.id}</code>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-7 px-2 text-xs"
+                onClick={() => {
+                  navigator.clipboard.writeText(document.id);
+                  // You could add a toast notification here
+                }}
+                title="Copy document ID to clipboard"
+              >
+                Copy
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Use this ID when asking Claude to edit this Excel file
+            </div>
+          </div>
+        </div>
+      )}
       {/* Loading state */}
       {isLoading && (
         <div className="flex-1 flex justify-center items-center">
