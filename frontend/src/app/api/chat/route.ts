@@ -612,108 +612,98 @@ User Question: ${message}`,
 
     // Process Excel operations in AI response if present
     let processedResponse = aiResponseContent;
-    let excelOperationResult = null;
+    let excelOperationResult: any = null;
     
-    // Check for Excel operation JSON in the response
-    // Try multiple regex patterns to catch different ways Claude might format the JSON
-    const jsonCodeBlockRegex = /```(?:json)?\s*({[\s\S]*?})\s*```/g;
-    const jsonRawRegex = /({\s*"(?:excel_operation|operation)"[\s\S]*?})/g;
-    const jsonOperationRegex = /\{[^\}]*"(?:excel_operation|operation)"\s*:\s*"(?:create|edit)"[^\}]*\}/g;
+    console.log('Attempting to detect JSON in AI response content:');
+    console.log('--- START AI Response Content ---');
+    console.log(aiResponseContent);
+    console.log('--- END AI Response Content ---');
     
-    // Try code block format first (most common)
-    let jsonMatches = [...aiResponseContent.matchAll(jsonCodeBlockRegex)];
+    // Check for JSON in the response (multiple patterns)
+    const jsonRegexPatterns = [
+      /```json\s*([\s\S]*?)\s*```/,           // Code block format: ```json ... ```
+      /{\s*"excel_operation":[\s\S]*}/,       // Raw JSON format starting with "excel_operation"
+      /{\s*"operation":[\s\S]*}/,             // Raw JSON format starting with "operation"
+      /"operation":\s*"(create|edit)"/,       // Specific operation format
+      /^\s*{[\s\S]*}\s*$/                    // General JSON object structure (fallback)
+    ];
     
-    // If no matches, try raw JSON format
-    if (jsonMatches.length === 0) {
-      jsonMatches = [...aiResponseContent.matchAll(jsonRawRegex)];
-      console.log('Trying raw JSON regex, found matches:', jsonMatches.length);
+    let detectedJson = null;
+    
+    for (const regex of jsonRegexPatterns) {
+      const match = aiResponseContent.match(regex);
+      if (match) {
+        // If matched code block, extract content inside
+        console.log('Detected JSON in AI response using pattern:', regex.toString());
+        detectedJson = match[1] ? match[1].trim() : match[0].trim(); 
+        console.log('Detected JSON string:', detectedJson);
+        break; // Stop after first match
+      }
     }
     
-    // If still no matches, try the operation-specific regex
-    if (jsonMatches.length === 0) {
-      jsonMatches = [...aiResponseContent.matchAll(jsonOperationRegex)];
-      console.log('Trying operation-specific regex, found matches:', jsonMatches.length);
-    }
-    
-    // Log the full AI response for debugging
-    console.log('Full AI response content:', aiResponseContent);
-    console.log('JSON matches found:', jsonMatches.length);
-    
-    if (jsonMatches.length > 0) {
-      // Process the first JSON block that contains an Excel operation
-      for (const match of jsonMatches) {
-        try {
-          const jsonStr = match[1];
-          console.log('Extracted JSON string:', jsonStr);
+    if (detectedJson) {
+      // Try to parse the detected JSON
+      // Normalize the operation key before processing
+      detectedJson = detectedJson.replace(/"excel_operation":/, '"operation":');
+      try {
+        const parsedJson = JSON.parse(detectedJson);
+        console.log('Successfully parsed JSON:', parsedJson);
+        
+        // Call the Excel API to perform the operation
+        const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': req.headers.get('Authorization') || '',
+          },
+          body: JSON.stringify(parsedJson),
+        });
+        
+        const excelResult = await excelResponse.json();
+        
+        if (excelResponse.ok) {
+          excelOperationResult = excelResult;
           
-          const jsonData = JSON.parse(jsonStr);
-          console.log('Parsed JSON data:', jsonData);
+          // Replace the JSON block with a success message
+          let successMessage = '';
           
-          if (jsonData.excel_operation) {
-            console.log('Detected Excel operation in AI response:', jsonData.excel_operation);
-            console.log('Document ID in operation:', jsonData.documentId);
+          if (parsedJson.operation === 'create') {
+            successMessage = `I've created a new Excel file named "${parsedJson.fileName}" for you. ${excelResult.url ? 'You can download it using the link below.' : ''}`;
+          } else if (parsedJson.operation === 'edit') {
+            // Create a more detailed message for edit operations
+            const cellUpdates = parsedJson.data.flatMap((sheet: { sheetName: string; cellUpdates: Array<{ cell: string; value: string }> }) => 
+              sheet.cellUpdates.map((update: { cell: string; value: string }) => 
+                `${update.cell} in sheet "${sheet.sheetName}" to "${update.value}"`
+              )
+            );
             
-            // Call the Excel API to perform the operation
-            const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': req.headers.get('Authorization') || '',
-              },
-              body: JSON.stringify(jsonData),
-            });
-            
-            const excelResult = await excelResponse.json();
-            
-            if (excelResponse.ok) {
-              excelOperationResult = excelResult;
+            const cellUpdateText = cellUpdates.length > 1 
+              ? `updated ${cellUpdates.length} cells` 
+              : `updated ${cellUpdates[0]}`;
               
-              // Replace the JSON block with a success message
-              let successMessage = '';
-              
-              if (jsonData.excel_operation === 'create') {
-                successMessage = `I've created a new Excel file named "${jsonData.fileName}" for you. ${excelResult.url ? 'You can download it using the link below.' : ''}`;
-              } else if (jsonData.excel_operation === 'edit') {
-                // Create a more detailed message for edit operations
-                const cellUpdates = jsonData.data.flatMap((sheet: { sheetName: string; cellUpdates: Array<{ cell: string; value: string }> }) => 
-                  sheet.cellUpdates.map((update: { cell: string; value: string }) => 
-                    `${update.cell} in sheet "${sheet.sheetName}" to "${update.value}"`
-                  )
-                );
-                
-                const cellUpdateText = cellUpdates.length > 1 
-                  ? `updated ${cellUpdates.length} cells` 
-                  : `updated ${cellUpdates[0]}`;
-                  
-                successMessage = `I've ${cellUpdateText} in the Excel file "${excelResult.fileName || 'your document'}".`;
-              } else {
-                successMessage = `I've successfully performed the ${jsonData.excel_operation} operation on the Excel file.`;
-              }
-              
-              processedResponse = processedResponse.replace(match[0], successMessage);
-            } else {
-              // Replace the JSON block with an error message
-              let errorMessage = `I tried to ${jsonData.excel_operation} an Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`;
-              
-              // Add suggestions if available documents were returned
-              if (excelResult.availableDocuments && excelResult.availableDocuments.length > 0) {
-                errorMessage += '\n\nHere are some available documents you can use instead:\n';
-                excelResult.availableDocuments.forEach((doc: { name: string; id: string }) => {
-                  errorMessage += `- "${doc.name}" (ID: ${doc.id})\n`;
-                });
-                errorMessage += '\nPlease try again with one of these document IDs.';
-              }
-              
-              processedResponse = processedResponse.replace(match[0], errorMessage);
-            }
-            
-            // Only process the first valid Excel operation
-            break;
+            successMessage = `I've ${cellUpdateText} in the Excel file "${excelResult.fileName || 'your document'}".`;
+          } else {
+            successMessage = `I've successfully performed the ${parsedJson.operation} operation on the Excel file.`;
           }
-        } catch (error) {
-          console.error('Error processing JSON in AI response:', error);
-          // Continue to the next JSON block if there's an error
+          
+          processedResponse = processedResponse.replace(detectedJson, successMessage);
+        } else {
+          // Replace the JSON block with an error message
+          let errorMessage = `I tried to ${parsedJson.operation} an Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`;
+          
+          // Add suggestions if available documents were returned
+          if (excelResult.availableDocuments && excelResult.availableDocuments.length > 0) {
+            errorMessage += '\n\nHere are some available documents you can use instead:\n';
+            excelResult.availableDocuments.forEach((doc: { name: string; id: string }) => {
+              errorMessage += `- "${doc.name}" (ID: ${doc.id})\n`;
+            });
+            errorMessage += '\nPlease try again with one of these document IDs.';
+          }
+          
+          processedResponse = processedResponse.replace(detectedJson, errorMessage);
         }
+      } catch (error) {
+        console.error('Error processing JSON in AI response:', error);
       }
     }
     
