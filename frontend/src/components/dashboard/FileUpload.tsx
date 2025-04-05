@@ -137,8 +137,12 @@ export function FileUpload({
     console.log(`Finished processing all ${filesToProcess.length} files sequentially. All succeeded: ${allSucceeded}`);
 
     if (allSucceeded && onUploadComplete) {
-      console.log('Calling onUploadComplete callback.');
-      onUploadComplete();
+      console.log('Introducing delay before refreshing documents...');
+      // Add timeout to allow the Cloud Function to complete processing
+      setTimeout(() => {
+        console.log('Calling onUploadComplete callback after delay.');
+        onUploadComplete();
+      }, 3000);  // 3-second delay
     }
 
   }, [user, onUploadComplete]); 
