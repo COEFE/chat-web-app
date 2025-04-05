@@ -50,7 +50,8 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
   const imageContainerRef = useRef<HTMLDivElement>(null);
-  // No need for hotTableRef with simpler configuration
+  // Reference to the Handsontable container div
+  const hotContainerRef = useRef<HTMLDivElement>(null);
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -150,7 +151,45 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     fetchDocumentContent();
   }, [document]); // Re-run when the document prop changes
 
-  // No need for re-render effect with simpler configuration
+  // Effect to handle container resizing and force Handsontable to recalculate dimensions
+  useEffect(() => {
+    // Only run if we have workbook data and an active sheet
+    if (workbookData && activeSheetName) {
+      // Function to update container width explicitly
+      const updateContainerWidth = () => {
+        if (hotContainerRef.current) {
+          // Force the container to take full width of its parent
+          hotContainerRef.current.style.width = '100%';
+          hotContainerRef.current.style.height = '100%';
+          hotContainerRef.current.style.overflow = 'hidden';
+          
+          // Dispatch a resize event to force Handsontable to recalculate
+          window.dispatchEvent(new Event('resize'));
+        }
+      };
+      
+      // Call immediately
+      updateContainerWidth();
+      
+      // Set up a short delay to ensure DOM is fully rendered
+      const timeoutId = setTimeout(updateContainerWidth, 100);
+      
+      // Set up resize observer to handle window resizing
+      const resizeObserver = new ResizeObserver(() => {
+        updateContainerWidth();
+      });
+      
+      if (hotContainerRef.current) {
+        resizeObserver.observe(hotContainerRef.current);
+      }
+      
+      // Clean up
+      return () => {
+        clearTimeout(timeoutId);
+        resizeObserver.disconnect();
+      };
+    }
+  }, [workbookData, activeSheetName]);
 
   // Define supported types for clarity
   const isPdf = document?.contentType === 'application/pdf';
@@ -209,18 +248,46 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               ))}
             </TabsList>
           </Tabs>
-          <div className="flex-1 overflow-auto border border-t-0 rounded-b-md relative">
-            {/* Simple Handsontable configuration based on official example */}
+          <div 
+            ref={hotContainerRef}
+            className="flex-1 overflow-hidden border border-t-0 rounded-b-md relative"
+            style={{ width: '100%', height: '100%', minHeight: '300px' }}
+          >
+            {/* Enhanced Handsontable configuration */}
             <HotTable
               data={workbookData.find(sheet => sheet.sheetName === activeSheetName)?.data || []}
               colHeaders={true}
               rowHeaders={true}
-              height="auto"
-              width="auto"
+              width="100%"
+              height="100%"
+              colWidths={100} // Set explicit column width
               stretchH="all" // Stretch columns to fit width
               autoColumnSize={false} // Disable auto sizing for better performance
+              manualColumnResize={true} // Allow manual column resizing
+              contextMenu={true} // Enable context menu
               licenseKey="non-commercial-and-evaluation"
+              afterGetColHeader={(col, TH) => {
+                // Ensure header cells have minimum width
+                if (TH) {
+                  TH.style.minWidth = '100px';
+                }
+              }}
             />
+            <style jsx global>{`
+              /* Ensure Handsontable takes full width/height of container */
+              .handsontable-container .handsontable {
+                width: 100% !important;
+                height: 100% !important;
+              }
+              /* Fix for header cells */
+              .handsontable th {
+                min-width: 100px;
+              }
+              /* Fix for data cells */
+              .handsontable td {
+                min-width: 100px;
+              }
+            `}</style>
           </div>
         </div>
       )}
