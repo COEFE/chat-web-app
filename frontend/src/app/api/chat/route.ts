@@ -611,107 +611,92 @@ User Question: ${message}`,
     // --- End AI Call ---
 
     // Process Excel operations in AI response if present
-    let processedResponse = aiResponseContent;
+    let finalResponseContent = aiResponseContent;
     let excelOperationResult: any = null;
     
     console.log('Attempting to detect JSON in AI response content:');
     console.log('--- START AI Response Content ---');
     console.log(aiResponseContent);
     console.log('--- END AI Response Content ---');
-    
-    // Check for JSON in the response (multiple patterns)
-    const jsonRegexPatterns = [
-      /```json\s*([\s\S]*?)\s*```/,           // Code block format: ```json ... ```
-      /{\s*"excel_operation":[\s\S]*}/,       // Raw JSON format starting with "excel_operation"
-      /{\s*"operation":[\s\S]*}/,             // Raw JSON format starting with "operation"
-      /"operation":\s*"(create|edit)"/,       // Specific operation format
-      /^\s*{[\s\S]*}\s*$/                    // General JSON object structure (fallback)
-    ];
-    
-    let detectedJson = null;
-    
-    for (const regex of jsonRegexPatterns) {
-      const match = aiResponseContent.match(regex);
-      if (match) {
-        // If matched code block, extract content inside
-        console.log('Detected JSON in AI response using pattern:', regex.toString());
-        detectedJson = match[1] ? match[1].trim() : match[0].trim(); 
-        console.log('Detected JSON string:', detectedJson);
-        break; // Stop after first match
-      }
-    }
-    
-    if (detectedJson) {
+ 
+    // Improved Regex to find JSON object possibly embedded in text
+    // It looks for '{' potentially preceded by whitespace/newline, 
+    // captures everything until the matching '}', handling nested objects.
+    const jsonExtractRegex = /(?:\s|^)(\{["\w\s:,\{}\[\]\-()]*\})(?:\s|$)/;
+    const match = aiResponseContent.match(jsonExtractRegex);
+
+    if (match && match[1]) {
+      const detectedJson = match[1].trim();
+      console.log('Extracted potential JSON string:', detectedJson);
+      
       // Try to parse the detected JSON
       // Normalize the operation key before processing
-      detectedJson = detectedJson.replace(/"excel_operation":/, '"operation":');
-      try {
-        const parsedJson = JSON.parse(detectedJson);
-        console.log('Successfully parsed JSON:', parsedJson);
+      const parsedJson = JSON.parse(detectedJson.replace(/"excel_operation":/, '"operation":'));
+      console.log('Successfully parsed JSON:', parsedJson);
+      
+      // Call the Excel API to perform the operation
+      const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': req.headers.get('Authorization') || '',
+        },
+        body: JSON.stringify(parsedJson),
+      });
+      
+      const excelResult = await excelResponse.json();
+      
+      if (excelResponse.ok) {
+        excelOperationResult = excelResult;
         
-        // Call the Excel API to perform the operation
-        const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': req.headers.get('Authorization') || '',
-          },
-          body: JSON.stringify(parsedJson),
-        });
+        // Replace the JSON block with a success message
+        let successMessage = '';
         
-        const excelResult = await excelResponse.json();
-        
-        if (excelResponse.ok) {
-          excelOperationResult = excelResult;
+        if (parsedJson.operation === 'create') {
+          successMessage = `I've created a new Excel file named "${parsedJson.fileName}" for you. ${excelResult.url ? 'You can download it using the link below.' : ''}`;
+        } else if (parsedJson.operation === 'edit') {
+          // Create a more detailed message for edit operations
+          const cellUpdates = parsedJson.data.flatMap((sheet: { sheetName: string; cellUpdates: Array<{ cell: string; value: string }> }) => 
+            sheet.cellUpdates.map((update: { cell: string; value: string }) => 
+              `${update.cell} in sheet "${sheet.sheetName}" to "${update.value}"`
+            )
+          );
           
-          // Replace the JSON block with a success message
-          let successMessage = '';
-          
-          if (parsedJson.operation === 'create') {
-            successMessage = `I've created a new Excel file named "${parsedJson.fileName}" for you. ${excelResult.url ? 'You can download it using the link below.' : ''}`;
-          } else if (parsedJson.operation === 'edit') {
-            // Create a more detailed message for edit operations
-            const cellUpdates = parsedJson.data.flatMap((sheet: { sheetName: string; cellUpdates: Array<{ cell: string; value: string }> }) => 
-              sheet.cellUpdates.map((update: { cell: string; value: string }) => 
-                `${update.cell} in sheet "${sheet.sheetName}" to "${update.value}"`
-              )
-            );
+          const cellUpdateText = cellUpdates.length > 1 
+            ? `updated ${cellUpdates.length} cells` 
+            : `updated ${cellUpdates[0]}`;
             
-            const cellUpdateText = cellUpdates.length > 1 
-              ? `updated ${cellUpdates.length} cells` 
-              : `updated ${cellUpdates[0]}`;
-              
-            successMessage = `I've ${cellUpdateText} in the Excel file "${excelResult.fileName || 'your document'}".`;
-          } else {
-            successMessage = `I've successfully performed the ${parsedJson.operation} operation on the Excel file.`;
-          }
-          
-          processedResponse = processedResponse.replace(detectedJson, successMessage);
+          successMessage = `I've ${cellUpdateText} in the Excel file "${excelResult.fileName || 'your document'}".`;
         } else {
-          // Replace the JSON block with an error message
-          let errorMessage = `I tried to ${parsedJson.operation} an Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`;
-          
-          // Add suggestions if available documents were returned
-          if (excelResult.availableDocuments && excelResult.availableDocuments.length > 0) {
-            errorMessage += '\n\nHere are some available documents you can use instead:\n';
-            excelResult.availableDocuments.forEach((doc: { name: string; id: string }) => {
-              errorMessage += `- "${doc.name}" (ID: ${doc.id})\n`;
-            });
-            errorMessage += '\nPlease try again with one of these document IDs.';
-          }
-          
-          processedResponse = processedResponse.replace(detectedJson, errorMessage);
+          successMessage = `I've successfully performed the ${parsedJson.operation} operation on the Excel file.`;
         }
-      } catch (error) {
-        console.error('Error processing JSON in AI response:', error);
+        
+        finalResponseContent = aiResponseContent.replace(detectedJson, successMessage);
+      } else {
+        // Replace the JSON block with an error message
+        let errorMessage = `I tried to ${parsedJson.operation} an Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`;
+        
+        // Add suggestions if available documents were returned
+        if (excelResult.availableDocuments && excelResult.availableDocuments.length > 0) {
+          errorMessage += '\n\nHere are some available documents you can use instead:\n';
+          excelResult.availableDocuments.forEach((doc: { name: string; id: string }) => {
+            errorMessage += `- "${doc.name}" (ID: ${doc.id})\n`;
+          });
+          errorMessage += '\nPlease try again with one of these document IDs.';
+        }
+        
+        finalResponseContent = aiResponseContent.replace(detectedJson, errorMessage);
       }
+    } else {
+      console.log('No JSON object found in AI response content using extraction regex.');
     }
     
-    return NextResponse.json({ 
+    // Return the final response
+    return NextResponse.json({
       response: {
         id: `ai-${Date.now()}`,
         role: 'ai',
-        content: processedResponse,
+        content: finalResponseContent,
         excelOperation: excelOperationResult,
       }
     }, { status: 200 });
