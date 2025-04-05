@@ -155,12 +155,37 @@ export async function POST(req: NextRequest) {
         }, { status: 400 });
       }
 
-      // Get the document from Firestore
-      const docRef = adminDb.collection('users').doc(userId).collection('documents').doc(documentId);
-      const docSnap = await docRef.get();
+      // Try to get the document from Firestore using the provided ID
+      let docRef = adminDb.collection('users').doc(userId).collection('documents').doc(documentId);
+      let docSnap = await docRef.get();
       
+      // If document not found by ID, try to find it by name
       if (!docSnap.exists) {
-        return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+        console.log(`Document with ID ${documentId} not found, trying to find by name`);
+        
+        // Query documents by name
+        const documentsRef = adminDb.collection('users').doc(userId).collection('documents');
+        const nameQuery = await documentsRef.where('name', '==', documentId).get();
+        
+        if (nameQuery.empty) {
+          // Get a list of available documents to provide helpful guidance
+          const allDocsQuery = await documentsRef.limit(5).get();
+          const availableDocs = allDocsQuery.docs.map(doc => ({
+            id: doc.id,
+            name: doc.data().name
+          }));
+          
+          return NextResponse.json({ 
+            error: 'Document not found', 
+            details: `No document found with the provided ID or name: "${documentId}". Please use a valid document ID, not the document name.`,
+            availableDocuments: availableDocs.length > 0 ? availableDocs : undefined
+          }, { status: 404 });
+        }
+        
+        // Use the first document that matches the name
+        docSnap = nameQuery.docs[0];
+        docRef = docSnap.ref;
+        console.log(`Found document by name: ${docSnap.id}`);
       }
       
       const docData = docSnap.data();

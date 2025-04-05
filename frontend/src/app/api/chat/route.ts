@@ -305,6 +305,8 @@ To edit an existing Excel file, include the following JSON in your response:
 }
 \`\`\`
 
+IMPORTANT: For the "documentId" field when editing a file, you MUST use the actual document ID, not the file name. The document ID is a unique identifier that looks like "abc123xyz". If the user refers to a document by name, you should explain that you need the document ID to make edits. The user can find the document ID in the URL when viewing the document or in the document list.
+
 User Question: ${message}`,
           },
         ],
