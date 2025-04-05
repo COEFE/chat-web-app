@@ -1,22 +1,177 @@
 import { NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
+import * as XLSX from 'xlsx';
+import admin from 'firebase-admin';
+import { getStorage } from 'firebase-admin/storage';
+import { getFirestore } from 'firebase-admin/firestore';
 
-// --- Dummy Helper Functions (Firebase/XLSX commented out) ---
-async function createExcelFile(db: any, storage: any, bucket: any, userId: string, documentId: string, data: any[]) {
-    console.log("createExcelFile called (Firebase/XLSX commented out)");
-    // Actual implementation would use db, storage, bucket, XLSX
-    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate async work
-    return { success: true, message: "Dummy: File creation skipped", documentId: documentId || `new-${uuidv4()}` };
+// Initialize Firebase Admin if not already initialized
+let firebaseApp: admin.app.App;
+try {
+  firebaseApp = admin.app();
+} catch (error) {
+  // Initialize the app if it doesn't exist
+  const serviceAccount = process.env.FIREBASE_ADMIN_SDK_CREDENTIALS
+    ? JSON.parse(process.env.FIREBASE_ADMIN_SDK_CREDENTIALS)
+    : undefined;
+
+  if (!serviceAccount) {
+    console.error('Firebase Admin SDK credentials not found in environment variables');
+  }
+
+  firebaseApp = admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+  });
 }
 
-async function editExcelFile(db: any, storage: any, bucket: any, userId: string, documentId: string, data: any[]) {
-    console.log("editExcelFile called (Firebase/XLSX commented out)");
-    // Actual implementation would use db, storage, bucket, XLSX
-    if (!documentId) {
-      return { success: false, message: "Dummy: Document ID required for edit" };
+// Get Firestore and Storage instances
+const db = getFirestore(firebaseApp);
+const storage = getStorage(firebaseApp);
+const bucket = storage.bucket();
+
+/**
+ * Creates a new Excel file based on the provided data
+ */
+async function createExcelFile(db: any, storage: any, bucket: any, userId: string, documentId: string, data: any[]) {
+    console.log("Creating Excel file for user:", userId);
+    
+    try {
+        // Create a new workbook
+        const workbook = XLSX.utils.book_new();
+        
+        // Process each sheet in the data array
+        for (const sheetData of data) {
+            const { sheetName = 'Sheet1', rows = [] } = sheetData;
+            
+            // Convert rows to worksheet
+            const worksheet = XLSX.utils.aoa_to_sheet(rows);
+            
+            // Add worksheet to workbook
+            XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+        }
+        
+        // Convert workbook to buffer
+        const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        
+        // Generate a unique filename
+        const filename = `${documentId || uuidv4()}.xlsx`;
+        const storagePath = `users/${userId}/${filename}`;
+        
+        // Upload to Firebase Storage
+        const file = bucket.file(storagePath);
+        await file.save(excelBuffer, {
+            metadata: {
+                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            }
+        });
+        
+        // Create document reference in Firestore
+        const docRef = db.collection('documents').doc(documentId || uuidv4());
+        await docRef.set({
+            name: filename,
+            uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
+            contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            storagePath,
+            status: 'processed',
+            userId,
+            size: excelBuffer.length,
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        return { 
+            success: true, 
+            message: "Excel file created successfully", 
+            documentId: docRef.id 
+        };
+    } catch (error: any) {
+        console.error("Error creating Excel file:", error);
+        return { 
+            success: false, 
+            message: `Error creating Excel file: ${error.message}` 
+        };
     }
-    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate async work
-    return { success: true, message: "Dummy: File edit skipped", documentId };
+}
+
+/**
+ * Edits an existing Excel file with the provided updates
+ */
+async function editExcelFile(db: any, storage: any, bucket: any, userId: string, documentId: string, data: any[]) {
+    console.log("Editing Excel file for user:", userId, "document:", documentId);
+    
+    if (!documentId) {
+        return { success: false, message: "Document ID required for edit" };
+    }
+    
+    try {
+        // Get document reference from Firestore
+        const docRef = db.collection('documents').doc(documentId);
+        const docSnapshot = await docRef.get();
+        
+        if (!docSnapshot.exists) {
+            return { success: false, message: "Document not found" };
+        }
+        
+        const docData = docSnapshot.data();
+        
+        // Verify user has access to this document
+        if (docData.userId !== userId) {
+            return { success: false, message: "Unauthorized access to document" };
+        }
+        
+        // Download the existing file from storage
+        const file = bucket.file(docData.storagePath);
+        const [fileBuffer] = await file.download();
+        
+        // Load the workbook
+        const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+        
+        // Process each sheet update in the data array
+        for (const sheetData of data) {
+            const { sheetName, cellUpdates = [] } = sheetData;
+            
+            // Get the worksheet, create if it doesn't exist
+            let worksheet = workbook.Sheets[sheetName];
+            if (!worksheet) {
+                worksheet = XLSX.utils.aoa_to_sheet([]);
+                XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+            }
+            
+            // Apply cell updates
+            for (const update of cellUpdates) {
+                const { cell, value } = update;
+                XLSX.utils.sheet_add_aoa(worksheet, [[value]], { origin: cell });
+            }
+        }
+        
+        // Convert workbook to buffer
+        const updatedBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        
+        // Upload updated file back to storage
+        await file.save(updatedBuffer, {
+            metadata: {
+                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            }
+        });
+        
+        // Update document metadata if needed
+        await docRef.update({
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            size: updatedBuffer.length
+        });
+        
+        return { 
+            success: true, 
+            message: "Excel file updated successfully", 
+            documentId 
+        };
+    } catch (error: any) {
+        console.error("Error editing Excel file:", error);
+        return { 
+            success: false, 
+            message: `Error editing Excel file: ${error.message}` 
+        };
+    }
 }
 
 // --- Exported Function for Excel Operations ---
@@ -29,9 +184,8 @@ export async function processExcelOperation(
   console.log('--- ENTERING processExcelOperation ---');
   console.log('Arguments:', { operation, documentId, data: data ? 'Present' : 'Absent', userId });
 
-  // Skip Firebase instance retrieval (still commented out)
-  console.log("--- Skipping Firebase Instance Retrieval (Firebase commented out) ---");
-  // let db = null, storage = null, bucket = null; // Dummy vars if needed below
+  // Firebase instances are already initialized at the top of the file
+  console.log("--- Using Firebase and XLSX for Excel operations ---");
 
   if (!operation || !data || (operation === 'edit' && !documentId)) {
     console.log('--- ERROR: Missing required fields (operation, data, or documentId for edit) ---');
@@ -45,18 +199,18 @@ export async function processExcelOperation(
 
     if (operation === 'create') {
       console.log(`Processing CREATE operation for user ${userId}, potential docId based on data?`);
-      // Pass null for db, storage, bucket for now
-      result = await createExcelFile(null, null, null, userId, effectiveDocumentId, data);
+      // Pass the actual Firebase instances
+      result = await createExcelFile(db, storage, bucket, userId, effectiveDocumentId, data);
     } else if (operation === 'edit') {
       console.log(`Processing EDIT operation for user ${userId}, document ${effectiveDocumentId}`);
-       // Pass null for db, storage, bucket for now
-      result = await editExcelFile(null, null, null, userId, effectiveDocumentId, data);
+      // Pass the actual Firebase instances
+      result = await editExcelFile(db, storage, bucket, userId, effectiveDocumentId, data);
     } else {
       console.log(`--- ERROR: Invalid operation type: ${operation} ---`);
       return NextResponse.json({ success: false, message: 'Invalid operation type' }, { status: 400 });
     }
 
-    console.log("Operation Result (Firebase/XLSX commented out):", result);
+    console.log("Operation Result:", result);
     // Ensure result has a success flag for consistent handling
     if (result && typeof result.success === 'boolean') {
         return NextResponse.json(result);
