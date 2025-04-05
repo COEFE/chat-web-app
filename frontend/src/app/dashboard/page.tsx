@@ -320,9 +320,25 @@ export default function DashboardPage() {
   return (
     <div className="flex h-screen flex-col bg-muted/40">
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-4">
-        <h1 className="text-2xl font-semibold">My Documents Dashboard</h1>
+        <h1 className="text-xl font-semibold whitespace-nowrap">My Documents</h1>
+        {documents.length > 0 && (
+          <div className="ml-4 w-full max-w-xs"> 
+            <Select onValueChange={handleDocumentSelectChange} value={selectedDocumentId ?? undefined}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a document..." />
+              </SelectTrigger>
+              <SelectContent>
+                {documents.map((doc) => (
+                  <SelectItem key={doc.id} value={doc.id}>
+                    {doc.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div className="ml-auto flex items-center gap-4">
-          {user && <span className="text-sm text-muted-foreground">Welcome, {user.displayName || user.email}</span>}
+          {user && <span className="text-sm text-muted-foreground whitespace-nowrap">Welcome, {user.displayName || user.email}</span>}
           <Button variant="outline" size="sm" onClick={logout}>Logout</Button>
         </div>
       </header>
@@ -336,20 +352,12 @@ export default function DashboardPage() {
             <div className="flex h-full flex-col p-6 overflow-auto">
               {selectedDocument ? (
                 <div className="flex h-full flex-col">
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-xl font-semibold">Viewing: {selectedDocument.name}</h2>
-                    <Button variant="outline" size="sm" onClick={() => handleSelectDocument(null)}>
-                      Back to List
-                    </Button>
-                  </div>
                   <div className="flex-1 overflow-hidden">
-                    {/* Explicit check to ensure selectedDocument is not null */}
                     {selectedDocument && <DocumentViewer document={selectedDocument} />}
                   </div>
                 </div>
               ) : (
                 <>
-                  <h1 className="text-2xl font-semibold mb-4">My Documents</h1>
                   <Card className="mb-6">
                     <CardHeader>
                       <CardTitle>Upload New Document</CardTitle>
@@ -367,29 +375,8 @@ export default function DashboardPage() {
                     error={errorDocs}
                     onSelectDocument={(doc: MyDocumentData | null) => handleSelectDocument(doc)}
                   />
-                  {documents.length > 0 ? (
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Select Document</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {/* Use the new handler here */}
-                        <Select onValueChange={handleDocumentSelectChange} value={selectedDocumentId ?? undefined}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Select a document to chat with..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {documents.map((doc) => (
-                              <SelectItem key={doc.id} value={doc.id}>
-                                {doc.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </CardContent>
-                    </Card>
-                  ) : (
-                    <p>No documents uploaded yet. Upload a file to start chatting.</p>
+                  {documents.length === 0 && (
+                    <p className="mt-4 text-center text-muted-foreground">No documents uploaded yet. Upload a file to start chatting.</p>
                   )}
                 </>
               )}
