@@ -629,68 +629,76 @@ User Question: ${message}`,
       const detectedJson = match[1].trim();
       console.log('Extracted potential JSON string:', detectedJson);
       
-      // Try to parse the detected JSON
-      // Normalize the operation key before processing
-      const parsedJson = JSON.parse(detectedJson.replace(/"excel_operation":/, '"operation":'));
-      console.log('Successfully parsed JSON:', parsedJson);
-      
-      // Call the Excel API to perform the operation
-      const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': req.headers.get('Authorization') || '',
-        },
-        body: JSON.stringify(parsedJson),
-      });
-      
-      const excelResult = await excelResponse.json();
-      
-      if (excelResponse.ok) {
-        excelOperationResult = excelResult;
+      try {
+        // Normalize the operation key before processing
+        const normalizedJsonString = detectedJson.replace(/"excel_operation":/, '"operation":');
+        const parsedJson = JSON.parse(normalizedJsonString);
+        console.log('Successfully parsed JSON:', parsedJson);
         
-        // Replace the JSON block with a success message
-        let successMessage = '';
+        // Call the Excel API to perform the operation
+        const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': req.headers.get('Authorization') || '',
+          },
+          body: JSON.stringify(parsedJson),
+        });
         
-        if (parsedJson.operation === 'create') {
-          successMessage = `I've created a new Excel file named "${parsedJson.fileName}" for you. ${excelResult.url ? 'You can download it using the link below.' : ''}`;
-        } else if (parsedJson.operation === 'edit') {
-          // Create a more detailed message for edit operations
-          const cellUpdates = parsedJson.data.flatMap((sheet: { sheetName: string; cellUpdates: Array<{ cell: string; value: string }> }) => 
-            sheet.cellUpdates.map((update: { cell: string; value: string }) => 
-              `${update.cell} in sheet "${sheet.sheetName}" to "${update.value}"`
-            )
-          );
+        const excelResult = await excelResponse.json();
+        
+        if (excelResponse.ok) {
+          excelOperationResult = excelResult;
           
-          const cellUpdateText = cellUpdates.length > 1 
-            ? `updated ${cellUpdates.length} cells` 
-            : `updated ${cellUpdates[0]}`;
+          // Replace the JSON block with a success message
+          let successMessage = '';
+          
+          if (parsedJson.operation === 'create') {
+            successMessage = `I've created a new Excel file named "${parsedJson.fileName}" for you. ${excelResult.url ? 'You can download it using the link below.' : ''}`;
+          } else if (parsedJson.operation === 'edit') {
+            // Create a more detailed message for edit operations
+            const cellUpdates = parsedJson.data.flatMap((sheet: { sheetName: string; cellUpdates: Array<{ cell: string; value: string }> }) => 
+              sheet.cellUpdates.map((update: { cell: string; value: string }) => 
+                `${update.cell} in sheet "${sheet.sheetName}" to "${update.value}"`
+              )
+            );
             
-          successMessage = `I've ${cellUpdateText} in the Excel file "${excelResult.fileName || 'your document'}".`;
+            const cellUpdateText = cellUpdates.length > 1 
+              ? `updated ${cellUpdates.length} cells` 
+              : `updated ${cellUpdates[0]}`;
+              
+            successMessage = `I've ${cellUpdateText} in the Excel file "${excelResult.fileName || 'your document'}".`;
+          } else {
+            successMessage = `I've successfully performed the ${parsedJson.operation} operation on the Excel file.`;
+          }
+          
+          finalResponseContent = aiResponseContent.replace(detectedJson, successMessage);
         } else {
-          successMessage = `I've successfully performed the ${parsedJson.operation} operation on the Excel file.`;
+          // Replace the JSON block with an error message
+          let errorMessage = `I tried to ${parsedJson.operation} an Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`;
+          
+          // Add suggestions if available documents were returned
+          if (excelResult.availableDocuments && excelResult.availableDocuments.length > 0) {
+            errorMessage += '\n\nHere are some available documents you can use instead:\n';
+            excelResult.availableDocuments.forEach((doc: { name: string; id: string }) => {
+              errorMessage += `- "${doc.name}" (ID: ${doc.id})\n`;
+            });
+            errorMessage += '\nPlease try again with one of these document IDs.';
+          }
+          
+          finalResponseContent = aiResponseContent.replace(detectedJson, errorMessage);
         }
-        
-        finalResponseContent = aiResponseContent.replace(detectedJson, successMessage);
-      } else {
-        // Replace the JSON block with an error message
-        let errorMessage = `I tried to ${parsedJson.operation} an Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`;
-        
-        // Add suggestions if available documents were returned
-        if (excelResult.availableDocuments && excelResult.availableDocuments.length > 0) {
-          errorMessage += '\n\nHere are some available documents you can use instead:\n';
-          excelResult.availableDocuments.forEach((doc: { name: string; id: string }) => {
-            errorMessage += `- "${doc.name}" (ID: ${doc.id})\n`;
-          });
-          errorMessage += '\nPlease try again with one of these document IDs.';
-        }
-        
-        finalResponseContent = aiResponseContent.replace(detectedJson, errorMessage);
+      } catch (error) {
+        console.error('Error processing JSON in AI response:', error);
+        // If parsing/processing fails, keep the original AI response content
+        finalResponseContent = aiResponseContent; 
       }
     } else {
       console.log('No JSON object found in AI response content using extraction regex.');
+      // Ensure finalResponseContent is the original if no JSON is found
+      finalResponseContent = aiResponseContent;
     }
-    
+ 
     // Return the final response
     return NextResponse.json({
       response: {
