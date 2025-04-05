@@ -36,6 +36,146 @@ function extractSheetName(message: string): string | null {
   return null;
 }
 
+// Helper function to handle Excel operations directly
+async function handleExcelOperation(req: NextRequest, userId: string, message: string, currentDocument: any) {
+  console.log('Handling Excel operation directly for document:', currentDocument?.id);
+  
+  // Extract the cell and value from the message using multiple regex patterns
+  const patterns = [
+    // Standard pattern: cell A1 to "value"
+    /(?:cell\s+)?([A-Z]+\d+)\s+(?:to|with|as|=|:)\s+["']?([^"']+)["']?/i,
+    
+    // Put "value" in cell A1
+    /(?:put|add|set)\s+["']?([^"']+)["']?\s+(?:in|into|to)\s+(?:cell\s+)?([A-Z]+\d+)/i,
+    
+    // Change A1 to "value"
+    /(?:change|update|edit)\s+(?:cell\s+)?([A-Z]+\d+)\s+(?:to|with|as|=|:)\s+["']?([^"']+)["']?/i,
+    
+    // Add "value" to A1
+    /(?:add|put)\s+["']?([^"']+)["']?\s+(?:in|into|to)\s+([A-Z]+\d+)/i
+  ];
+  
+  let cell = '';
+  let value = '';
+  let match = null;
+  
+  // Try each pattern until we find a match
+  for (const pattern of patterns) {
+    match = message.match(pattern);
+    if (match) {
+      // For patterns where cell is first capture group
+      if (pattern.toString().includes('([A-Z]+\\d+)\\s+(?:to|with|as|=|:)')) {
+        cell = match[1];
+        value = match[2];
+      } else {
+        // For patterns where value is first capture group
+        value = match[1];
+        cell = match[2];
+      }
+      break;
+    }
+  }
+  
+  if (match && cell && value) {
+    console.log(`Detected cell ${cell} and value ${value}`);
+    
+    // Helper function to extract sheet name from a message
+    function extractSheetName(message: string): string | null {
+      // Try to find sheet name in various formats
+      const patterns = [
+        /in\s+(?:sheet|tab)\s+["']?([^"']+)["']?/i,
+        /on\s+(?:sheet|tab)\s+["']?([^"']+)["']?/i,
+        /sheet\s+["']?([^"']+)["']?/i,
+        /tab\s+["']?([^"']+)["']?/i
+      ];
+      
+      for (const pattern of patterns) {
+        const match = message.match(pattern);
+        if (match && match[1]) {
+          return match[1].trim();
+        }
+      }
+      
+      return null;
+    }
+    
+    // Create the Excel operation JSON
+    const excelOperation = {
+      operation: "edit", // This needs to match the parameter name in the Excel API
+      documentId: currentDocument.id,
+      data: [
+        {
+          // Try to extract sheet name from message, default to Sheet1
+          sheetName: extractSheetName(message) || "Sheet1",
+          cellUpdates: [
+            {cell, value}
+          ]
+        }
+      ]
+    };
+    
+    // Log the Excel operation being sent
+    console.log('Sending Excel operation to API:', JSON.stringify(excelOperation));
+    
+    try {
+      // Call the Excel API to perform the operation
+      const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': req.headers.get('Authorization') || '',
+        },
+        body: JSON.stringify(excelOperation),
+      });
+      
+      const excelResult = await excelResponse.json();
+      console.log('Excel API response status:', excelResponse.status);
+      console.log('Excel API response result:', excelResult);
+      
+      if (excelResponse.ok) {
+        // Create a success message
+        const successMessage = `I've updated ${cell} to "${value}" in your Excel file "${currentDocument.name}".`;
+        
+        // Return the success response
+        return { 
+          success: true,
+          response: {
+            id: `ai-${Date.now()}`,
+            role: 'ai',
+            content: successMessage,
+            excelOperation: excelResult,
+          }
+        };
+      } else {
+        // Create an error message
+        const errorMessage = `I tried to update ${cell} to "${value}" in your Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`;
+        
+        // Return the error response
+        return { 
+          success: false,
+          response: {
+            id: `ai-${Date.now()}`,
+            role: 'ai',
+            content: errorMessage,
+          }
+        };
+      }
+    } catch (error) {
+      console.error('Error calling Excel API:', error);
+      return {
+        success: false,
+        response: {
+          id: `ai-${Date.now()}`,
+          role: 'ai',
+          content: `I tried to update ${cell} to "${value}" in your Excel file, but encountered a system error. Please try again later.`,
+        }
+      };
+    }
+  }
+  
+  return { success: false };
+}
+
 export async function POST(req: NextRequest) {
   console.log('Received request at /api/chat');
   try {
@@ -268,37 +408,6 @@ export async function POST(req: NextRequest) {
     // --- Call AI API ---
     let aiResponseContent = 'Sorry, I could not get a response from the AI.'; // Default error message
     try {
-      // Log the API key status (without revealing the key)
-      console.log(`ANTHROPIC_API_KEY is ${process.env.ANTHROPIC_API_KEY ? 'set' : 'NOT SET'}`); 
-      
-      const anthropic = new Anthropic({
-        apiKey: process.env.ANTHROPIC_API_KEY, // Ensure this is set in .env.local
-      });
-
-      if (!process.env.ANTHROPIC_API_KEY) {
-        throw new Error("ANTHROPIC_API_KEY environment variable is not set.");
-      }
-
-      console.log(`Calling Anthropic Claude 3.5 Sonnet with content length: ${documentContent.length}`);
-
-      // Prepare context about the current document for Claude
-      let currentDocumentContext = '';
-      if (currentDocument && currentDocument.id && [
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
-        'application/vnd.ms-excel', // .xls
-        'text/csv' // .csv
-      ].includes(currentDocument.contentType)) {
-        currentDocumentContext = `
-\nCURRENT EXCEL DOCUMENT INFORMATION:
-You are currently viewing an Excel document with the following details:
-- Document ID: ${currentDocument.id}
-- Document Name: ${currentDocument.name || 'Unnamed'}
-- Content Type: ${currentDocument.contentType}
-
-If the user asks you to edit this Excel file, you should automatically use this document ID in your response.
-`;
-      }
-
       // Check if the user's message is asking to edit the current Excel file
       const isEditExcelRequest = (
         (message.toLowerCase().includes('edit') || 
@@ -320,114 +429,64 @@ If the user asks you to edit this Excel file, you should automatically use this 
          ['.xlsx', '.xls', '.csv'].some(ext => currentDocument.name?.toLowerCase().endsWith(ext)))
       );
       
+      // If we're in a test environment or the API key is not set, return a test response
+      if (process.env.NODE_ENV === 'test' || !process.env.ANTHROPIC_API_KEY) {
+        console.log(`ANTHROPIC_API_KEY is ${process.env.ANTHROPIC_API_KEY ? 'set' : 'NOT SET'}`);
+        if (!process.env.ANTHROPIC_API_KEY) {
+          console.warn("ANTHROPIC_API_KEY environment variable is not set. Using fallback response.");
+          
+          // For Excel edit requests, try to handle directly
+          if (isEditExcelRequest && currentDocument && currentDocument.id) {
+            const result = await handleExcelOperation(req, userId, message, currentDocument);
+            if (result.success) {
+              return NextResponse.json(result.response, { status: 200 });
+            }
+          }
+          
+          // Return a fallback response
+          return NextResponse.json({ 
+            response: {
+              id: `ai-${Date.now()}`,
+              role: 'ai',
+              content: "I'm sorry, I'm currently unable to process your request due to a configuration issue. Please try again later or contact support.",
+            }
+          }, { status: 200 });
+        }
+      }
+      
+      const anthropic = new Anthropic({
+        apiKey: process.env.ANTHROPIC_API_KEY,
+        maxRetries: 3, // Add retries for transient errors
+      });
+
+      console.log(`Calling Anthropic Claude 3.5 Sonnet with content length: ${documentContent.length}`);
+
+      // Prepare context about the current document for Claude
+      let currentDocumentContext = '';
+      if (currentDocument && currentDocument.id && [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+        'application/vnd.ms-excel', // .xls
+        'text/csv' // .csv
+      ].includes(currentDocument.contentType)) {
+        currentDocumentContext = `
+\nCURRENT EXCEL DOCUMENT INFORMATION:
+You are currently viewing an Excel document with the following details:
+- Document ID: ${currentDocument.id}
+- Document Name: ${currentDocument.name || 'Unnamed'}
+- Content Type: ${currentDocument.contentType}
+
+If the user asks you to edit this Excel file, you should automatically use this document ID in your response.
+`;
+      }
+
       // If it's an edit request and we have a document ID, directly process it
       if (isEditExcelRequest && currentDocument && currentDocument.id) {
-        console.log('Detected Excel edit request for current document:', currentDocument.id);
-        console.log('Current document details:', {
-          id: currentDocument.id,
-          name: currentDocument.name,
-          contentType: currentDocument.contentType,
-          storagePath: currentDocument.storagePath
-        });
-        
-        // Extract the cell and value from the message using multiple regex patterns
-        const patterns = [
-          // Standard pattern: cell A1 to "value"
-          /(?:cell\s+)?([A-Z]+\d+)\s+(?:to|with|as|=|:)\s+["']?([^"']+)["']?/i,
-          
-          // Put "value" in cell A1
-          /(?:put|add|set)\s+["']?([^"']+)["']?\s+(?:in|into|to)\s+(?:cell\s+)?([A-Z]+\d+)/i,
-          
-          // Change A1 to "value"
-          /(?:change|update|edit)\s+(?:cell\s+)?([A-Z]+\d+)\s+(?:to|with|as|=|:)\s+["']?([^"']+)["']?/i,
-          
-          // Add "value" to A1
-          /(?:add|put)\s+["']?([^"']+)["']?\s+(?:in|into|to)\s+([A-Z]+\d+)/i
-        ];
-        
-        let cell = '';
-        let value = '';
-        let match = null;
-        
-        // Try each pattern until we find a match
-        for (const pattern of patterns) {
-          match = message.match(pattern);
-          if (match) {
-            // For patterns where cell is first capture group
-            if (pattern.toString().includes('([A-Z]+\\d+)\\s+(?:to|with|as|=|:)')) {
-              cell = match[1];
-              value = match[2];
-            } else {
-              // For patterns where value is first capture group
-              value = match[1];
-              cell = match[2];
-            }
-            break;
-          }
+        // Try to handle the Excel operation directly
+        const result = await handleExcelOperation(req, userId, message, currentDocument);
+        if (result.success) {
+          return NextResponse.json(result.response, { status: 200 });
         }
-        
-        if (match && cell && value) {
-          console.log(`Detected cell ${cell} and value ${value}`);
-          
-          // Create the Excel operation JSON
-          const excelOperation = {
-            operation: "edit", // This needs to match the parameter name in the Excel API
-            documentId: currentDocument.id,
-            data: [
-              {
-                // Try to extract sheet name from message, default to Sheet1
-                sheetName: extractSheetName(message) || "Sheet1",
-                cellUpdates: [
-                  {cell, value}
-                ]
-              }
-            ]
-          };
-          
-          // Log the Excel operation being sent
-          console.log('Sending Excel operation to API:', JSON.stringify(excelOperation));
-          
-          // Call the Excel API to perform the operation
-          const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': req.headers.get('Authorization') || '',
-            },
-            body: JSON.stringify(excelOperation),
-          });
-          
-          const excelResult = await excelResponse.json();
-          console.log('Excel API response status:', excelResponse.status);
-          console.log('Excel API response result:', excelResult);
-          
-          if (excelResponse.ok) {
-            // Create a success message
-            const successMessage = `I've updated ${cell} to "${value}" in your Excel file "${currentDocument.name}".`;
-            
-            // Return the success response
-            return NextResponse.json({ 
-              response: {
-                id: `ai-${Date.now()}`,
-                role: 'ai',
-                content: successMessage,
-                excelOperation: excelResult,
-              }
-            }, { status: 200 });
-          } else {
-            // Create an error message
-            const errorMessage = `I tried to update ${cell} to "${value}" in your Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`;
-            
-            // Return the error response
-            return NextResponse.json({ 
-              response: {
-                id: `ai-${Date.now()}`,
-                role: 'ai',
-                content: errorMessage,
-              }
-            }, { status: 200 });
-          }
-        }
+        // If direct handling failed, continue with Claude API
       }
       
       // If not a direct Excel edit request or we couldn't parse it, proceed with Claude
@@ -507,6 +566,36 @@ User Question: ${message}`,
         console.error(`- Error stack: ${aiError.stack}`);
       } else {
         console.error('- Unknown error type:', aiError);
+      }
+      
+      // Check again if this is an Excel edit request to handle as fallback
+      const isExcelEditRequest = (
+        (message.toLowerCase().includes('edit') || 
+         message.toLowerCase().includes('update') || 
+         message.toLowerCase().includes('change') || 
+         message.toLowerCase().includes('set') || 
+         message.toLowerCase().includes('put') || 
+         message.toLowerCase().includes('add')) && 
+        (message.toLowerCase().includes('excel') || 
+         message.toLowerCase().includes('spreadsheet') || 
+         message.toLowerCase().includes('sheet') || 
+         message.toLowerCase().includes('cell') || 
+         message.toLowerCase().includes('row') || 
+         message.toLowerCase().includes('column')) && 
+        currentDocument && 
+        (['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+          'application/vnd.ms-excel', // .xls
+          'text/csv'].includes(currentDocument.contentType) || 
+         ['.xlsx', '.xls', '.csv'].some(ext => currentDocument.name?.toLowerCase().endsWith(ext)))
+      );
+      
+      // For Excel edit requests, try to handle directly as a fallback
+      if (isExcelEditRequest && currentDocument && currentDocument.id) {
+        console.log('Anthropic API failed, trying direct Excel operation handling as fallback');
+        const result = await handleExcelOperation(req, userId, message, currentDocument);
+        if (result.success) {
+          return NextResponse.json(result.response, { status: 200 });
+        }
       }
       
       // Check for specific error types
