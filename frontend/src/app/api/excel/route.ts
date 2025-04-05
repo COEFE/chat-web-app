@@ -8,310 +8,144 @@ import * as XLSX from 'xlsx';
 import { v4 as uuidv4 } from 'uuid';
 
 // Initialize Firebase Admin SDK
-console.log("--- MODULE LOAD CHECKPOINT 3: Before Firebase Init ---"); 
+console.log("--- MODULE LOAD CHECKPOINT 3: Before Firebase Init (Commented Out) ---"); 
+/*
 try {
-  console.log('Initializing Firebase Admin SDK in excel API route (Module Level)'); // Modify log
+  console.log('Initializing Firebase Admin SDK in excel API route (Module Level)');
   const app = initializeFirebaseAdmin();
   console.log(`Firebase Admin SDK initialized successfully with app name: ${app.name} (Module Level)`);
 } catch (error) {
-  console.error('Failed to initialize Firebase Admin SDK in excel API route (Module Level):', error); // Modify log
+  console.error('Failed to initialize Firebase Admin SDK in excel API route (Module Level):', error);
 }
-console.log("--- MODULE LOAD CHECKPOINT 4: After Firebase Init ---"); 
+*/
+console.log("--- MODULE LOAD CHECKPOINT 4: After Firebase Init (Commented Out) ---"); 
 
 // Helper function to authenticate user from token
+/*
 async function authenticateUser(req: NextRequest) {
-  const authorization = req.headers.get('Authorization');
-  if (!authorization?.startsWith('Bearer ')) {
-    console.error('API /excel - Unauthorized: No Bearer token');
-    return { error: 'Unauthorized: Missing Bearer token', status: 401 };
+  console.log("Attempting authentication...");
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.log("Authentication failed: Missing or invalid Authorization header.");
+    return { user: null, error: NextResponse.json({ success: false, message: 'Unauthorized: Missing token' }, { status: 401 }) };
   }
+  const token = authHeader.split('Bearer ')[1];
 
-  const idToken = authorization.split('Bearer ')[1];
-  
   try {
-    // Ensure Firebase Admin is initialized before getting auth
-    try {
-      initializeFirebaseAdmin();
-    } catch (initError: any) {
-      console.error('Failed to initialize Firebase Admin in authenticateUser:', initError);
-      throw new Error(`Firebase initialization error: ${initError.message}`);
-    }
-    
-    const auth = getAdminAuth();
-    const decodedToken = await auth.verifyIdToken(idToken);
-    return { userId: decodedToken.uid };
+    const adminAuth = getAdminAuth(); // Assuming getAdminAuth is safe to call even if not fully initialized?
+    const decodedToken = await adminAuth.verifyIdToken(token);
+    console.log("Authentication successful for user:", decodedToken.uid);
+    return { user: decodedToken, error: null };
   } catch (error: any) {
-    console.error('API /excel - Unauthorized: Invalid token', error);
-    return { error: 'Unauthorized: Invalid token', details: error.message, status: 401 };
+    console.error("Authentication failed: Error verifying token:", error);
+    // Log specific error codes if available
+    if (error.code === 'auth/id-token-expired') {
+      return { user: null, error: NextResponse.json({ success: false, message: 'Unauthorized: Token expired' }, { status: 401 }) };
+    } else if (error.code === 'auth/argument-error') {
+        return { user: null, error: NextResponse.json({ success: false, message: 'Unauthorized: Invalid token format' }, { status: 401 }) };
+    } else {
+        return { user: null, error: NextResponse.json({ success: false, message: 'Unauthorized: Invalid token' }, { status: 401 }) };
+    }
   }
 }
+*/
 
-// POST endpoint for creating or editing Excel files
+// ... (rest of helper functions potentially using Firebase, keep them commented out for now if needed)
+
+async function createExcelFile(db: any, storage: any, bucket: any, userId: string, documentId: string, data: any[]) {
+    // Dummy implementation for now
+    console.log("createExcelFile called (Firebase commented out)");
+    return { success: true, message: "File creation skipped (Firebase disabled)" };
+}
+
+async function editExcelFile(db: any, storage: any, bucket: any, userId: string, documentId: string, data: any[]) {
+    // Dummy implementation for now
+    console.log("editExcelFile called (Firebase commented out)");
+    return { success: true, message: "File edit skipped (Firebase disabled)" };
+}
+
 export async function POST(req: NextRequest) {
-  console.log('--- ENTERING POST /api/excel ---');
-
-  // Authenticate the user
-  const auth = await authenticateUser(req);
-  if ('error' in auth) {
-    return NextResponse.json({ error: auth.error, details: auth.details }, { status: auth.status });
-  }
+  console.log('--- ENTERING POST /api/excel ---'); 
   
-  const userId = auth.userId;
-  console.log(`POST /api/excel - Authenticated user ID from token: ${userId}`);
+  // Temporarily skip authentication
+  console.log("--- Skipping Authentication (Firebase commented out) ---");
+  const userId = "test-user"; // Dummy user ID
+
+  // Skip Firebase instance retrieval
+  // let db, storage, bucket;
+  console.log("--- Skipping Firebase Instance Retrieval (Firebase commented out) ---");
+  /*
+  try {
+      db = getAdminDb();
+      storage = getAdminStorage();
+      bucket = storage.bucket(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET);
+      if (!process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) {
+          throw new Error("Firebase Storage bucket name not configured.");
+      }
+      console.log("Successfully retrieved Firebase DB/Storage instances and bucket.");
+  } catch (error: any) {
+      console.error('--- ERROR retrieving Firebase instances ---');
+      console.error('Error Details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name,
+          code: error.code
+      });
+      return NextResponse.json({ success: false, message: 'Server Configuration Error' }, { status: 500 });
+  }
+  */
+
+  let body;
+  try {
+    body = await req.json();
+    console.log("Request Body Parsed:", body); 
+  } catch (error: any) {
+    console.error('--- ERROR parsing request body ---');
+    console.error('Error Details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        code: error.code
+    });
+    return NextResponse.json({ success: false, message: 'Invalid request body' }, { status: 400 });
+  }
+
+  const { operation, documentId: reqDocumentId, data } = body;
+
+  if (!operation || !reqDocumentId || !data) {
+    console.log('--- ERROR: Missing required fields (operation, documentId, data) ---');
+    return NextResponse.json({ success: false, message: 'Missing required fields' }, { status: 400 });
+  }
+
+  // Use dummy documentId if needed for logic flow, actual operations are skipped
+  const effectiveDocumentId = reqDocumentId || "test-doc-id";
 
   try {
-    // Get Firebase Admin instances
-    const adminDb = getAdminDb();
-    const adminStorage = getAdminStorage();
-    const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
-    
-    if (!bucketName) {
-      throw new Error('NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET environment variable not set!');
-    }
-    
-    const bucket = adminStorage.bucket(`gs://${bucketName}`);
-    console.log('Successfully retrieved Firebase DB/Storage instances and bucket.');
-
-    // Parse the request body *after* confirming Firebase access
-    const body = await req.json();
-    const { operation, documentId, data, fileName } = body;
-
-    console.log('Request Body Parsed:', { operation, documentId: documentId ? 'Present' : 'Absent', data: data ? 'Present' : 'Absent', fileName });
-
-    if (!operation) {
-      console.error('Missing operation parameter in request body.');
-      return NextResponse.json({ error: 'Missing operation parameter' }, { status: 400 });
-    }
-
-    // Handle different operations
+    let result;
     if (operation === 'create') {
-      console.log('Processing CREATE operation...');
-      // Validate required parameters for create operation
-      if (!data || !fileName) {
-        return NextResponse.json({ 
-          error: 'Missing required parameters for create operation', 
-          details: 'Both data and fileName are required' 
-        }, { status: 400 });
-      }
-
-      // Create a new workbook
-      const workbook = XLSX.utils.book_new();
-      
-      // Process the data for each sheet
-      for (const sheet of data) {
-        const { sheetName, sheetData } = sheet;
-        
-        // Convert the data to a worksheet
-        const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
-        
-        // Add the worksheet to the workbook
-        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName || 'Sheet1');
-      }
-
-      // Generate a unique file name to avoid conflicts
-      const timestamp = Date.now();
-      const uniqueFileName = `${fileName}-${timestamp}.xlsx`;
-      const storagePath = `users/${userId}/${uniqueFileName}`;
-      
-      // Write the workbook to a buffer
-      const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-      
-      // Upload the file to Firebase Storage
-      const file = bucket.file(storagePath);
-      await file.save(excelBuffer, {
-        metadata: {
-          contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          metadata: {
-            userId,
-            originalName: fileName,
-            timestamp: timestamp.toString()
-          }
-        }
-      });
-
-      // Get the download URL
-      const [url] = await file.getSignedUrl({
-        action: 'read',
-        expires: '03-01-2500', // Far future expiration
-      });
-
-      // Create a document in Firestore
-      const docId = uuidv4();
-      const docRef = adminDb.collection('users').doc(userId).collection('documents').doc(docId);
-      
-      await docRef.set({
-        name: fileName,
-        storagePath,
-        url,
-        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        size: excelBuffer.length,
-      });
-
-      return NextResponse.json({ 
-        success: true, 
-        message: 'Excel file created successfully',
-        documentId: docId,
-        fileName: uniqueFileName,
-        url
-      });
-    } 
-    else if (operation === 'edit') {
-      console.log('Processing EDIT operation...');
-      // Validate required parameters for edit operation
-      if (!documentId || !data) {
-        return NextResponse.json({ 
-          error: 'Missing required parameters for edit operation', 
-          details: 'Both documentId and data are required' 
-        }, { status: 400 });
-      }
-
-      // Try to get the document from Firestore using the provided ID
-      let docRef = adminDb.collection('users').doc(userId).collection('documents').doc(documentId);
-      let docSnap = await docRef.get();
-      
-      // If document not found by ID, try multiple fallback strategies
-      if (!docSnap.exists) {
-        console.log(`Document with ID ${documentId} not found, trying fallback strategies`);
-        const documentsRef = adminDb.collection('users').doc(userId).collection('documents');
-        
-        // Strategy 1: Exact name match
-        console.log(`Trying to find document by exact name: "${documentId}"`);
-        const exactNameQuery = await documentsRef.where('name', '==', documentId).get();
-        
-        if (!exactNameQuery.empty) {
-          docSnap = exactNameQuery.docs[0];
-          docRef = docSnap.ref;
-          console.log(`Found document by exact name match: ${docSnap.id}`);
-        } else {
-          // Strategy 2: Case-insensitive name contains (get all docs and filter in memory)
-          console.log(`Trying to find document by partial name match`);
-          const allDocsQuery = await documentsRef.get();
-          
-          // First try exact match ignoring case
-          const caseInsensitiveMatch = allDocsQuery.docs.find(doc => 
-            doc.data().name?.toLowerCase() === documentId.toLowerCase()
-          );
-          
-          if (caseInsensitiveMatch) {
-            docSnap = caseInsensitiveMatch;
-            docRef = caseInsensitiveMatch.ref;
-            console.log(`Found document by case-insensitive name match: ${docSnap.id}`);
-          } else {
-            // Try partial match
-            const partialMatch = allDocsQuery.docs.find(doc => 
-              doc.data().name?.toLowerCase().includes(documentId.toLowerCase())
-            );
-            
-            if (partialMatch) {
-              docSnap = partialMatch;
-              docRef = partialMatch.ref;
-              console.log(`Found document by partial name match: ${docSnap.id}`);
-            } else {
-              // No matches found, return helpful error with available documents
-              const availableDocs = allDocsQuery.docs.map(doc => ({
-                id: doc.id,
-                name: doc.data().name
-              })).slice(0, 5); // Limit to 5 documents
-              
-              return NextResponse.json({ 
-                error: 'Document not found', 
-                details: `No document found with the provided ID or name: "${documentId}". Please use a valid document ID, not the document name.`,
-                availableDocuments: availableDocs.length > 0 ? availableDocs : undefined
-              }, { status: 404 });
-            }
-          }
-        }
-      }
-      
-      const docData = docSnap.data();
-      if (!docData) {
-        return NextResponse.json({ error: 'Document data is empty' }, { status: 500 });
-      }
-      
-      const storagePath = docData.storagePath;
-      const originalName = docData.name;
-      
-      // Get the file from Firebase Storage
-      const file = bucket.file(storagePath);
-      const [fileBuffer] = await file.download();
-      
-      // Read the existing workbook
-      const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-      
-      // Process the edits for each sheet
-      for (const edit of data) {
-        const { sheetName, cellUpdates } = edit;
-        
-        // Get the worksheet
-        let worksheet = workbook.Sheets[sheetName];
-        
-        // If the sheet doesn't exist, create it
-        if (!worksheet) {
-          worksheet = XLSX.utils.aoa_to_sheet([[]]);
-          XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
-        }
-        
-        // Apply the cell updates
-        for (const update of cellUpdates) {
-          const { cell, value } = update;
-          XLSX.utils.sheet_add_aoa(worksheet, [[value]], { origin: cell });
-        }
-      }
-      
-      // Write the updated workbook to a buffer
-      const updatedBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-      
-      // Upload the updated file to Firebase Storage
-      await file.save(updatedBuffer, {
-        metadata: {
-          contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          metadata: {
-            userId,
-            originalName,
-            timestamp: Date.now().toString()
-          }
-        }
-      });
-      
-      // Get the download URL
-      const [url] = await file.getSignedUrl({
-        action: 'read',
-        expires: '03-01-2500', // Far future expiration
-      });
-      
-      // Update the document in Firestore
-      await docRef.update({
-        updatedAt: new Date(),
-        size: updatedBuffer.length,
-        url, // Update the URL in case it changed
-      });
-      
-      return NextResponse.json({ 
-        success: true, 
-        message: 'Excel file updated successfully',
-        documentId,
-        fileName: originalName,
-        url
-      });
+      console.log(`Processing CREATE operation for user ${userId}, document ${effectiveDocumentId}`);
+      // result = await createExcelFile(db, storage, bucket, userId, effectiveDocumentId, data);
+      result = await createExcelFile(null, null, null, userId, effectiveDocumentId, data); // Call dummy version
+    } else if (operation === 'edit') {
+      console.log(`Processing EDIT operation for user ${userId}, document ${effectiveDocumentId}`);
+      // result = await editExcelFile(db, storage, bucket, userId, effectiveDocumentId, data);
+      result = await editExcelFile(null, null, null, userId, effectiveDocumentId, data); // Call dummy version
+    } else {
+      console.log(`--- ERROR: Invalid operation type: ${operation} ---`);
+      return NextResponse.json({ success: false, message: 'Invalid operation type' }, { status: 400 });
     }
-    else {
-      return NextResponse.json({ error: 'Invalid operation' }, { status: 400 });
-    }
+
+    console.log("Operation Result (Firebase commented out):", result);
+    return NextResponse.json(result);
+
   } catch (error: any) {
-    console.error('--- ERROR in POST /api/excel ---:', error);
-    // Attempt to provide more details from the error object
-    const errorDetails = { 
-      message: error.message,
-      stack: error.stack,
-      name: error.name,
-      code: (error as any).code // Include Firebase error codes if available
-    };
-    console.error('Error Details:', JSON.stringify(errorDetails, null, 2));
-    return NextResponse.json({ 
-      error: 'Failed to process Excel operation', 
-      details: errorDetails
-    }, { status: 500 });
+    console.error('--- ERROR in POST /api/excel (Main Try/Catch) ---');
+    console.error('Error Details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        code: error.code
+    });
+    return NextResponse.json({ success: false, message: 'Internal Server Error' }, { status: 500 });
   }
 }
