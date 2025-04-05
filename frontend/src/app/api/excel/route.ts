@@ -1,16 +1,22 @@
+console.log("--- MODULE LOAD CHECKPOINT 1: /api/excel/route.ts ---"); 
+
 import { NextRequest, NextResponse } from 'next/server';
+console.log("--- MODULE LOAD CHECKPOINT 2: Imports done ---"); // Log after imports
+
 import { initializeFirebaseAdmin, getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig';
 import * as XLSX from 'xlsx';
 import { v4 as uuidv4 } from 'uuid';
 
 // Initialize Firebase Admin SDK
+console.log("--- MODULE LOAD CHECKPOINT 3: Before Firebase Init ---"); 
 try {
-  console.log('Initializing Firebase Admin SDK in excel API route');
+  console.log('Initializing Firebase Admin SDK in excel API route (Module Level)'); // Modify log
   const app = initializeFirebaseAdmin();
-  console.log(`Firebase Admin SDK initialized successfully with app name: ${app.name}`);
+  console.log(`Firebase Admin SDK initialized successfully with app name: ${app.name} (Module Level)`);
 } catch (error) {
-  console.error('Failed to initialize Firebase Admin SDK in excel API route:', error);
+  console.error('Failed to initialize Firebase Admin SDK in excel API route (Module Level):', error); // Modify log
 }
+console.log("--- MODULE LOAD CHECKPOINT 4: After Firebase Init ---"); 
 
 // Helper function to authenticate user from token
 async function authenticateUser(req: NextRequest) {
