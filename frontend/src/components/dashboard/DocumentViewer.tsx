@@ -46,33 +46,11 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Extract the storage path from the downloadURL
-  const getStoragePath = (url: string): string | null => {
-    try {
-      // Parse the URL to extract the path parameter
-      const parsedUrl = new URL(url);
-      
-      // The path is in the format /v0/b/BUCKET_NAME/o/PATH?alt=media&token=TOKEN
-      // We need to extract just the PATH part
-      const objectPath = parsedUrl.pathname.split('/o/')[1];
-      if (!objectPath) return null;
-      
-      // Remove any query parameters if present
-      const pathWithoutQuery = objectPath.split('?')[0];
-      
-      // URL decode the path
-      return decodeURIComponent(pathWithoutQuery);
-    } catch (e) {
-      console.error('Failed to parse storage URL:', e);
-      return null;
-    }
-  };
-
   // Fetch content based on document type
   useEffect(() => {
     const fetchDocumentContent = async () => {
-      if (!document || !document.downloadURL) {
-        setError('Document data or download URL is missing.');
+      if (!document || !document.storagePath) {
+        setError('Document data or storage path is missing.');
         setIsLoading(false);
         return;
       }
@@ -88,10 +66,10 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       setPosition({ x: 0, y: 0 }); // Reset position
 
       try {
-        // Extract the storage path from the downloadURL
-        const storagePath = getStoragePath(document.downloadURL);
-        if (!storagePath) {
-          throw new Error('Could not extract storage path from URL');
+        // Use the storage path directly from the document data
+        const storagePath = document.storagePath; 
+        if (!storagePath) { 
+          throw new Error('Storage path is missing from document data.');
         }
 
         // Use our proxy API instead of direct Firebase Storage URL
@@ -183,8 +161,8 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       )}
 
       {/* PDF Viewer */} 
-      {!isLoading && !error && isPdf && document.downloadURL && (
-        <PDFViewer documentUrl={`/api/file-proxy?path=${encodeURIComponent(getStoragePath(document.downloadURL) || '')}`} />
+      {!isLoading && !error && isPdf && document.storagePath && (
+        <PDFViewer documentUrl={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}`} />
       )}
 
       {/* Text Viewer */}
@@ -296,9 +274,9 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         <div className="flex-1 flex items-center justify-center border rounded-md bg-muted/10">
           <div className="text-center p-4">
             <p className="text-muted-foreground mb-2">Preview not available for {document?.contentType || 'this file type'}</p>
-            {document?.downloadURL && (
+            {document?.storagePath && (
               <Button asChild variant="outline">
-                <a href={document.downloadURL} target="_blank" rel="noopener noreferrer">
+                <a href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}`} target="_blank" rel="noopener noreferrer">
                   Download File
                 </a>
               </Button>
