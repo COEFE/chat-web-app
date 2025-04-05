@@ -120,7 +120,7 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
         });
         
         // Create document reference in Firestore
-        const docRef = db.collection('documents').doc(documentId || uuidv4());
+        const docRef = db.collection('users').doc(userId).collection('documents').doc(documentId || uuidv4());
         await docRef.set({
             name: filename,
             uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -183,7 +183,7 @@ async function editExcelFile(db: any, storage: any, bucket: any, userId: string,
     
     try {
         // Get document reference from Firestore
-        const docRef = db.collection('documents').doc(documentId);
+        const docRef = db.collection('users').doc(userId).collection('documents').doc(documentId);
         const docSnapshot = await docRef.get();
         
         if (!docSnapshot.exists) {
