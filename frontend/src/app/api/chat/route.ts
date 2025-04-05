@@ -16,6 +16,26 @@ function isFirebaseStorageError(error: unknown, code: number): error is Firebase
   // Adjust `storage/object-not-found` if the actual code string differs
 }
 
+// Helper function to extract sheet name from a message
+function extractSheetName(message: string): string | null {
+  // Try to find sheet name in various formats
+  const patterns = [
+    /in\s+(?:sheet|tab)\s+["']?([^"']+)["']?/i,
+    /on\s+(?:sheet|tab)\s+["']?([^"']+)["']?/i,
+    /sheet\s+["']?([^"']+)["']?/i,
+    /tab\s+["']?([^"']+)["']?/i
+  ];
+  
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+  
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   console.log('Received request at /api/chat');
   try {
@@ -276,6 +296,127 @@ If the user asks you to edit this Excel file, you should automatically use this 
 `;
       }
 
+      // Check if the user's message is asking to edit the current Excel file
+      const isEditExcelRequest = (
+        (message.toLowerCase().includes('edit') || 
+         message.toLowerCase().includes('update') || 
+         message.toLowerCase().includes('change') || 
+         message.toLowerCase().includes('set') || 
+         message.toLowerCase().includes('put') || 
+         message.toLowerCase().includes('add')) && 
+        (message.toLowerCase().includes('excel') || 
+         message.toLowerCase().includes('spreadsheet') || 
+         message.toLowerCase().includes('sheet') || 
+         message.toLowerCase().includes('cell') || 
+         message.toLowerCase().includes('row') || 
+         message.toLowerCase().includes('column')) && 
+        currentDocument && 
+        (['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+          'application/vnd.ms-excel', // .xls
+          'text/csv'].includes(currentDocument.contentType) || 
+         ['.xlsx', '.xls', '.csv'].some(ext => currentDocument.name?.toLowerCase().endsWith(ext)))
+      );
+      
+      // If it's an edit request and we have a document ID, directly process it
+      if (isEditExcelRequest && currentDocument && currentDocument.id) {
+        console.log('Detected Excel edit request for current document:', currentDocument.id);
+        
+        // Extract the cell and value from the message using multiple regex patterns
+        const patterns = [
+          // Standard pattern: cell A1 to "value"
+          /(?:cell\s+)?([A-Z]+\d+)\s+(?:to|with|as|=|:)\s+["']?([^"']+)["']?/i,
+          
+          // Put "value" in cell A1
+          /(?:put|add|set)\s+["']?([^"']+)["']?\s+(?:in|into|to)\s+(?:cell\s+)?([A-Z]+\d+)/i,
+          
+          // Change A1 to "value"
+          /(?:change|update|edit)\s+(?:cell\s+)?([A-Z]+\d+)\s+(?:to|with|as|=|:)\s+["']?([^"']+)["']?/i,
+          
+          // Add "value" to A1
+          /(?:add|put)\s+["']?([^"']+)["']?\s+(?:in|into|to)\s+([A-Z]+\d+)/i
+        ];
+        
+        let cell = '';
+        let value = '';
+        let match = null;
+        
+        // Try each pattern until we find a match
+        for (const pattern of patterns) {
+          match = message.match(pattern);
+          if (match) {
+            // For patterns where cell is first capture group
+            if (pattern.toString().includes('([A-Z]+\\d+)\\s+(?:to|with|as|=|:)')) {
+              cell = match[1];
+              value = match[2];
+            } else {
+              // For patterns where value is first capture group
+              value = match[1];
+              cell = match[2];
+            }
+            break;
+          }
+        }
+        
+        if (match && cell && value) {
+          console.log(`Detected cell ${cell} and value ${value}`);
+          
+          // Create the Excel operation JSON
+          const excelOperation = {
+            excel_operation: "edit",
+            documentId: currentDocument.id,
+            data: [
+              {
+                // Try to extract sheet name from message, default to Sheet1
+                sheetName: extractSheetName(message) || "Sheet1",
+                cellUpdates: [
+                  {cell, value}
+                ]
+              }
+            ]
+          };
+          
+          // Call the Excel API to perform the operation
+          const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': req.headers.get('Authorization') || '',
+            },
+            body: JSON.stringify(excelOperation),
+          });
+          
+          const excelResult = await excelResponse.json();
+          
+          if (excelResponse.ok) {
+            // Create a success message
+            const successMessage = `I've updated ${cell} to "${value}" in your Excel file "${currentDocument.name}".`;
+            
+            // Return the success response
+            return NextResponse.json({ 
+              response: {
+                id: `ai-${Date.now()}`,
+                role: 'ai',
+                content: successMessage,
+                excelOperation: excelResult,
+              }
+            }, { status: 200 });
+          } else {
+            // Create an error message
+            const errorMessage = `I tried to update ${cell} to "${value}" in your Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`;
+            
+            // Return the error response
+            return NextResponse.json({ 
+              response: {
+                id: `ai-${Date.now()}`,
+                role: 'ai',
+                content: errorMessage,
+              }
+            }, { status: 200 });
+          }
+        }
+      }
+      
+      // If not a direct Excel edit request or we couldn't parse it, proceed with Claude
       const aiMsg = await anthropic.messages.create({
         model: 'claude-3-5-sonnet-20240620',
         max_tokens: 1024,
