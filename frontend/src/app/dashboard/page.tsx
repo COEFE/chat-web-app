@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,7 @@ import {
 import DocumentViewer from '@/components/dashboard/DocumentViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
 import { FileUpload } from '@/components/dashboard/FileUpload';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 // Import Firestore functions and db instance
 import { db } from '@/lib/firebaseConfig';
@@ -161,81 +162,100 @@ export default function DashboardPage() {
   const [selectedDocument, setSelectedDocument] = useState<MyDocumentData | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const currentRequestIdRef = useRef<string | null>(null);
 
   const fetchDocuments = useCallback(async () => {
     // Create a unique request ID to handle race conditions
     const requestId = Date.now().toString();
+    currentRequestIdRef.current = requestId;
     
+    if (authLoading) {
+      console.log('fetchDocuments: Auth context is loading, skipping fetch.');
+      return; // Don't fetch if auth state isn't ready
+    }
     if (!user) {
-      console.log('No user available for fetching documents');
-      return;
+      console.log('fetchDocuments: No user logged in, skipping fetch.');
+      setErrorDocs('User not logged in');
+      setIsLoadingDocs(false);
+      return; // Don't fetch if user isn't logged in
     }
 
-    console.log(`[Request ${requestId}] Attempting to fetch documents for user:`, user.uid);
+    console.log(`fetchDocuments: Fetching for user ${user.uid} with requestId ${requestId}`);
     setIsLoadingDocs(true);
     setErrorDocs(null);
 
+    let token: string | null = null;
     try {
-      // Force token refresh to ensure we have the latest authentication
-      console.log(`[Request ${requestId}] Refreshing auth token before querying Firestore`);
-      await user.getIdToken(true);
-      console.log(`[Request ${requestId}] Token refreshed successfully`);
-      
-      // Log the full path we're querying
-      const path = `users/${user.uid}/documents`;
-      console.log(`[Request ${requestId}] Querying Firestore path: ${path}`);
-      
-      // Get the documents collection
-      const collectionRef = collection(db, 'users', user.uid, 'documents');
-      
-      // Try a simple query first without any ordering
-      let q = query(collectionRef);
-      const initialSnapshot = await getDocs(q);
-      console.log(`[Request ${requestId}] Initial query returned ${initialSnapshot.docs.length} documents without ordering`);
-      
-      // If documents exist, try with ordering if possible
-      let querySnapshot = initialSnapshot;
-      if (initialSnapshot.docs.length > 0) {
-        // Check if any documents have the uploadedAt field
-        const hasUploadedAt = initialSnapshot.docs.some(doc => doc.data().uploadedAt);
-        
-        if (hasUploadedAt) {
-          console.log(`[Request ${requestId}] Documents with uploadedAt exist, trying with orderBy`);
-          q = query(collectionRef, orderBy('uploadedAt', 'desc'));
-          querySnapshot = await getDocs(q);
-          console.log(`[Request ${requestId}] Ordered query returned ${querySnapshot.docs.length} documents`);
-        } else {
-          console.log(`[Request ${requestId}] No documents have uploadedAt field, skipping ordering`);
-        }
+      token = await user.getIdToken();
+    } catch (tokenError) {
+      console.error("fetchDocuments: Failed to get ID token", tokenError);
+      setErrorDocs('Authentication error. Please refresh.');
+      setIsLoadingDocs(false);
+      return;
+    }
+
+    if (!token) {
+        console.error("fetchDocuments: Got null token after attempt");
+        setErrorDocs('Authentication error. Please refresh.');
+        setIsLoadingDocs(false);
+        return;
+    }
+
+    try {
+      // Fetch from the API route, including the Auth header
+      const response = await fetch('/api/documents', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      // Check if the request ID has changed (meaning a newer request has started)
+      if (currentRequestIdRef.current !== requestId) {
+        console.log(`[Request ${requestId}] Request ID changed, skipping response processing`);
+        return;
       }
-    
-      // Process documents with careful handling of timestamps
-      const userDocuments = querySnapshot.docs.map(doc => {
-        const data = doc.data();
-        let uploadedAt = data.uploadedAt;
-        
-        // Handle different timestamp formats
-        if (uploadedAt) {
-          if (typeof uploadedAt.toDate === 'function') {
-            // Firestore Timestamp
-            uploadedAt = uploadedAt.toDate();
-          } else if (uploadedAt instanceof Date) {
-            // Already a Date object
-            uploadedAt = uploadedAt;
-          } else if (typeof uploadedAt === 'number') {
-            // Timestamp in milliseconds
-            uploadedAt = new Date(uploadedAt);
-          } else if (typeof uploadedAt === 'string') {
-            // ISO string or other date string
-            uploadedAt = new Date(uploadedAt);
-          }
+
+      if (!response.ok) {
+        let errorMsg = `HTTP error! status: ${response.status}`; 
+        try {
+          const errorData = await response.json();
+          errorMsg = errorData.error || errorData.message || errorMsg;
+        } catch (e) {
+          // Ignore if response body isn't JSON
         }
-        
+        console.error(`[Request ${requestId}] Error fetching documents: ${errorMsg}`);
+        setErrorDocs(`Failed to fetch documents: ${errorMsg}`);
+        setIsLoadingDocs(false);
+        return;
+      }
+
+      const data = await response.json();
+      const fetchedDocs = data.documents || []; 
+      console.log(`[Request ${requestId}] Fetched ${fetchedDocs.length} documents`);
+
+      // Process documents with careful handling of timestamps
+      const userDocuments = fetchedDocs.map((doc: any) => {
+        let uploadedAt = doc.createdAt;
+        if (uploadedAt && typeof uploadedAt === 'string') {
+          try {
+            uploadedAt = new Date(uploadedAt); // Convert string timestamp to Date
+          } catch (e) { 
+            console.warn(`Could not parse timestamp string: ${uploadedAt}`);
+            uploadedAt = null; 
+          }
+        } else if (uploadedAt) { 
+            // If it's already a Date or other type, use as is or handle accordingly
+            // For now, nullify if not a string that can be parsed
+            console.warn(`Unexpected timestamp format: ${typeof uploadedAt}`);
+            uploadedAt = null;
+        }
+
         return {
           id: doc.id,
-          ...data,
-          uploadedAt: uploadedAt || null
-        } as MyDocumentData;
+          name: doc.filename || 'Untitled', // Use filename from API
+          uploadedAt: uploadedAt,
+        } as MyDocumentData; // Cast to your frontend type
       });
       
       console.log(`[Request ${requestId}] Processed ${userDocuments.length} documents with timestamp handling`);
@@ -270,10 +290,21 @@ export default function DashboardPage() {
     }
   }, [user, authLoading, fetchDocuments]);
 
+  // Handler for the existing DocumentList component (if used)
   const handleSelectDocument = (doc: MyDocumentData | null) => {
-    console.log("Selected Document:", doc);
-    setSelectedDocument(doc);
+    console.log("Selected Document from List:", doc);
+    setSelectedDocument(doc); // Keep this for DocumentViewer perhaps
+    setSelectedDocumentId(doc?.id ?? null);
     // setView('chat'); // Switch view to chat interface
+  };
+
+  // New handler specifically for the Shadcn Select component's onValueChange
+  const handleDocumentSelectChange = (value: string) => {
+    console.log("Selected Document ID from Select:", value);
+    setSelectedDocumentId(value);
+    // Optionally, find the full document object if needed elsewhere
+    const fullDoc = documents.find(d => d.id === value);
+    setSelectedDocument(fullDoc || null);
   };
 
   if (authLoading) {
@@ -334,6 +365,30 @@ export default function DashboardPage() {
                     error={errorDocs}
                     onSelectDocument={(doc: MyDocumentData | null) => handleSelectDocument(doc)}
                   />
+                  {documents.length > 0 ? (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Select Document</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {/* Use the new handler here */}
+                        <Select onValueChange={handleDocumentSelectChange} value={selectedDocumentId ?? undefined}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select a document to chat with..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {documents.map((doc) => (
+                              <SelectItem key={doc.id} value={doc.id}>
+                                {doc.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <p>No documents uploaded yet. Upload a file to start chatting.</p>
+                  )}
                 </>
               )}
             </div>
@@ -343,8 +398,8 @@ export default function DashboardPage() {
 
           <ResizablePanel defaultSize={40}>
             <div className="flex h-full flex-col p-6">
-              {selectedDocument ? (
-                <ChatInterface document={selectedDocument} />
+              {selectedDocumentId ? (
+                <ChatInterface documentId={selectedDocumentId} />
               ) : (
                 <div className="flex h-full items-center justify-center text-muted-foreground">
                   Select a document to start chatting.

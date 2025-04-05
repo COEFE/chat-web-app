@@ -16,10 +16,10 @@ interface ChatMessage {
 }
 
 interface ChatInterfaceProps {
-  document: MyDocumentData;
+  documentId: string; 
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ document }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -60,7 +60,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ document }) => {
         },
         body: JSON.stringify({ 
           message: userMessage.content, // Send the user's message content
-          documentId: document.id      // Send the ID of the current document
+          documentId: documentId      
         }),
       });
 
@@ -155,7 +155,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ document }) => {
   return (
     <Card className="flex flex-col h-full">
       <CardHeader>
-        <CardTitle>Chat with: {document.name}</CardTitle>
+        <CardTitle>Chat with Document ID: {documentId}</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 overflow-hidden p-0"> {/* Remove padding for ScrollArea */}
         <ScrollArea className="h-full p-4" ref={scrollAreaRef}>
