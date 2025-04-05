@@ -299,10 +299,11 @@ export async function POST(req: NextRequest) {
       if (!bucketName) {
         throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET environment variable not set!");
       }
-      const bucket = adminStorage.bucket(`gs://${bucketName}`);
+      // Use only the bucket name without any protocol prefix
+      const bucket = adminStorage.bucket(bucketName);
       const file: GoogleCloudFile = bucket.file(storagePath);
 
-      console.log(`Attempting to download from gs://${bucketName}/${storagePath}`);
+      console.log(`Attempting to download from storage bucket: ${bucketName}, path: ${storagePath}`);
       const [contentBuffer] = await file.download();
       console.log(`Successfully downloaded ${contentBuffer.byteLength} bytes from storage.`);
 
