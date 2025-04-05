@@ -42,7 +42,7 @@ async function authenticateUser(req: NextRequest) {
 
 // POST endpoint for creating or editing Excel files
 export async function POST(req: NextRequest) {
-  console.log('POST /api/excel called');
+  console.log('--- ENTERING POST /api/excel ---');
 
   // Authenticate the user
   const auth = await authenticateUser(req);
@@ -54,14 +54,6 @@ export async function POST(req: NextRequest) {
   console.log(`POST /api/excel - Authenticated user ID from token: ${userId}`);
 
   try {
-    // Parse the request body
-    const body = await req.json();
-    const { operation, documentId, data, fileName } = body;
-
-    if (!operation) {
-      return NextResponse.json({ error: 'Missing operation parameter' }, { status: 400 });
-    }
-
     // Get Firebase Admin instances
     const adminDb = getAdminDb();
     const adminStorage = getAdminStorage();
@@ -72,9 +64,22 @@ export async function POST(req: NextRequest) {
     }
     
     const bucket = adminStorage.bucket(`gs://${bucketName}`);
+    console.log('Successfully retrieved Firebase DB/Storage instances and bucket.');
+
+    // Parse the request body *after* confirming Firebase access
+    const body = await req.json();
+    const { operation, documentId, data, fileName } = body;
+
+    console.log('Request Body Parsed:', { operation, documentId: documentId ? 'Present' : 'Absent', data: data ? 'Present' : 'Absent', fileName });
+
+    if (!operation) {
+      console.error('Missing operation parameter in request body.');
+      return NextResponse.json({ error: 'Missing operation parameter' }, { status: 400 });
+    }
 
     // Handle different operations
     if (operation === 'create') {
+      console.log('Processing CREATE operation...');
       // Validate required parameters for create operation
       if (!data || !fileName) {
         return NextResponse.json({ 
@@ -147,6 +152,7 @@ export async function POST(req: NextRequest) {
       });
     } 
     else if (operation === 'edit') {
+      console.log('Processing EDIT operation...');
       // Validate required parameters for edit operation
       if (!documentId || !data) {
         return NextResponse.json({ 
@@ -288,10 +294,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid operation' }, { status: 400 });
     }
   } catch (error: any) {
-    console.error('Error in /api/excel:', error);
+    console.error('--- ERROR in POST /api/excel ---:', error);
+    // Attempt to provide more details from the error object
+    const errorDetails = { 
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      code: (error as any).code // Include Firebase error codes if available
+    };
+    console.error('Error Details:', JSON.stringify(errorDetails, null, 2));
     return NextResponse.json({ 
       error: 'Failed to process Excel operation', 
-      details: error.message 
+      details: errorDetails
     }, { status: 500 });
   }
 }
