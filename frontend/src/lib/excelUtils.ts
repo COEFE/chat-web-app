@@ -14,7 +14,13 @@ try {
   // Use the centralized Firebase Admin initialization
   db = getAdminDb();
   storage = getAdminStorage();
-  bucket = storage.bucket();
+  
+  // Get the bucket name from environment variables
+  const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com';
+  console.log(`Using storage bucket: ${bucketName}`);
+  
+  // Get the bucket with the specific name
+  bucket = storage.bucket(bucketName);
   console.log('Firebase services initialized successfully from firebaseAdminConfig');
 } catch (error) {
   console.error('Error initializing Firebase services:', error);
