@@ -176,6 +176,47 @@ async function handleExcelOperation(req: NextRequest, userId: string, message: s
   return { success: false };
 }
 
+// Helper function to create success messages
+function createSuccessMessage(parsedJson: any, excelResult: any): string {
+  if (parsedJson.operation === 'create') {
+    return `I've created a new Excel file named "${parsedJson.fileName}" for you. ${excelResult.url ? 'You can download it using the link below.' : ''}`;
+  } else if (parsedJson.operation === 'edit') {
+    const cellUpdates = parsedJson.data.flatMap((sheet: { sheetName: string; cellUpdates: Array<{ cell: string; value: string }> }) =>
+      sheet.cellUpdates.map((update: { cell: string; value: string }) =>
+        `${update.cell} in sheet "${sheet.sheetName || 'Sheet1'}" to "${update.value}"` // Added default sheet name
+      )
+    );
+
+    const cellUpdateText = cellUpdates.length > 1
+      ? `updated ${cellUpdates.length} cells`
+      : `updated ${cellUpdates[0]}`;
+
+    return `I've ${cellUpdateText} in the Excel file "${excelResult.fileName || 'your document'}".`;
+  } else {
+    return `I've successfully performed the ${parsedJson.operation} operation on the Excel file.`;
+  }
+}
+
+// Helper function to create error messages
+function createErrorMessage(parsedJson: any, excelResult: any): string {
+  let errorMessage = `I tried to perform the operation on an Excel file, but encountered an error: ${excelResult?.error || 'Unknown error'}`;
+
+  // Safely access operation type
+  if (parsedJson && parsedJson.operation) {
+    errorMessage = `I tried to ${parsedJson.operation} an Excel file, but encountered an error: ${excelResult?.error || 'Unknown error'}`;
+  }
+
+  // Add suggestions if available documents were returned
+  if (excelResult && excelResult.availableDocuments && excelResult.availableDocuments.length > 0) {
+    errorMessage += '\n\nHere are some available documents you can use instead:\n';
+    excelResult.availableDocuments.forEach((doc: { name: string; id: string }) => {
+      errorMessage += `- "${doc.name}" (ID: ${doc.id})\n`;
+    });
+    errorMessage += '\nPlease try again with one of these document IDs.';
+  }
+  return errorMessage;
+}
+
 export async function POST(req: NextRequest) {
   console.log('Received request at /api/chat');
   try {
@@ -625,17 +666,47 @@ User Question: ${message}`,
     const jsonExtractRegex = /(?:\s|^)(\{["\w\s:,\{}\[\]\-()]*\})(?:\s|$)/;
     const match = aiResponseContent.match(jsonExtractRegex);
 
-    if (match && match[1]) {
-      const detectedJson = match[1].trim();
-      console.log('Extracted potential JSON string:', detectedJson);
-      
+    let aiContentString: string | null = null;
+
+    // First, try parsing the entire aiResponseContent as the outer JSON object
+    try {
+      const outerResponse = JSON.parse(aiResponseContent);
+      if (outerResponse && typeof outerResponse.content === 'string') {
+        aiContentString = outerResponse.content;
+        console.log('Successfully parsed outer AI response, extracted content string.');
+      } else {
+        console.log('Parsed outer AI response, but content field is not a string or missing.');
+      }
+    } catch (outerParseError) {
+      console.log('Could not parse aiResponseContent as an outer JSON object. Assuming raw content.', outerParseError);
+      // Fallback: Treat aiResponseContent as the raw string potentially containing JSON
+      aiContentString = aiResponseContent;
+    }
+
+    // Now, try to parse the extracted (or fallback) content string as the inner JSON
+    if (aiContentString) {
+      console.log('Attempting to parse inner JSON string:', aiContentString);
       try {
-        // Normalize the operation key before processing
-        const normalizedJsonString = detectedJson.replace(/"excel_operation":/, '"operation":');
-        const parsedJson = JSON.parse(normalizedJsonString);
-        console.log('Successfully parsed JSON:', parsedJson);
-        
-        // Call the Excel API to perform the operation
+        // Attempt to parse the inner content string
+        const parsedJson = JSON.parse(aiContentString);
+        console.log("Successfully parsed inner JSON object:", parsedJson);
+
+        // --- Normalization & API Call --- 
+
+        // Normalize key: Check for 'excel_operation' and rename to 'operation'
+        if (parsedJson && parsedJson.excel_operation && !parsedJson.operation) {
+          parsedJson.operation = parsedJson.excel_operation;
+          delete parsedJson.excel_operation;
+          console.log('Normalized "excel_operation" key to "operation"');
+        }
+
+        // Ensure essential fields are present after parsing
+        if (!parsedJson || !parsedJson.operation || !parsedJson.documentId || !parsedJson.data) {
+          console.error('Parsed JSON is missing required fields (operation, documentId, data)');
+          throw new Error('Parsed inner JSON is missing required fields.');
+        }
+
+        console.log('Calling Excel API with parsed/normalized data:', parsedJson);
         const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
           method: 'POST',
           headers: {
@@ -644,61 +715,44 @@ User Question: ${message}`,
           },
           body: JSON.stringify(parsedJson),
         });
-        
+
         const excelResult = await excelResponse.json();
-        
+        console.log('Excel API Response Status:', excelResponse.status);
+        console.log('Excel API Response Parsed Body:', excelResult);
+
         if (excelResponse.ok) {
           excelOperationResult = excelResult;
-          
-          // Replace the JSON block with a success message
-          let successMessage = '';
-          
-          if (parsedJson.operation === 'create') {
-            successMessage = `I've created a new Excel file named "${parsedJson.fileName}" for you. ${excelResult.url ? 'You can download it using the link below.' : ''}`;
-          } else if (parsedJson.operation === 'edit') {
-            // Create a more detailed message for edit operations
-            const cellUpdates = parsedJson.data.flatMap((sheet: { sheetName: string; cellUpdates: Array<{ cell: string; value: string }> }) => 
-              sheet.cellUpdates.map((update: { cell: string; value: string }) => 
-                `${update.cell} in sheet "${sheet.sheetName}" to "${update.value}"`
-              )
-            );
-            
-            const cellUpdateText = cellUpdates.length > 1 
-              ? `updated ${cellUpdates.length} cells` 
-              : `updated ${cellUpdates[0]}`;
-              
-            successMessage = `I've ${cellUpdateText} in the Excel file "${excelResult.fileName || 'your document'}".`;
-          } else {
-            successMessage = `I've successfully performed the ${parsedJson.operation} operation on the Excel file.`;
-          }
-          
-          finalResponseContent = aiResponseContent.replace(detectedJson, successMessage);
+
+          const successMessage = createSuccessMessage(parsedJson, excelResult);
+
+          console.log("Excel operation successful. Replacing inner JSON string with success message.");
+          console.log("Inner JSON string to replace:", aiContentString);
+          // Replace the inner JSON *string* within the original aiResponseContent
+          finalResponseContent = aiResponseContent.replace(aiContentString, successMessage);
+          console.log("Final content after replacement:", finalResponseContent);
+
         } else {
-          // Replace the JSON block with an error message
-          let errorMessage = `I tried to ${parsedJson.operation} an Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`;
-          
-          // Add suggestions if available documents were returned
-          if (excelResult.availableDocuments && excelResult.availableDocuments.length > 0) {
-            errorMessage += '\n\nHere are some available documents you can use instead:\n';
-            excelResult.availableDocuments.forEach((doc: { name: string; id: string }) => {
-              errorMessage += `- "${doc.name}" (ID: ${doc.id})\n`;
-            });
-            errorMessage += '\nPlease try again with one of these document IDs.';
-          }
-          
-          finalResponseContent = aiResponseContent.replace(detectedJson, errorMessage);
+          const errorMessage = createErrorMessage(parsedJson, excelResult);
+
+          console.log("Excel operation failed. Replacing inner JSON string with error message.");
+          console.log("Inner JSON string to replace:", aiContentString);
+          // Replace the inner JSON *string* within the original aiResponseContent
+          finalResponseContent = aiResponseContent.replace(aiContentString, errorMessage);
+          console.log("Final content after replacement:", finalResponseContent);
         }
       } catch (error) {
-        console.error('Error processing JSON in AI response:', error);
+        console.error('Error parsing inner JSON string or calling Excel API:', error);
+        // Log the full error object for detailed diagnosis
+        console.error('Full Error Object:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
         // If parsing/processing fails, keep the original AI response content
-        finalResponseContent = aiResponseContent; 
+        finalResponseContent = aiResponseContent;
       }
     } else {
-      console.log('No JSON object found in AI response content using extraction regex.');
-      // Ensure finalResponseContent is the original if no JSON is found
+      console.log('Could not extract a valid content string to parse for inner JSON.');
+      // Keep original response if no JSON detected
       finalResponseContent = aiResponseContent;
     }
- 
+
     // Return the final response
     return NextResponse.json({
       response: {
@@ -714,4 +768,27 @@ User Question: ${message}`,
     // Generic error for unexpected issues
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
+}
+
+async function authenticateUser(req: NextRequest): Promise<{ userId: string; token: string } | null> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.error("Authorization header missing or invalid");
+    return null;
+  }
+  const idToken = authHeader.split('Bearer ')[1];
+  
+  let decodedToken;
+  let userId: string;
+  try {
+    const adminAuth = getAdminAuth(); // Get the initialized auth service
+    decodedToken = await adminAuth.verifyIdToken(idToken);
+    userId = decodedToken.uid;
+    console.log("User authenticated:", userId);
+  } catch (error) {
+    console.error("Error verifying auth token:", error); 
+    return null;
+  }
+  
+  return { userId, token: idToken };
 }
