@@ -37,7 +37,7 @@ function extractSheetName(message: string): string | null {
 }
 
 // Helper function to handle Excel operations directly
-async function handleExcelOperation(req: NextRequest, userId: string, message: string, currentDocument: any) {
+async function handleExcelOperation(authToken: string, userId: string, message: string, currentDocument: any) {
   console.log('Handling Excel operation directly for document:', currentDocument?.id);
   
   // Extract the cell and value from the message using multiple regex patterns
@@ -119,11 +119,16 @@ async function handleExcelOperation(req: NextRequest, userId: string, message: s
     
     try {
       // Call the Excel API to perform the operation
-      const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel-process`, {
+      // Construct the base URL carefully
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || ''; // Or determine origin differently if needed server-side
+      const apiUrl = `${baseUrl}/api/excel-process`;
+      console.log(`Direct Excel Edit - Calling API at: ${apiUrl}`);
+
+      const excelResponse = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': req.headers.get('Authorization') || '',
+          'Authorization': authToken, // Use the passed authToken directly
         },
         body: JSON.stringify(excelOperation),
       });
@@ -495,7 +500,7 @@ export async function POST(req: NextRequest) {
           
           // For Excel edit requests, try to handle directly
           if (isEditExcelRequest && currentDocument && currentDocument.id) {
-            const result = await handleExcelOperation(req, userId, message, currentDocument);
+            const result = await handleExcelOperation(authorization, userId, message, currentDocument);
             if (result.success) {
               return NextResponse.json(result.response, { status: 200 });
             }
@@ -540,7 +545,7 @@ If the user asks you to edit this Excel file, you should automatically use this 
       // If it's an edit request and we have a document ID, directly process it
       if (isEditExcelRequest && currentDocument && currentDocument.id) {
         // Try to handle the Excel operation directly
-        const result = await handleExcelOperation(req, userId, message, currentDocument);
+        const result = await handleExcelOperation(authorization, userId, message, currentDocument);
         if (result.success) {
           return NextResponse.json(result.response, { status: 200 });
         }
@@ -650,7 +655,7 @@ User Question: ${message}`,
       // For Excel edit requests, try to handle directly as a fallback
       if (isExcelEditRequest && currentDocument && currentDocument.id) {
         console.log('Anthropic API failed, trying direct Excel operation handling as fallback');
-        const result = await handleExcelOperation(req, userId, message, currentDocument);
+        const result = await handleExcelOperation(authorization, userId, message, currentDocument);
         if (result.success) {
           return NextResponse.json(result.response, { status: 200 });
         }
