@@ -286,24 +286,30 @@ export async function POST(req: NextRequest) {
       const docData = docSnap.data();
       storagePath = docData?.storagePath;
       const contentType = docData?.contentType;
-      console.log(`Found document: ID=${documentId}, Path=${storagePath}, Type=${contentType}`);
+      console.log(`Document info retrieved: ID=${documentId}, Path=${storagePath}, Type=${contentType}`);
 
+      // --- Ensure storagePath is defined before proceeding ---
       if (!storagePath) {
         console.error(`Storage path missing for document ID: ${documentId}`);
         return NextResponse.json({ error: 'Document metadata incomplete (missing storage path)' }, { status: 500 });
       }
 
-      // 2. Fetch file content from Storage using storagePath
-      // Ensure storage bucket is configured if not done during initialization
-      const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
-      if (!bucketName) {
-        throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET environment variable not set!");
-      }
+      // --- Download Content from Storage ---
+      // Get bucket name from env vars with fallback, ensure NO domain suffix
+      const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0';
+      
+      // Removed the check for !bucketName as we now have a fallback
+      // if (!bucketName) {
+      //   throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET environment variable not set!");
+      // }
+      
+      const adminStorage = getAdminStorage();
+      
       // Use only the bucket name without any protocol prefix
       const bucket = adminStorage.bucket(bucketName);
       const file: GoogleCloudFile = bucket.file(storagePath);
 
-      console.log(`Attempting to download from storage bucket: ${bucketName}, path: ${storagePath}`);
+      console.log(`Attempting to download from storage bucket: [${bucketName}], path: [${storagePath}]`);
       const [contentBuffer] = await file.download();
       console.log(`Successfully downloaded ${contentBuffer.byteLength} bytes from storage.`);
 
