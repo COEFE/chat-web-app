@@ -30,7 +30,7 @@ import * as XLSX from 'xlsx';
 import Anthropic from '@anthropic-ai/sdk';
 import { FirebaseError } from 'firebase-admin/app';
 // Import the function from the other route
-import { processExcelOperation } from '../excel-process/route';
+import { processExcelOperation } from '@/lib/excelUtils';
 // Imports for file/PDF handling
 import { File as GoogleCloudFile } from '@google-cloud/storage';
 import { extractText } from 'unpdf';
