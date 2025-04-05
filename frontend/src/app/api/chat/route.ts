@@ -753,16 +753,58 @@ User Question: ${message}`,
         if (excelResult.success) {
           excelOperationResult = excelResult;
           console.log("Excel operation via JSON was successful:", excelResult.message || 'Operation completed.');
-          // Optionally modify Claude's response or just let it continue?
-          // Let's allow Claude's original response to stream back for now.
+          
+          // Modify Claude's response to acknowledge the successful Excel operation
+          // Extract any meaningful context from Claude's original response
+          const originalResponseLines = aiResponseContent.split('\n');
+          let contextualResponse = '';
+          
+          // Look for contextual information in Claude's response (before the JSON)
+          if (originalResponseLines.length > 3) {
+            // Take up to the first 3 lines that don't contain JSON syntax
+            const contextLines = originalResponseLines
+              .filter(line => !line.includes('{') && !line.includes('}') && line.trim() !== '')
+              .slice(0, 3);
+            if (contextLines.length > 0) {
+              contextualResponse = contextLines.join('\n') + '\n\n';
+            }
+          }
+          
+          // Create a confirmation message with details about what was updated
+          let updateDetails = '';
+          try {
+            if (parsedJson.data && Array.isArray(parsedJson.data)) {
+              // Get sheet and cell information
+              parsedJson.data.forEach((sheetData: { sheetName?: string; cellUpdates?: Array<{ cell: string; value: any }> }) => {
+                if (sheetData.sheetName && sheetData.cellUpdates && Array.isArray(sheetData.cellUpdates)) {
+                  updateDetails += `Updated sheet "${sheetData.sheetName}" with the following changes:\n`;
+                  sheetData.cellUpdates.forEach((update: { cell: string; value: any }) => {
+                    updateDetails += `- Cell ${update.cell}: Value set to "${update.value}"\n`;
+                  });
+                }
+              });
+            }
+          } catch (error) {
+            console.error('Error creating update details:', error);
+          }
+          
+          // Create the final response with confirmation and details
+          finalResponseContent = 
+            contextualResponse +
+            `✅ Excel file has been successfully updated!\n\n` +
+            updateDetails + '\n' +
+            `The changes have been saved to your document.`;
         } else {
            // Handle error from processExcelOperation
            console.error("Error from processExcelOperation (JSON path):", excelResult.message);
-           // Append error info to the stream data?
+           // Append error info to the stream data
            excelOperationResult = excelResult;
-           console.error("Error from processExcelOperation (JSON path):", excelResult.message);
-           // Maybe send an error message back immediately?
-           // For now, let Claude's original response stream back.
+           
+           // Modify Claude's response to show the error
+           finalResponseContent = 
+             `❌ Sorry, I wasn't able to update the Excel file.\n\n` +
+             `Error: ${excelResult.message}\n\n` +
+             `Please try again or check if the document exists and you have permission to edit it.`;
         }
       } catch (error) {
         console.error('*** Error during inner JSON parsing or Excel API call ***', error);
