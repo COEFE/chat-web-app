@@ -236,10 +236,44 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               dropdownMenu={true} // Enable dropdown for columns
               manualColumnResize={true}
               manualRowResize={true}
+              colWidths={100} // Set default column width to 100px
+              autoColumnSize={true} // Enable auto column sizing
+              afterRender={() => {
+                // Force a resize after rendering
+                if (hotTableRef.current?.hotInstance) {
+                  setTimeout(() => {
+                    hotTableRef.current?.hotInstance?.updateSettings({}, true);
+                  }, 100);
+                }
+              }}
+              afterGetColHeader={(col, TH) => {
+                // Ensure header cells have minimum width
+                if (TH) {
+                  TH.style.minWidth = '100px';
+                }
+              }}
               width="100%"
-              height="100%" // Let the container handle height
+              height="100%"
+              className="excel-viewer" // Add class for potential CSS targeting
               licenseKey="non-commercial-and-evaluation" // Use the non-commercial key
             />
+            <style jsx global>{`
+              /* Ensure the Handsontable container has proper dimensions */
+              .excel-viewer .handsontable {
+                width: auto !important;
+                height: 100% !important;
+              }
+              /* Ensure column headers have proper width */
+              .excel-viewer .handsontable th {
+                min-width: 100px;
+                white-space: nowrap;
+              }
+              /* Ensure cells have proper width */
+              .excel-viewer .handsontable td {
+                min-width: 100px;
+                white-space: nowrap;
+              }
+            `}</style>
           </div>
         </div>
       )}
