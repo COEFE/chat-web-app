@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import * as XLSX from 'xlsx'; // Import xlsx library
 import mammoth from 'mammoth'; // Import mammoth for DOCX handling
-import { HotTable, HotTableClass } from '@handsontable/react'; // Import HotTable AND HotTableClass for ref type
+import { HotTable } from '@handsontable/react'; // Import HotTable
 import 'handsontable/dist/handsontable.full.min.css'; // Import Handsontable CSS
 import { registerAllModules } from 'handsontable/registry'; // Needed for features
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"; // Import Shadcn Tabs
@@ -50,7 +50,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
   const imageContainerRef = useRef<HTMLDivElement>(null);
-  const hotTableRef = useRef<HotTableClass>(null); // Use HotTableClass for the ref type
+  // No need for hotTableRef with simpler configuration
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -150,23 +150,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     fetchDocumentContent();
   }, [document]); // Re-run when the document prop changes
 
-  // Effect to re-render Handsontable when the active sheet changes
-  useEffect(() => {
-    // Get the Handsontable core instance from the ref
-    const hotInstance = hotTableRef.current?.hotInstance;
-
-    if (hotInstance && workbookData) {
-      // Use requestAnimationFrame to ensure render call happens after DOM update
-      requestAnimationFrame(() => {
-        // Check if instance still exists before calling methods
-        if (hotTableRef.current?.hotInstance) {
-          hotTableRef.current.hotInstance.render();
-          hotTableRef.current.hotInstance.updateSettings({}); // Force re-evaluation
-          console.log('Handsontable re-rendered due to sheet change.');
-        }
-      });
-    }
-  }, [activeSheetName, workbookData]); // Depend on activeSheetName and workbookData
+  // No need for re-render effect with simpler configuration
 
   // Define supported types for clarity
   const isPdf = document?.contentType === 'application/pdf';
@@ -209,7 +193,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         </div>
       )}
 
-      {/* Excel/CSV Viewer */}
+      {/* Excel/CSV Viewer using Handsontable - Simplified Configuration */}
       {!isLoading && !error && isSheet && workbookData && activeSheetName && (
         <div className="flex-1 flex flex-col overflow-hidden">
           <Tabs value={activeSheetName} onValueChange={setActiveSheetName} className="flex-shrink-0">
@@ -226,54 +210,17 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             </TabsList>
           </Tabs>
           <div className="flex-1 overflow-auto border border-t-0 rounded-b-md relative">
+            {/* Simple Handsontable configuration based on official example */}
             <HotTable
-              ref={hotTableRef} // Assign ref
               data={workbookData.find(sheet => sheet.sheetName === activeSheetName)?.data || []}
-              rowHeaders={true}
               colHeaders={true}
-              readOnly={true}
-              contextMenu={true} // Enable context menu (copy, etc.)
-              dropdownMenu={true} // Enable dropdown for columns
-              manualColumnResize={true}
-              manualRowResize={true}
-              colWidths={100} // Set default column width to 100px
-              autoColumnSize={true} // Enable auto column sizing
-              afterRender={() => {
-                // Force a resize after rendering
-                if (hotTableRef.current?.hotInstance) {
-                  setTimeout(() => {
-                    hotTableRef.current?.hotInstance?.updateSettings({}, true);
-                  }, 100);
-                }
-              }}
-              afterGetColHeader={(col, TH) => {
-                // Ensure header cells have minimum width
-                if (TH) {
-                  TH.style.minWidth = '100px';
-                }
-              }}
-              width="100%"
-              height="100%"
-              className="excel-viewer" // Add class for potential CSS targeting
-              licenseKey="non-commercial-and-evaluation" // Use the non-commercial key
+              rowHeaders={true}
+              height="auto"
+              width="auto"
+              stretchH="all" // Stretch columns to fit width
+              autoColumnSize={false} // Disable auto sizing for better performance
+              licenseKey="non-commercial-and-evaluation"
             />
-            <style jsx global>{`
-              /* Ensure the Handsontable container has proper dimensions */
-              .excel-viewer .handsontable {
-                width: auto !important;
-                height: 100% !important;
-              }
-              /* Ensure column headers have proper width */
-              .excel-viewer .handsontable th {
-                min-width: 100px;
-                white-space: nowrap;
-              }
-              /* Ensure cells have proper width */
-              .excel-viewer .handsontable td {
-                min-width: 100px;
-                white-space: nowrap;
-              }
-            `}</style>
           </div>
         </div>
       )}
