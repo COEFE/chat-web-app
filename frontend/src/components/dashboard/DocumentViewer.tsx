@@ -218,7 +218,6 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               manualRowResize={true}
               width="100%"
               height="100%" // Let the container handle height
-              stretchH="all" // Stretch columns to fill width
               licenseKey="non-commercial-and-evaluation" // Use the non-commercial key
             />
           </div>
