@@ -174,10 +174,40 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
 
       {/* Excel/CSV Viewer */}
       {!isLoading && !error && isSheet && sheetHtml && (
-        <div 
-          className="flex-1 overflow-auto border rounded-md p-4 [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:p-2 [&_th]:text-left [&_th]:bg-muted [&_td]:border [&_td]:p-2"
-          dangerouslySetInnerHTML={{ __html: sheetHtml }}
-        />
+        <>
+          <div 
+            className="excel-viewer-table flex-1 overflow-auto border rounded-md" 
+            dangerouslySetInnerHTML={{ __html: sheetHtml }}
+          />
+          <style jsx>{`
+            .excel-viewer-table table {
+              border-collapse: collapse;
+              width: 100%;
+              font-size: 0.875rem; /* text-sm */
+              border: 1px solid #e5e7eb; /* border-gray-200 */
+            }
+            .excel-viewer-table th,
+            .excel-viewer-table td {
+              border: 1px solid #e5e7eb; /* border-gray-200 */
+              padding: 0.5rem 0.75rem; 
+              text-align: left;
+              vertical-align: top;
+            }
+            .excel-viewer-table th {
+              background-color: #f3f4f6; /* bg-gray-100 */
+              font-weight: 600; /* font-semibold */
+              position: sticky; /* Sticky header */
+              top: 0;
+              z-index: 10; 
+            }
+            .excel-viewer-table tr:nth-child(even) td {
+              background-color: #f9fafb; /* bg-gray-50 - Zebra stripes */
+            }
+            .excel-viewer-table tr:hover td {
+              background-color: #eff6ff; /* bg-blue-50 - Hover effect */
+            }
+          `}</style>
+        </>
       )}
       
       {/* DOCX Viewer */}
