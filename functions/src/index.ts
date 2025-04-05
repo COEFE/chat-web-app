@@ -12,6 +12,7 @@ import {onObjectFinalized} from "firebase-functions/v2/storage";
 import {getFirestore, Timestamp, FieldValue} from "firebase-admin/firestore";
 import * as admin from "firebase-admin";
 import {initializeApp} from "firebase-admin/app";
+import {getStorage} from "firebase-admin/storage";
 import * as logger from "firebase-functions/logger"; // Import logger
 
 // Start writing functions
@@ -144,14 +145,20 @@ export const processDocumentUpload = onObjectFinalized(
         }
       }
 
-      // Construct a public download URL instead of a signed URL to avoid permissions issues
-      // Format: https://firebasestorage.googleapis.com/v0/b/BUCKET/o/PATH?alt=media
-      const encodedFilePath = encodeURIComponent(filePath);
-      // Split URL to avoid line length issues
-      const baseUrl = `https://firebasestorage.googleapis.com/v0/b/${fileBucket}/o/`;
-      const downloadURL = `${baseUrl}${encodedFilePath}?alt=media`;
+      // Get the download URL for the file - now with proper permissions
+      const storage = getStorage();
+      const fileRef = storage.bucket(fileBucket).file(filePath);
 
-      logger.info(`Generated public download URL: ${downloadURL}`);
+      // Use a reasonable expiration time (24 hours from now)
+      const expirationDate = new Date();
+      expirationDate.setDate(expirationDate.getDate() + 1);
+
+      const [downloadURL] = await fileRef.getSignedUrl({
+        action: "read",
+        expires: expirationDate.toISOString(),
+      });
+
+      logger.info(`Generated signed URL with 24-hour expiration: ${downloadURL}`);
 
       await docRef.set({
         userId,
