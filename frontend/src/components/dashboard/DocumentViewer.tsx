@@ -155,21 +155,52 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   // Effect to handle Handsontable initialization and configuration
   useEffect(() => {
     if (workbookData && activeSheetName && hotInstance) {
-      // Force Handsontable to render properly
-      setTimeout(() => {
+      // Force Handsontable to render properly with multiple attempts
+      // This addresses the common issue with Handsontable not rendering all columns
+      // when initialized in a hidden container or when switching between tabs
+      const renderWithRetry = (attempt = 1, maxAttempts = 5) => {
+        console.log(`Rendering Handsontable attempt ${attempt}/${maxAttempts}`);
+        
+        // Ensure all columns have proper width
+        const columnCount = hotInstance.countCols();
+        console.log(`Setting widths for ${columnCount} columns`);
+        
+        for (let i = 0; i < columnCount; i++) {
+          hotInstance.setColWidth(i, 120); // Set explicit width for each column
+        }
+        
+        // Force render to apply column widths
+        hotInstance.render();
+        
+        // Check if we need to retry (if columns aren't properly rendered)
+        if (attempt < maxAttempts) {
+          setTimeout(() => {
+            // Get the actual rendered column count from the DOM
+            const renderedCols = hotInstance.rootElement.querySelectorAll('.ht_master .htCore thead tr th').length;
+            console.log(`Currently rendered columns: ${renderedCols} of ${columnCount}`);
+            
+            // If not all columns are rendered, retry
+            if (renderedCols < columnCount) {
+              renderWithRetry(attempt + 1, maxAttempts);
+            }
+          }, 200 * attempt); // Increasing delay with each attempt
+        }
+      };
+      
+      // Start the render process
+      renderWithRetry();
+      
+      // Additional render when window is resized to ensure proper display
+      const handleResize = () => {
         if (hotInstance) {
           hotInstance.render();
-          
-          // Ensure all columns have proper width
-          const columnCount = hotInstance.countCols();
-          for (let i = 0; i < columnCount; i++) {
-            hotInstance.setColWidth(i, 120); // Set explicit width for each column
-          }
-          
-          // Force another render to apply column widths
-          hotInstance.render();
         }
-      }, 100);
+      };
+      
+      window.addEventListener('resize', handleResize);
+      return () => {
+        window.removeEventListener('resize', handleResize);
+      };
     }
   }, [workbookData, activeSheetName, hotInstance]);
 
@@ -236,7 +267,9 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             style={{ 
               height: '500px', // Fixed height for stability
               width: '100%',
-              overflow: 'hidden'
+              overflow: 'hidden',
+              visibility: 'visible', // Ensure visibility for proper rendering
+              position: 'relative' // Needed for proper positioning
             }}
           >
             {/* Robust Handsontable configuration with fixed dimensions */}
@@ -254,10 +287,18 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               fixedColumnsLeft={0} // No fixed columns
               stretchH="none" // Don't stretch columns
               wordWrap={false} // No word wrapping
+              preventOverflow="horizontal" // Prevent horizontal overflow
+              outsideClickDeselects={false} // Better UX for selection
               afterGetColHeader={(col: number, TH: HTMLTableCellElement) => {
                 // Ensure header cells have minimum width
                 if (TH) {
                   TH.style.minWidth = '120px';
+                }
+              }}
+              beforeRender={() => {
+                // Before rendering, ensure the container is visible to the browser
+                if (hotTableRef.current) {
+                  hotTableRef.current.style.visibility = 'visible';
                 }
               }}
               afterRender={() => {
@@ -266,6 +307,14 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                   const instance = (hotTableRef.current as any).__hotInstance;
                   if (instance) {
                     setHotInstance(instance);
+                    
+                    // Log the number of columns for debugging
+                    console.log(`Handsontable rendered with ${instance.countCols()} columns`);
+                    
+                    // Force another render after a short delay
+                    setTimeout(() => {
+                      instance.render();
+                    }, 50);
                   }
                 }
               }}
@@ -278,6 +327,16 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               /* Ensure minimum column width */
               .handsontable th, .handsontable td {
                 min-width: 120px !important;
+              }
+              /* Make sure all columns are rendered */
+              .handsontable .htCore {
+                width: auto !important;
+                table-layout: fixed !important;
+              }
+              /* Ensure column headers are visible */
+              .handsontable .htCore thead th {
+                display: table-cell !important;
+                visibility: visible !important;
               }
               /* Improve scrollbar appearance */
               .handsontable ::-webkit-scrollbar {
