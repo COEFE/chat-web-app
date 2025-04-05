@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff } from 'lucide-react';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
@@ -474,60 +475,128 @@ export default function DashboardPage() {
       </header>
 
       <main className="flex-1 overflow-hidden p-6 pt-4">
-        <ResizablePanelGroup
-          direction="horizontal"
-          className="h-full rounded-lg border"
-        >
-          <ResizablePanel defaultSize={60}>
-            <div className="flex h-full flex-col p-6 overflow-auto">
-              {selectedDocument ? (
-                <div className="flex h-full flex-col">
-                  <div className="flex-1 overflow-hidden">
-                    {selectedDocument && <DocumentViewer document={selectedDocument} />}
+        {/* View mode state: 'split', 'full', or 'chat-only' */}
+        {(() => {
+          const [viewMode, setViewMode] = useState<'split' | 'full' | 'chat-only'>('split');
+          
+          // Toggle functions for view modes
+          const toggleFullScreen = () => setViewMode(viewMode === 'full' ? 'split' : 'full');
+          const toggleChatOnly = () => setViewMode(viewMode === 'chat-only' ? 'split' : 'chat-only');
+          
+          return (
+            <div className="h-full flex flex-col">
+              {/* View mode controls - only show when a document is selected */}
+              {selectedDocument && (
+                <div className="flex justify-end mb-2 gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={toggleFullScreen}
+                    title={viewMode === 'full' ? "Exit full screen" : "Full screen"}
+                  >
+                    {viewMode === 'full' ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={toggleChatOnly}
+                    title={viewMode === 'chat-only' ? "Show document" : "Hide document"}
+                  >
+                    {viewMode === 'chat-only' ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                  </Button>
+                </div>
+              )}
+              
+              {/* Fixed panel layout with different configurations based on view mode */}
+              <div className="flex-1 rounded-lg border overflow-hidden">
+                {viewMode === 'full' ? (
+                  // Full screen document view
+                  <div className="h-full">
+                    {selectedDocument ? (
+                      <div className="flex h-full flex-col p-6 overflow-auto">
+                        <div className="flex h-full flex-col">
+                          <div className="flex-1 overflow-hidden">
+                            {selectedDocument && <DocumentViewer document={selectedDocument} />}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-muted-foreground">
+                        Select a document to view.
+                      </div>
+                    )}
                   </div>
-                </div>
-              ) : (
-                <>
-                  <Card className="mb-6">
-                    <CardHeader>
-                      <CardTitle>Upload New Document</CardTitle>
-                      <CardDescription>Drag & drop files here or click to select files.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <FileUpload
-                        onUploadComplete={handleUploadComplete}
-                      />
-                    </CardContent>
-                  </Card>
-                  <DocumentTable
-                    documents={documents}
-                    isLoading={isLoadingDocs}
-                    error={errorDocs}
-                    onSelectDocument={(doc: MyDocumentData | null) => handleSelectDocument(doc)}
-                    onDeleteDocument={handleDeleteDocument}
-                  />
-                  {documents.length === 0 && (
-                    <p className="mt-4 text-center text-muted-foreground">No documents uploaded yet. Upload a file to start chatting.</p>
-                  )}
-                </>
-              )}
+                ) : viewMode === 'chat-only' ? (
+                  // Chat only view
+                  <div className="h-full">
+                    <div className="flex h-full flex-col p-6">
+                      {selectedDocumentId ? (
+                        <ChatInterface documentId={selectedDocumentId} />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-muted-foreground">
+                          Select a document to start chatting.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  // Default split view (80/20)
+                  <div className="flex h-full">
+                    {/* Document panel - fixed 80% width */}
+                    <div className="w-4/5 border-r">
+                      <div className="flex h-full flex-col p-6 overflow-auto">
+                        {selectedDocument ? (
+                          <div className="flex h-full flex-col">
+                            <div className="flex-1 overflow-hidden">
+                              {selectedDocument && <DocumentViewer document={selectedDocument} />}
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <Card className="mb-6">
+                              <CardHeader>
+                                <CardTitle>Upload New Document</CardTitle>
+                                <CardDescription>Drag & drop files here or click to select files.</CardDescription>
+                              </CardHeader>
+                              <CardContent>
+                                <FileUpload
+                                  onUploadComplete={handleUploadComplete}
+                                />
+                              </CardContent>
+                            </Card>
+                            <DocumentTable
+                              documents={documents}
+                              isLoading={isLoadingDocs}
+                              error={errorDocs}
+                              onSelectDocument={(doc: MyDocumentData | null) => handleSelectDocument(doc)}
+                              onDeleteDocument={handleDeleteDocument}
+                            />
+                            {documents.length === 0 && (
+                              <p className="mt-4 text-center text-muted-foreground">No documents uploaded yet. Upload a file to start chatting.</p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Chat panel - fixed 20% width */}
+                    <div className="w-1/5">
+                      <div className="flex h-full flex-col p-6">
+                        {selectedDocumentId ? (
+                          <ChatInterface documentId={selectedDocumentId} />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-muted-foreground">
+                            Select a document to start chatting.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </ResizablePanel>
-
-          <ResizableHandle withHandle />
-
-          <ResizablePanel defaultSize={40}>
-            <div className="flex h-full flex-col p-6">
-              {selectedDocumentId ? (
-                <ChatInterface documentId={selectedDocumentId} />
-              ) : (
-                <div className="flex h-full items-center justify-center text-muted-foreground">
-                  Select a document to start chatting.
-                </div>
-              )}
-            </div>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+          );
+        })()}
       </main>
     </div>
   );

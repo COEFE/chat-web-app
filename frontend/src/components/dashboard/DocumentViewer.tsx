@@ -7,10 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Loader2, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import * as XLSX from 'xlsx'; // Import xlsx library
 import mammoth from 'mammoth'; // Import mammoth for DOCX handling
-// No longer using Handsontable
+import { HotTable } from '@handsontable/react'; // Import HotTable
+import 'handsontable/dist/handsontable.full.min.css'; // Import Handsontable CSS
+import { registerAllModules } from 'handsontable/registry'; // Needed for features
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"; // Import Shadcn Tabs
 
-// No longer using Handsontable
+// Register Handsontable modules
+registerAllModules();
 
 // Import CSS for PDF rendering
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
@@ -47,8 +50,9 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
   const imageContainerRef = useRef<HTMLDivElement>(null);
-  // Reference to the table container
-  const tableContainerRef = useRef<HTMLDivElement>(null);
+  // Reference to the Handsontable container
+  const hotTableRef = useRef<HTMLDivElement>(null);
+  const [hotInstance, setHotInstance] = useState<any>(null);
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -148,12 +152,26 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     fetchDocumentContent();
   }, [document]); // Re-run when the document prop changes
 
-  // Generate HTML tables for each sheet
+  // Effect to handle Handsontable initialization and configuration
   useEffect(() => {
-    if (workbookData && activeSheetName) {
-      // Nothing to do here - we'll generate the HTML directly in the render
+    if (workbookData && activeSheetName && hotInstance) {
+      // Force Handsontable to render properly
+      setTimeout(() => {
+        if (hotInstance) {
+          hotInstance.render();
+          
+          // Ensure all columns have proper width
+          const columnCount = hotInstance.countCols();
+          for (let i = 0; i < columnCount; i++) {
+            hotInstance.setColWidth(i, 120); // Set explicit width for each column
+          }
+          
+          // Force another render to apply column widths
+          hotInstance.render();
+        }
+      }, 100);
     }
-  }, [workbookData, activeSheetName]);
+  }, [workbookData, activeSheetName, hotInstance]);
 
   // Define supported types for clarity
   const isPdf = document?.contentType === 'application/pdf';
@@ -213,65 +231,68 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             </TabsList>
           </Tabs>
           <div 
-            ref={tableContainerRef}
-            className="flex-1 overflow-auto border border-t-0 rounded-b-md p-1"
+            ref={hotTableRef}
+            className="flex-1 border border-t-0 rounded-b-md"
+            style={{ 
+              height: '500px', // Fixed height for stability
+              width: '100%',
+              overflow: 'hidden'
+            }}
           >
-            {/* Render basic HTML table for reliability */}
-            {workbookData && activeSheetName && (
-              <div className="excel-table-wrapper">
-                <table className="excel-table">
-                  <thead>
-                    <tr>
-                      {/* Create header row */}
-                      {workbookData.find(sheet => sheet.sheetName === activeSheetName)?.data[0]?.map((cell, index) => (
-                        <th key={index}>{cell !== undefined ? String(cell) : ''}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {/* Create data rows (skip header row) */}
-                    {workbookData.find(sheet => sheet.sheetName === activeSheetName)?.data.slice(1).map((row, rowIndex) => (
-                      <tr key={rowIndex}>
-                        {row.map((cell, cellIndex) => (
-                          <td key={cellIndex}>{cell !== undefined ? String(cell) : ''}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            {/* Robust Handsontable configuration with fixed dimensions */}
+            <HotTable
+              data={workbookData.find(sheet => sheet.sheetName === activeSheetName)?.data || []}
+              colHeaders={true}
+              rowHeaders={true}
+              width="100%"
+              height="100%"
+              colWidths={120} // Fixed column width
+              autoColumnSize={false} // Disable auto sizing for better performance
+              manualColumnResize={true} // Allow manual column resizing
+              contextMenu={true} // Enable context menu for Excel-like functionality
+              licenseKey="non-commercial-and-evaluation"
+              fixedColumnsLeft={0} // No fixed columns
+              stretchH="none" // Don't stretch columns
+              wordWrap={false} // No word wrapping
+              afterGetColHeader={(col: number, TH: HTMLTableCellElement) => {
+                // Ensure header cells have minimum width
+                if (TH) {
+                  TH.style.minWidth = '120px';
+                }
+              }}
+              afterRender={() => {
+                // Get the Handsontable instance
+                if (!hotInstance && hotTableRef.current) {
+                  const instance = (hotTableRef.current as any).__hotInstance;
+                  if (instance) {
+                    setHotInstance(instance);
+                  }
+                }
+              }}
+            />
             <style jsx global>{`
-              .excel-table-wrapper {
-                overflow-x: auto;
-                width: 100%;
+              /* Force horizontal scrollbar to be visible */
+              .handsontable .wtHolder {
+                overflow-x: auto !important;
               }
-              .excel-table {
-                border-collapse: collapse;
-                width: auto;
-                font-size: 0.875rem;
-                border: 1px solid #e5e7eb;
+              /* Ensure minimum column width */
+              .handsontable th, .handsontable td {
+                min-width: 120px !important;
               }
-              .excel-table th,
-              .excel-table td {
-                border: 1px solid #e5e7eb;
-                padding: 0.5rem 0.75rem; 
-                text-align: left;
-                min-width: 100px;
-                white-space: nowrap;
+              /* Improve scrollbar appearance */
+              .handsontable ::-webkit-scrollbar {
+                height: 10px;
+                width: 10px;
               }
-              .excel-table th {
-                background-color: #f3f4f6;
-                font-weight: 600;
-                position: sticky;
-                top: 0;
-                z-index: 10; 
+              .handsontable ::-webkit-scrollbar-track {
+                background: #f1f1f1;
               }
-              .excel-table tr:nth-child(even) td {
-                background-color: #f9fafb;
+              .handsontable ::-webkit-scrollbar-thumb {
+                background: #888;
+                border-radius: 5px;
               }
-              .excel-table tr:hover td {
-                background-color: #eff6ff;
+              .handsontable ::-webkit-scrollbar-thumb:hover {
+                background: #555;
               }
             `}</style>
           </div>
