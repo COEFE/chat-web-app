@@ -531,7 +531,7 @@ export default function DashboardPage() {
                   <div className="h-full">
                     <div className="flex h-full flex-col p-6">
                       {selectedDocumentId ? (
-                        <ChatInterface documentId={selectedDocumentId} />
+                        <ChatInterface documentId={selectedDocumentId} document={selectedDocument || undefined} />
                       ) : (
                         <div className="flex h-full items-center justify-center text-muted-foreground">
                           Select a document to start chatting.
@@ -583,7 +583,7 @@ export default function DashboardPage() {
                     <div className="w-1/5">
                       <div className="flex h-full flex-col p-6">
                         {selectedDocumentId ? (
-                          <ChatInterface documentId={selectedDocumentId} />
+                          <ChatInterface documentId={selectedDocumentId} document={selectedDocument || undefined} />
                         ) : (
                           <div className="flex h-full items-center justify-center text-muted-foreground">
                             Select a document to start chatting.

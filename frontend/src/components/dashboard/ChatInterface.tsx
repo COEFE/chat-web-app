@@ -23,10 +23,11 @@ interface ChatMessage {
 }
 
 interface ChatInterfaceProps {
-  documentId: string; 
+  documentId: string;
+  document?: MyDocumentData; 
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -67,7 +68,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId }) => {
         },
         body: JSON.stringify({ 
           message: userMessage.content, // Send the user's message content
-          documentId: documentId      
+          documentId: documentId,
+          currentDocument: document // Pass the full document object if available
         }),
       });
 

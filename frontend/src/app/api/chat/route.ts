@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     console.log('Request body:', body);
-    const { message, documentId } = body;
+    const { message, documentId, currentDocument } = body;
 
     if (!message || !documentId) {
       console.error('Missing message or documentId');
@@ -258,13 +258,31 @@ export async function POST(req: NextRequest) {
 
       console.log(`Calling Anthropic Claude 3.5 Sonnet with content length: ${documentContent.length}`);
 
+      // Prepare context about the current document for Claude
+      let currentDocumentContext = '';
+      if (currentDocument && currentDocument.id && [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+        'application/vnd.ms-excel', // .xls
+        'text/csv' // .csv
+      ].includes(currentDocument.contentType)) {
+        currentDocumentContext = `
+\nCURRENT EXCEL DOCUMENT INFORMATION:
+You are currently viewing an Excel document with the following details:
+- Document ID: ${currentDocument.id}
+- Document Name: ${currentDocument.name || 'Unnamed'}
+- Content Type: ${currentDocument.contentType}
+
+If the user asks you to edit this Excel file, you should automatically use this document ID in your response.
+`;
+      }
+
       const aiMsg = await anthropic.messages.create({
         model: 'claude-3-5-sonnet-20240620',
         max_tokens: 1024,
         messages: [
           {
             role: 'user',
-            content: `Based on the following document content, please answer the user's question.
+            content: `Based on the following document content, please answer the user's question.${currentDocumentContext}
 
 Document Content:
 ---
@@ -304,6 +322,8 @@ To edit an existing Excel file, include the following JSON in your response:
   ]
 }
 \`\`\`
+
+IMPORTANT: When editing the Excel file that the user is currently viewing, you should automatically use the current document ID that was provided to you in the context. Do not ask the user for the document ID if they are asking to edit the current file.
 
 IMPORTANT: For the "documentId" field when editing a file, you MUST use the actual document ID, not the file name. The document ID is a unique identifier that looks like "abc123xyz". If the user refers to a document by name, you should explain that you need the document ID to make edits. The user can find the document ID in the URL when viewing the document or in the document list.
 
