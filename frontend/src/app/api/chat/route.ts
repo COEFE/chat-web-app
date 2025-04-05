@@ -119,7 +119,7 @@ async function handleExcelOperation(req: NextRequest, userId: string, message: s
     
     try {
       // Call the Excel API to perform the operation
-      const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
+      const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel-process`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -128,9 +128,26 @@ async function handleExcelOperation(req: NextRequest, userId: string, message: s
         body: JSON.stringify(excelOperation),
       });
       
-      const excelResult = await excelResponse.json();
-      console.log('Excel API response status:', excelResponse.status);
-      console.log('Excel API response result:', excelResult);
+      console.log('Excel API Response Status:', excelResponse.status);
+      
+      // Check if the Excel API call was successful before parsing JSON
+      if (!excelResponse.ok) {
+        // Try to get error details, but handle cases where body might not be JSON
+        let errorBody = `Status: ${excelResponse.status}, StatusText: ${excelResponse.statusText}`;
+        try {
+          const errorJson = await excelResponse.json();
+          errorBody = JSON.stringify(errorJson);
+        } catch (e) {
+          // If parsing error JSON fails, use text
+          errorBody = await excelResponse.text(); 
+        }
+        console.error('Excel API returned an error:', errorBody);
+        throw new Error(`Excel API request failed: ${errorBody}`);
+      }
+      
+      // Only parse JSON if the response was ok
+      const excelResult = await excelResponse.json(); 
+      console.log('Excel API Response Parsed Body:', excelResult);
       
       if (excelResponse.ok) {
         // Create a success message
@@ -680,7 +697,7 @@ User Question: ${message}`,
     } catch (outerParseError) {
       console.log('Could not parse aiResponseContent as an outer JSON object. Assuming raw content.', outerParseError);
       // Fallback: Treat aiResponseContent as the raw string potentially containing JSON
-      aiContentString = aiResponseContent;
+      aiContentString = aiResponseContent.trim();
     }
 
     // Now, try to parse the extracted (or fallback) content string as the inner JSON
@@ -707,7 +724,7 @@ User Question: ${message}`,
         }
 
         console.log('Calling Excel API with parsed/normalized data:', parsedJson);
-        const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
+        const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel-process`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -716,35 +733,43 @@ User Question: ${message}`,
           body: JSON.stringify(parsedJson),
         });
 
-        const excelResult = await excelResponse.json();
         console.log('Excel API Response Status:', excelResponse.status);
+
+        // Check if the Excel API call was successful before parsing JSON
+        if (!excelResponse.ok) {
+          // Try to get error details, but handle cases where body might not be JSON
+          let errorBody = `Status: ${excelResponse.status}, StatusText: ${excelResponse.statusText}`;
+          try {
+            const errorJson = await excelResponse.json();
+            errorBody = JSON.stringify(errorJson);
+          } catch (e) {
+            // If parsing error JSON fails, use text
+            errorBody = await excelResponse.text(); 
+          }
+          console.error('Excel API returned an error:', errorBody);
+          throw new Error(`Excel API request failed: ${errorBody}`);
+        }
+
+        // Only parse JSON if the response was ok
+        const excelResult = await excelResponse.json(); 
         console.log('Excel API Response Parsed Body:', excelResult);
 
-        if (excelResponse.ok) {
-          excelOperationResult = excelResult;
+        // We already know excelResponse.ok is true here
+        excelOperationResult = excelResult;
 
-          const successMessage = createSuccessMessage(parsedJson, excelResult);
+        const successMessage = createSuccessMessage(parsedJson, excelResult);
 
-          console.log("Excel operation successful. Replacing inner JSON string with success message.");
-          console.log("Inner JSON string to replace:", aiContentString);
-          // Replace the inner JSON *string* within the original aiResponseContent
-          finalResponseContent = aiResponseContent.replace(aiContentString, successMessage);
-          console.log("Final content after replacement:", finalResponseContent);
+        console.log("Excel operation successful. Replacing inner JSON string with success message.");
+        console.log("Inner JSON string to replace:", aiContentString);
+        // Replace the inner JSON *string* within the original aiResponseContent
+        finalResponseContent = aiResponseContent.replace(aiContentString, successMessage);
+        console.log("Final content after replacement:", finalResponseContent);
 
-        } else {
-          const errorMessage = createErrorMessage(parsedJson, excelResult);
-
-          console.log("Excel operation failed. Replacing inner JSON string with error message.");
-          console.log("Inner JSON string to replace:", aiContentString);
-          // Replace the inner JSON *string* within the original aiResponseContent
-          finalResponseContent = aiResponseContent.replace(aiContentString, errorMessage);
-          console.log("Final content after replacement:", finalResponseContent);
-        }
       } catch (error) {
-        console.error('Error parsing inner JSON string or calling Excel API:', error);
+        console.error('*** Error during inner JSON parsing or Excel API call ***', error);
         // Log the full error object for detailed diagnosis
         console.error('Full Error Object:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
-        // If parsing/processing fails, keep the original AI response content
+        console.log('Falling back to original aiResponseContent due to inner processing error.');
         finalResponseContent = aiResponseContent;
       }
     } else {
