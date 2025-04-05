@@ -2,71 +2,20 @@ import { NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
 import admin from 'firebase-admin';
-import { getStorage } from 'firebase-admin/storage';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getAdminDb, getAdminStorage } from './firebaseAdminConfig';
 
-// Initialize Firebase Admin if not already initialized
-let firebaseApp: admin.app.App;
-try {
-  firebaseApp = admin.app();
-} catch (error) {
-  // Initialize the app if it doesn't exist
-  try {
-    // Check for individual credential parts first (preferred method)
-    if (process.env.FIREBASE_PROJECT_ID && 
-        process.env.FIREBASE_CLIENT_EMAIL && 
-        process.env.FIREBASE_PRIVATE_KEY) {
-      
-      const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-      
-      console.log('Initializing Firebase Admin with individual credential parts');
-      firebaseApp = admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: privateKey
-        }),
-        storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
-      });
-    } 
-    // Fall back to full credentials object if available
-    else if (process.env.FIREBASE_ADMIN_SDK_CREDENTIALS) {
-      console.log('Initializing Firebase Admin with full credentials object');
-      const serviceAccount = JSON.parse(process.env.FIREBASE_ADMIN_SDK_CREDENTIALS);
-      firebaseApp = admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
-      });
-    }
-    else {
-      console.error('Firebase Admin SDK credentials not found in environment variables');
-      // Create a dummy app for development/testing
-      console.log('Creating dummy Firebase app for development');
-      firebaseApp = admin.initializeApp({
-        projectId: 'dummy-project-id'
-      });
-    }
-  } catch (initError) {
-    console.error('Error initializing Firebase Admin:', initError);
-    // Create a dummy app for development/testing
-    console.log('Creating dummy Firebase app after initialization error');
-    firebaseApp = admin.initializeApp({
-      projectId: 'dummy-project-id-after-error'
-    });
-  }
-}
-
-// Get Firestore and Storage instances
+// Get Firestore and Storage instances from the centralized Firebase Admin config
 let db: any = null;
 let storage: any = null;
 let bucket: any = null;
 
 // Try to initialize Firebase services, but handle gracefully if they fail
 try {
-  db = getFirestore(firebaseApp);
-  storage = getStorage(firebaseApp);
+  // Use the centralized Firebase Admin initialization
+  db = getAdminDb();
+  storage = getAdminStorage();
   bucket = storage.bucket();
-  console.log('Firebase services initialized successfully');
+  console.log('Firebase services initialized successfully from firebaseAdminConfig');
 } catch (error) {
   console.error('Error initializing Firebase services:', error);
   console.log('Will use fallback dummy implementations for Excel operations');
