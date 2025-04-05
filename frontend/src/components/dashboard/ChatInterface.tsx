@@ -13,6 +13,13 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'ai';
   content: string;
+  excelOperation?: {
+    success: boolean;
+    message: string;
+    documentId?: string;
+    fileName?: string;
+    url?: string;
+  };
 }
 
 interface ChatInterfaceProps {
@@ -84,9 +91,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId }) => {
             const aiResponse: ChatMessage = { 
               id: aiData.response.id || Date.now().toString(), 
               role: 'ai', 
-              content: aiData.response.content 
+              content: aiData.response.content,
+              excelOperation: aiData.response.excelOperation || undefined
             };
             setMessages((prev) => [...prev, aiResponse]);
+            
+            // If there was an Excel operation, refresh the document list
+            if (aiResponse.excelOperation && aiResponse.excelOperation.success) {
+              // You could trigger a document list refresh here if needed
+              console.log('Excel operation successful:', aiResponse.excelOperation);
+            }
           } else if (aiData && typeof aiData === 'object') {
             // Try to extract content from different possible structures
             let content = '';
@@ -169,13 +183,50 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId }) => {
               <div
                 key={message.id}
                 className={cn(
-                  "flex max-w-[75%] flex-col gap-2 rounded-lg px-3 py-2 text-sm whitespace-normal break-words",
-                  message.role === "user"
-                    ? "ml-auto bg-primary text-primary-foreground"
-                    : "bg-muted"
+                  'mb-4 flex',
+                  message.role === 'user' ? 'justify-end' : 'justify-start'
                 )}
               >
-                {message.content}
+                <div
+                  className={cn(
+                    'rounded-lg px-4 py-2 max-w-[80%]',
+                    message.role === 'user'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted'
+                  )}
+                >
+                  <div className="whitespace-pre-wrap">{message.content}</div>
+                  
+                  {/* Display Excel operation result if available */}
+                  {message.excelOperation && (
+                    <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                      <div className="text-sm font-medium">
+                        {message.excelOperation.success ? (
+                          <div className="flex flex-col space-y-2">
+                            <span className="text-green-600 dark:text-green-400">
+                              Excel file {message.excelOperation.fileName ? `"${message.excelOperation.fileName}"` : ""} 
+                              {message.excelOperation.documentId ? "updated" : "created"} successfully
+                            </span>
+                            {message.excelOperation.url && (
+                              <a 
+                                href={message.excelOperation.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="text-blue-600 dark:text-blue-400 hover:underline"
+                              >
+                                Download Excel File
+                              </a>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-red-600 dark:text-red-400">
+                            Error: {message.excelOperation.message}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
             {isLoading && (

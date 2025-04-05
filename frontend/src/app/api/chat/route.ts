@@ -264,7 +264,48 @@ export async function POST(req: NextRequest) {
         messages: [
           {
             role: 'user',
-            content: `Based on the following document content, please answer the user's question.\n\nDocument Content:\n---\n${documentContent}\n---\n\nUser Question: ${message}`,
+            content: `Based on the following document content, please answer the user's question.
+
+Document Content:
+---
+${documentContent}
+---
+
+You have the ability to create and edit Excel files. If the user asks you to create or modify an Excel file, you can do so by responding with a special JSON format.
+
+To create a new Excel file, include the following JSON in your response:
+
+\`\`\`json
+{
+  "excel_operation": "create",
+  "fileName": "name_of_file",
+  "data": [
+    {
+      "sheetName": "Sheet1",
+      "sheetData": [["Header1", "Header2"], ["Value1", "Value2"]]
+    }
+  ]
+}
+\`\`\`
+
+To edit an existing Excel file, include the following JSON in your response:
+
+\`\`\`json
+{
+  "excel_operation": "edit",
+  "documentId": "id_of_document",
+  "data": [
+    {
+      "sheetName": "Sheet1",
+      "cellUpdates": [
+        {"cell": "A1", "value": "New Value"}
+      ]
+    }
+  ]
+}
+\`\`\`
+
+User Question: ${message}`,
           },
         ],
       });
@@ -283,11 +324,69 @@ export async function POST(req: NextRequest) {
     }
     // --- End AI Call ---
 
+    // Process Excel operations in AI response if present
+    let processedResponse = aiResponseContent;
+    let excelOperationResult = null;
+    
+    // Check for Excel operation JSON in the response
+    const jsonRegex = /```json\s*({[\s\S]*?})\s*```/g;
+    const jsonMatches = [...aiResponseContent.matchAll(jsonRegex)];
+    
+    if (jsonMatches.length > 0) {
+      // Process the first JSON block that contains an Excel operation
+      for (const match of jsonMatches) {
+        try {
+          const jsonStr = match[1];
+          const jsonData = JSON.parse(jsonStr);
+          
+          if (jsonData.excel_operation) {
+            console.log('Detected Excel operation in AI response:', jsonData.excel_operation);
+            
+            // Call the Excel API to perform the operation
+            const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': req.headers.get('Authorization') || '',
+              },
+              body: JSON.stringify(jsonData),
+            });
+            
+            const excelResult = await excelResponse.json();
+            
+            if (excelResponse.ok) {
+              excelOperationResult = excelResult;
+              
+              // Replace the JSON block with a success message
+              const successMessage = jsonData.excel_operation === 'create' 
+                ? `I've created a new Excel file named "${jsonData.fileName}" for you.` 
+                : `I've updated the Excel file as requested.`;
+              
+              processedResponse = processedResponse.replace(match[0], successMessage);
+            } else {
+              // Replace the JSON block with an error message
+              processedResponse = processedResponse.replace(
+                match[0], 
+                `I tried to ${jsonData.excel_operation} an Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`
+              );
+            }
+            
+            // Only process the first valid Excel operation
+            break;
+          }
+        } catch (error) {
+          console.error('Error processing JSON in AI response:', error);
+          // Continue to the next JSON block if there's an error
+        }
+      }
+    }
+    
     return NextResponse.json({ 
       response: {
         id: `ai-${Date.now()}`,
         role: 'ai',
-        content: aiResponseContent,
+        content: processedResponse,
+        excelOperation: excelOperationResult,
       }
     }, { status: 200 });
 
