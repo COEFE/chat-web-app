@@ -2,13 +2,6 @@ import admin, { ServiceAccount } from 'firebase-admin';
 
 let firebaseAdminInstance: admin.app.App | null = null;
 
-// Define the expected structure for credentials from environment variables
-interface FirebaseCredentials {
-  projectId: string;
-  clientEmail: string;
-  privateKey: string;
-}
-
 // For debugging Vercel environment issues
 const isVercel = process.env.VERCEL === '1';
 const environment = isVercel ? 'Vercel' : 'Local';
@@ -16,7 +9,7 @@ console.log(`Running in ${environment} environment`);
 
 /**
  * Initializes the Firebase Admin SDK if it hasn't been initialized yet.
- * Uses individual environment variables suitable for Vercel deployments.
+ * Uses a Base64 encoded service account key for reliable initialization across environments.
  */
 export function initializeFirebaseAdmin(): admin.app.App {
   if (firebaseAdminInstance) {
@@ -24,86 +17,100 @@ export function initializeFirebaseAdmin(): admin.app.App {
     return firebaseAdminInstance;
   }
 
-  console.log('Attempting to initialize Firebase Admin SDK using individual environment variables...');
-
-  // Retrieve credentials from environment variables
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  let privateKey = process.env.FIREBASE_PRIVATE_KEY;
-
-  // Validate required environment variables
-  if (!projectId) {
-    throw new Error('FIREBASE_PROJECT_ID environment variable is not set.');
-  }
-  if (!clientEmail) {
-    throw new Error('FIREBASE_CLIENT_EMAIL environment variable is not set.');
-  }
-  if (!privateKey) {
-    throw new Error('FIREBASE_PRIVATE_KEY environment variable is not set.');
-  }
-
-  console.log('Found required Firebase environment variables:');
-  console.log(`- FIREBASE_PROJECT_ID: ${projectId}`);
-  console.log(`- FIREBASE_CLIENT_EMAIL: ${clientEmail}`);
-  console.log(`- FIREBASE_PRIVATE_KEY length: ${privateKey.length}`);
-  console.log(`- FIREBASE_PRIVATE_KEY starts with: ${privateKey.substring(0, 50)}...`);
-  console.log(`- FIREBASE_PRIVATE_KEY ends with: ${privateKey.slice(-50)}`);
-
-  // IMPORTANT: Handle private key format
-  // The key needs to have actual newlines for the Firebase Admin SDK
-  
-  // Simple approach that works reliably
-  if (privateKey && privateKey.includes('\\n')) {
-    // Replace escaped newlines with actual newlines
-    privateKey = privateKey.replace(/\\n/g, '\n');
-  }
-  
-  // If the key is JSON stringified (common in Vercel)
-  if (privateKey && privateKey.startsWith('"') && privateKey.endsWith('"')) {
-    try {
-      const parsedKey = JSON.parse(privateKey);
-      if (typeof parsedKey === 'string') {
-        privateKey = parsedKey;
-        console.log('Successfully parsed private key from JSON string');
-      }
-    } catch (e) {
-      console.log('Failed to parse private key as JSON, using as-is');
-    }
-  }
-
-  console.log('Private Key after replacing \\n/\n and removing quotes:');
-  console.log(`- Length: ${privateKey.length}`);
-  console.log(`- Starts with: ${privateKey.substring(0, 50)}...`);
-  console.log(`- Ends with: ${privateKey.slice(-50)}`);
-
-
-  // Construct the credentials object for the SDK (expects camelCase)
-  const credentials: FirebaseCredentials = {
-    projectId,
-    clientEmail,
-    privateKey, 
-  };
+  console.log('Attempting to initialize Firebase Admin SDK...');
 
   try {
-    // Initialize Firebase Admin SDK with the constructed credentials
+    // First attempt: Try using Base64 encoded service account (most reliable method)
+    const serviceAccountBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
+    
+    if (serviceAccountBase64) {
+      try {
+        console.log('Found FIREBASE_SERVICE_ACCOUNT_BASE64, attempting to decode and initialize...');
+        
+        // Decode the Base64 string to get the JSON string
+        let serviceAccountJson: string;
+        
+        // In Node.js environment
+        if (typeof Buffer !== 'undefined') {
+          serviceAccountJson = Buffer.from(serviceAccountBase64, 'base64').toString('utf8');
+        } 
+        // In browser or edge environment
+        else {
+          serviceAccountJson = atob(serviceAccountBase64);
+        }
+        
+        // Parse the JSON string to get the service account object
+        const serviceAccount = JSON.parse(serviceAccountJson);
+        
+        // Initialize Firebase Admin with the service account
+        firebaseAdminInstance = admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount as ServiceAccount),
+        });
+        
+        console.log('Firebase Admin SDK initialized successfully with Base64 encoded service account.');
+        return firebaseAdminInstance;
+      } catch (base64Error) {
+        console.error('Failed to initialize with Base64 encoded service account:', base64Error);
+      }
+    } else {
+      console.log('FIREBASE_SERVICE_ACCOUNT_BASE64 not found, trying other methods...');
+    }
+    
+    // Second attempt: Try using Google Application Default Credentials
+    try {
+      console.log('Trying to initialize with Application Default Credentials...');
+      firebaseAdminInstance = admin.initializeApp({
+        credential: admin.credential.applicationDefault(),
+      });
+      console.log('Firebase Admin SDK initialized successfully with Application Default Credentials.');
+      return firebaseAdminInstance;
+    } catch (adcError) {
+      console.log('Application Default Credentials not available, falling back to environment variables.');
+    }
+
+    // Third attempt: Try using individual environment variables
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+    // Validate required environment variables
+    if (!projectId || !clientEmail || !privateKey) {
+      throw new Error('Required Firebase environment variables are not set.');
+    }
+
+    console.log('Found individual Firebase environment variables');
+
+    // Process the private key if needed
+    if (privateKey && privateKey.startsWith('"') && privateKey.endsWith('"')) {
+      try {
+        const parsedKey = JSON.parse(privateKey);
+        if (typeof parsedKey === 'string') {
+          privateKey = parsedKey;
+        }
+      } catch (e) {
+        // Continue with the original value if parsing fails
+      }
+    }
+
+    if (privateKey && privateKey.includes('\\n')) {
+      privateKey = privateKey.replace(/\\n/g, '\n');
+    }
+
+    // Initialize with individual environment variables
     firebaseAdminInstance = admin.initializeApp({
-      credential: admin.credential.cert(credentials as ServiceAccount), // Cast needed as our interface is simpler
+      credential: admin.credential.cert({
+        projectId,
+        clientEmail,
+        privateKey,
+      } as ServiceAccount),
     });
 
-    console.log('Firebase Admin SDK initialized successfully using individual environment variables.');
+    console.log('Firebase Admin SDK initialized successfully with individual environment variables.');
+    return firebaseAdminInstance;
   } catch (error: any) {
-    console.error('Failed to initialize Firebase Admin SDK using individual ENV vars:', error);
-    // Log credentials details (excluding full private key) for debugging
-    console.error('Credentials used:');
-    console.error(`- Project ID: ${credentials.projectId}`);
-    console.error(`- Client Email: ${credentials.clientEmail}`);
-    console.error(`- Private Key Length: ${credentials.privateKey?.length}`);
-    console.error(`- Private Key Start: ${credentials.privateKey?.substring(0, 30)}...`);
-    console.error(`- Private Key End: ${credentials.privateKey?.slice(-30)}`);
+    console.error('Failed to initialize Firebase Admin SDK:', error);
     throw new Error(`Failed to initialize Firebase Admin SDK: ${error.message}`);
   }
-
-  return firebaseAdminInstance;
 }
 
 /**
