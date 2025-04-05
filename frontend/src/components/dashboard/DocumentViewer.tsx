@@ -7,13 +7,10 @@ import { Button } from '@/components/ui/button';
 import { Loader2, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import * as XLSX from 'xlsx'; // Import xlsx library
 import mammoth from 'mammoth'; // Import mammoth for DOCX handling
-import { HotTable } from '@handsontable/react'; // Import HotTable
-import 'handsontable/dist/handsontable.full.min.css'; // Import Handsontable CSS
-import { registerAllModules } from 'handsontable/registry'; // Needed for features
+// No longer using Handsontable
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"; // Import Shadcn Tabs
 
-// Register Handsontable modules
-registerAllModules();
+// No longer using Handsontable
 
 // Import CSS for PDF rendering
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
@@ -50,8 +47,8 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
   const imageContainerRef = useRef<HTMLDivElement>(null);
-  // Reference to the Handsontable container div
-  const hotContainerRef = useRef<HTMLDivElement>(null);
+  // Reference to the table container
+  const tableContainerRef = useRef<HTMLDivElement>(null);
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -151,43 +148,10 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     fetchDocumentContent();
   }, [document]); // Re-run when the document prop changes
 
-  // Effect to handle container resizing and force Handsontable to recalculate dimensions
+  // Generate HTML tables for each sheet
   useEffect(() => {
-    // Only run if we have workbook data and an active sheet
     if (workbookData && activeSheetName) {
-      // Function to update container width explicitly
-      const updateContainerWidth = () => {
-        if (hotContainerRef.current) {
-          // Force the container to take full width of its parent
-          hotContainerRef.current.style.width = '100%';
-          hotContainerRef.current.style.height = '100%';
-          hotContainerRef.current.style.overflow = 'hidden';
-          
-          // Dispatch a resize event to force Handsontable to recalculate
-          window.dispatchEvent(new Event('resize'));
-        }
-      };
-      
-      // Call immediately
-      updateContainerWidth();
-      
-      // Set up a short delay to ensure DOM is fully rendered
-      const timeoutId = setTimeout(updateContainerWidth, 100);
-      
-      // Set up resize observer to handle window resizing
-      const resizeObserver = new ResizeObserver(() => {
-        updateContainerWidth();
-      });
-      
-      if (hotContainerRef.current) {
-        resizeObserver.observe(hotContainerRef.current);
-      }
-      
-      // Clean up
-      return () => {
-        clearTimeout(timeoutId);
-        resizeObserver.disconnect();
-      };
+      // Nothing to do here - we'll generate the HTML directly in the render
     }
   }, [workbookData, activeSheetName]);
 
@@ -249,43 +213,65 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             </TabsList>
           </Tabs>
           <div 
-            ref={hotContainerRef}
-            className="flex-1 overflow-hidden border border-t-0 rounded-b-md relative"
-            style={{ width: '100%', height: '100%', minHeight: '300px' }}
+            ref={tableContainerRef}
+            className="flex-1 overflow-auto border border-t-0 rounded-b-md p-1"
           >
-            {/* Enhanced Handsontable configuration */}
-            <HotTable
-              data={workbookData.find(sheet => sheet.sheetName === activeSheetName)?.data || []}
-              colHeaders={true}
-              rowHeaders={true}
-              width="100%"
-              height="100%"
-              colWidths={100} // Set explicit column width
-              stretchH="all" // Stretch columns to fit width
-              autoColumnSize={false} // Disable auto sizing for better performance
-              manualColumnResize={true} // Allow manual column resizing
-              contextMenu={true} // Enable context menu
-              licenseKey="non-commercial-and-evaluation"
-              afterGetColHeader={(col, TH) => {
-                // Ensure header cells have minimum width
-                if (TH) {
-                  TH.style.minWidth = '100px';
-                }
-              }}
-            />
+            {/* Render basic HTML table for reliability */}
+            {workbookData && activeSheetName && (
+              <div className="excel-table-wrapper">
+                <table className="excel-table">
+                  <thead>
+                    <tr>
+                      {/* Create header row */}
+                      {workbookData.find(sheet => sheet.sheetName === activeSheetName)?.data[0]?.map((cell, index) => (
+                        <th key={index}>{cell !== undefined ? String(cell) : ''}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Create data rows (skip header row) */}
+                    {workbookData.find(sheet => sheet.sheetName === activeSheetName)?.data.slice(1).map((row, rowIndex) => (
+                      <tr key={rowIndex}>
+                        {row.map((cell, cellIndex) => (
+                          <td key={cellIndex}>{cell !== undefined ? String(cell) : ''}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <style jsx global>{`
-              /* Ensure Handsontable takes full width/height of container */
-              .handsontable-container .handsontable {
-                width: 100% !important;
-                height: 100% !important;
+              .excel-table-wrapper {
+                overflow-x: auto;
+                width: 100%;
               }
-              /* Fix for header cells */
-              .handsontable th {
-                min-width: 100px;
+              .excel-table {
+                border-collapse: collapse;
+                width: auto;
+                font-size: 0.875rem;
+                border: 1px solid #e5e7eb;
               }
-              /* Fix for data cells */
-              .handsontable td {
+              .excel-table th,
+              .excel-table td {
+                border: 1px solid #e5e7eb;
+                padding: 0.5rem 0.75rem; 
+                text-align: left;
                 min-width: 100px;
+                white-space: nowrap;
+              }
+              .excel-table th {
+                background-color: #f3f4f6;
+                font-weight: 600;
+                position: sticky;
+                top: 0;
+                z-index: 10; 
+              }
+              .excel-table tr:nth-child(even) td {
+                background-color: #f9fafb;
+              }
+              .excel-table tr:hover td {
+                background-color: #eff6ff;
               }
             `}</style>
           </div>
