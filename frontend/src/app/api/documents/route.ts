@@ -51,13 +51,53 @@ export async function GET(req: NextRequest) {
     const documents = snapshot.docs.map((doc) => {
       const data = doc.data();
       console.log(`Document data for ${doc.id}:`, data);
+      
+      // Normalize content type for Excel files
+      let contentType = data.contentType || 'unknown';
+      
+      // Log the content type for debugging
+      console.log(`Original content type for ${doc.id}: ${contentType}`);
+      
+      // Normalize Excel content types to ensure consistent handling
+      if (contentType.includes('excel') || 
+          contentType.includes('spreadsheet') || 
+          contentType.includes('xlsx') || 
+          contentType.includes('xls') || 
+          contentType.includes('csv')) {
+        console.log(`Normalizing Excel content type for ${doc.id}`);
+        if (data.name?.toLowerCase().endsWith('.xlsx')) {
+          contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        } else if (data.name?.toLowerCase().endsWith('.xls')) {
+          contentType = 'application/vnd.ms-excel';
+        } else if (data.name?.toLowerCase().endsWith('.csv')) {
+          contentType = 'text/csv';
+        }
+      }
+      
+      // Handle timestamps properly
+      let uploadedAt = data.uploadedAt;
+      if (uploadedAt?.toDate) {
+        uploadedAt = uploadedAt.toDate();
+      } else if (uploadedAt && typeof uploadedAt === 'string') {
+        try {
+          uploadedAt = new Date(uploadedAt);
+        } catch (e) {
+          console.warn(`Could not parse uploadedAt string: ${uploadedAt}`);
+          uploadedAt = null;
+        }
+      } else if (!uploadedAt && data.createdAt) {
+        // Fall back to createdAt if uploadedAt is missing
+        uploadedAt = data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt;
+      }
+      
       return {
         id: doc.id,
-        filename: data.name || data.filename || data.originalName || doc.id,
-        contentType: data.contentType || 'unknown',
+        name: data.name || data.filename || data.originalName || doc.id,
+        contentType: contentType,
         downloadURL: data.downloadURL || null,
-        createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt, // Handle potential timestamp format
-        // Add other fields like storagePath if stored and needed
+        uploadedAt: uploadedAt,
+        createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt,
+        storagePath: data.storagePath || null,
       };
     });
 
