@@ -7,22 +7,28 @@ const isVercel = process.env.VERCEL === '1';
 const environment = isVercel ? 'Vercel' : 'Local';
 console.log(`Running in ${environment} environment`);
 
-// Log all environment variables related to Firebase (without exposing sensitive values)
-const envVars = {
-  FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID ? 'Set' : 'Not set',
-  FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL ? 'Set' : 'Not set',
-  FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY ? `Set (length: ${process.env.FIREBASE_PRIVATE_KEY.length})` : 'Not set',
-  GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS ? 'Set' : 'Not set',
-  FIREBASE_DATABASE_URL: process.env.FIREBASE_DATABASE_URL ? 'Set' : 'Not set',
-  FIREBASE_STORAGE_BUCKET: process.env.FIREBASE_STORAGE_BUCKET ? 'Set' : 'Not set',
-  NODE_ENV: process.env.NODE_ENV || 'Not set'
+// Create a service account from environment variables or direct JSON
+const serviceAccount = {
+  type: 'service_account',
+  project_id: 'web-chat-app-fa7f0',
+  private_key_id: '99a5d24a3efee832bf078cd21c1463eb24bb5846',
+  private_key: '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC64uQKBVr6G7ER\n4rHiMa+QqwBIKzLGixq87K8Oim1dAeXvO4C30eeV8x8dQDHGmJ58exnFX4ixS9OH\nP43sRwfOjl2QLu9ty0T3YWhep6+DAAazZX6OHmcv2OIdV3BR5VvWIR7vzE6ACIwm\nC1YpyQBQcrOt56ySuuf14uj0BWLBcerxspT9hwulMNRjfXlTlDOMMPwe1/h0qQZt\ny4wUDtBh0Fuz4XpYDBknQ9k+XzDW+KFRTW5noRZlg91IBvrm5r1JHX2Mn2cYXbGk\nNaRIDIeJLEzFrXR4b24/GDvIjOEzgd0hWX1/x3AcL5X0qMr2MBvcRncVgFWdHq7w\nEkWNq8DrAgMBAAECggEACbU1hqERQRgP0k+wpoD8OgtCoCfA+Hf2CJr8MPOB4NNI\nwBea2nGd57fRsEb1uaI97ADHrZgGgBHh8rmbbrWgiIX0Au8H4u/XLPPeDw9Y2k41\ntZCadVl2ShGoapZwhYs2LQuwEWF528QV5k1adCCL0qH9XBWXwlDRMdWlUjUMFI5L\n0iz6osILpdQ9Bh0jRwntbVU/uHxMNfPcuGIuW5XpAYLqXRwX0GySdybH/mN+kZWN\nKKmW1XwzKc31crOmJlxlAnDx+zlCVwXWDbuNfh4xBa0jltT/xAAJKlSQS1etsnU+\n/0gQgFM8W6clPNUUAiCmGgflQSGHxnBU5pa0t1G02QKBgQDzeHGhjOYOtwAFQiwl\nqvdPrC8Thef4nDBMKUFIMaGLzCSaHwDSzp3nAeQHdNPbEl2o0WByVTmn53qrMzAs\nmjGoyOy8lb3h/CBeY3LaI3fJZPxMMkR7x1Twebckx1xyVyrIpMGRc2wZVzGf/pgS\nmL0Kcbf3KXFCRQPqQUvqk4GVBwKBgQDEgP02IrKA9oVrEJyLt9zZTXhqwrI7/EKv\nRTMBJqlhzhnBbeP4CQm213NI8E9Ue9RXW9l4kc/70ItYSFe09QKhvEb7DgyKh0iZ\nZS+8J90F1x9Jy8oiADOyAZu/Z9yowMv6p21AN0oq3LEXYD8hJqFyuMnCcg2nYwZ9\nRoEf/qt//QKBgF2dTxvN4FuCE9jxw6XMIgGZdBRupW4bKBrwtfA7XSEyolQ8XYWw\n+lfrizEuw5L1cdvKfeoYSO39fFY9fWV4+GUstJIihXtSBWQlmvCzOIjQco4dueVa\nFJfORRQ4L5yrVYEGkIMLvWHU+/jH3NMxtWZBqXm4jprrjIDTEIymoOmbAoGABghf\nvbW6/TKUTgEojTGL2jACrmRjzGumMHNTaYmiUZpeOA4Dna3JWo+qvmaCSPm0PypW\nttjjJbv1SzSNXMTY29ZH55U61VXp6Kuul3wx0OgV0dIr1ndjHuflvC6YG6YvnPZe\n6EXKRR6ZYTpXNdFVy4vYxdtyh90GafosJKtQ4JECgYEAsROBTEaT5A4JXVW7jt7b\nvKXOCgne9vek0QRpnaAlQWc8O0vc5HwYdXWmfjiXhNGnWbX67QALeODMP+DA6tGT\nz093eG0RBDdmrYH6pvI89D5kd1asenIEn56HaBiMtDO3vk/GyZmy7lD3XQw0YcLd\n/UFewzsu6jEjOHg1aVLMq4k=\n-----END PRIVATE KEY-----\n',
+  client_email: 'firebase-adminsdk-fbsvc@web-chat-app-fa7f0.iam.gserviceaccount.com',
+  client_id: '110858865888826309936',
+  auth_uri: 'https://accounts.google.com/o/oauth2/auth',
+  token_uri: 'https://oauth2.googleapis.com/token',
+  auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
+  client_x509_cert_url: 'https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40web-chat-app-fa7f0.iam.gserviceaccount.com',
+  universe_domain: 'googleapis.com'
 };
 
-console.log('Firebase-related environment variables:', envVars);
+console.log(`Using service account for project: ${serviceAccount.project_id}`);
+console.log(`Service account email: ${serviceAccount.client_email}`);
+
 
 /**
  * Initializes the Firebase Admin SDK if it hasn't been initialized yet.
- * Uses environment variables for configuration.
+ * Uses a direct service account configuration.
  */
 export function initializeFirebaseAdmin(): admin.app.App {
   if (firebaseAdminInstance) {
@@ -33,115 +39,30 @@ export function initializeFirebaseAdmin(): admin.app.App {
   console.log('Attempting to initialize Firebase Admin SDK...');
 
   try {
-    // First attempt: Try using Google Application Default Credentials
+    // Initialize with the hardcoded service account
+    console.log('Initializing with direct service account configuration...');
+    
+    // Use the service account directly
+    firebaseAdminInstance = admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount as ServiceAccount),
+      storageBucket: `${serviceAccount.project_id}.appspot.com`
+    });
+    
+    console.log(`Firebase Admin SDK initialized successfully with project ID: ${serviceAccount.project_id}`);
+    return firebaseAdminInstance;
+  } catch (error: any) {
+    console.error('Failed to initialize Firebase Admin SDK:', error);
+    
+    // Fallback to Application Default Credentials if available
     try {
-      console.log('Trying to initialize with Application Default Credentials...');
+      console.log('Trying to initialize with Application Default Credentials as fallback...');
       firebaseAdminInstance = admin.initializeApp({
         credential: admin.credential.applicationDefault(),
       });
       console.log('Firebase Admin SDK initialized successfully with Application Default Credentials.');
       return firebaseAdminInstance;
     } catch (adcError) {
-      console.log('Application Default Credentials not available, falling back to environment variables.');
-    }
-
-    // Second attempt: Try using individual environment variables
-    const projectId = process.env.FIREBASE_PROJECT_ID;
-    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-    let privateKey = process.env.FIREBASE_PRIVATE_KEY;
-
-    console.log('Firebase environment variables values (partial):');
-    console.log(`- FIREBASE_PROJECT_ID: ${projectId ? projectId : 'Not set'}`);
-    console.log(`- FIREBASE_CLIENT_EMAIL: ${clientEmail ? clientEmail.substring(0, 5) + '...' : 'Not set'}`);
-    console.log(`- FIREBASE_PRIVATE_KEY length: ${privateKey ? privateKey.length : 0}`);
-
-    // Validate required environment variables
-    if (!projectId || !clientEmail || !privateKey) {
-      const missing = [];
-      if (!projectId) missing.push('FIREBASE_PROJECT_ID');
-      if (!clientEmail) missing.push('FIREBASE_CLIENT_EMAIL');
-      if (!privateKey) missing.push('FIREBASE_PRIVATE_KEY');
-      throw new Error(`Required Firebase environment variables are not set: ${missing.join(', ')}`);
-    }
-
-    console.log('Found all required Firebase environment variables');
-
-    // Process the private key if needed
-    if (privateKey && privateKey.startsWith('"') && privateKey.endsWith('"')) {
-      try {
-        const parsedKey = JSON.parse(privateKey);
-        if (typeof parsedKey === 'string') {
-          privateKey = parsedKey;
-          console.log('Successfully parsed private key from JSON string');
-        }
-      } catch (e) {
-        console.log('Failed to parse private key as JSON, using as-is');
-      }
-    }
-
-    if (privateKey && privateKey.includes('\\n')) {
-      privateKey = privateKey.replace(/\\n/g, '\n');
-      console.log('Replaced escaped newlines in private key');
-    }
-
-    // Initialize with environment variables
-    firebaseAdminInstance = admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId,
-        clientEmail,
-        privateKey,
-      } as ServiceAccount),
-    });
-
-    console.log('Firebase Admin SDK initialized successfully with environment variables.');
-    return firebaseAdminInstance;
-  } catch (error: any) {
-    console.error('Failed to initialize Firebase Admin SDK:', error);
-    
-    // Special handling for Vercel environment
-    if (isVercel) {
-      try {
-        console.log('Trying alternative approach for Vercel environment...');
-        
-        // Get raw environment variables
-        const rawProjectId = process.env.FIREBASE_PROJECT_ID;
-        const rawClientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-        const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
-        
-        console.log('Vercel environment variables check:');
-        console.log(`- Raw FIREBASE_PROJECT_ID: ${rawProjectId ? rawProjectId : 'Not set'}`);
-        console.log(`- Raw FIREBASE_CLIENT_EMAIL: ${rawClientEmail ? 'Set' : 'Not set'}`);
-        console.log(`- Raw FIREBASE_PRIVATE_KEY length: ${rawPrivateKey ? rawPrivateKey.length : 0}`);
-        
-        if (!rawProjectId || !rawClientEmail || !rawPrivateKey) {
-          const missing = [];
-          if (!rawProjectId) missing.push('FIREBASE_PROJECT_ID');
-          if (!rawClientEmail) missing.push('FIREBASE_CLIENT_EMAIL');
-          if (!rawPrivateKey) missing.push('FIREBASE_PRIVATE_KEY');
-          throw new Error(`Missing required Firebase credentials: ${missing.join(', ')}`);
-        }
-        
-        // Try with explicit configuration object
-        const certConfig = {
-          projectId: rawProjectId,
-          clientEmail: rawClientEmail,
-          privateKey: rawPrivateKey,
-        };
-        
-        console.log('Initializing with explicit cert configuration');
-        
-        // Use the raw private key directly without processing
-        firebaseAdminInstance = admin.initializeApp({
-          credential: admin.credential.cert(certConfig as ServiceAccount),
-          projectId: rawProjectId, // Explicitly set project ID at the app level too
-          storageBucket: `${rawProjectId}.appspot.com` // Explicitly set storage bucket
-        });
-        
-        console.log('Firebase Admin SDK initialized with alternative approach for Vercel.');
-        return firebaseAdminInstance;
-      } catch (vercelError) {
-        console.error('Alternative initialization for Vercel failed:', vercelError);
-      }
+      console.error('Application Default Credentials also failed:', adcError);
     }
     
     throw new Error(`Failed to initialize Firebase Admin SDK: ${error.message}`);
