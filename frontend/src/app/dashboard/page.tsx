@@ -297,28 +297,47 @@ export default function DashboardPage() {
 
       // Process documents with careful handling of timestamps
       const userDocuments = fetchedDocs.map((doc: any) => {
-        let uploadedAt = doc.createdAt;
+        console.log('Processing document:', doc);
+        
+        // Handle uploadedAt timestamp
+        let uploadedAt = doc.uploadedAt || doc.createdAt;
         if (uploadedAt && typeof uploadedAt === 'string') {
           try {
             uploadedAt = new Date(uploadedAt); // Convert string timestamp to Date
+            console.log('Parsed string timestamp:', uploadedAt);
           } catch (e) { 
             console.warn(`Could not parse timestamp string: ${uploadedAt}`);
             uploadedAt = null; 
           }
+        } else if (uploadedAt instanceof Date) {
+            console.log('Timestamp is already a Date object');
+            // It's already a Date, use as is
         } else if (uploadedAt) { 
-            // If it's already a Date or other type, use as is or handle accordingly
-            // For now, nullify if not a string that can be parsed
             console.warn(`Unexpected timestamp format: ${typeof uploadedAt}`);
-            uploadedAt = null;
+            try {
+              // Last attempt to convert to Date if it's some other format
+              uploadedAt = new Date(uploadedAt);
+            } catch (e) {
+              uploadedAt = null;
+            }
         }
 
-        return {
+        // Ensure we have all required fields with proper fallbacks
+        const processedDoc = {
           id: doc.id,
-          name: doc.filename || doc.name || doc.id, // Try multiple possible field names
-          uploadedAt: uploadedAt,
-          contentType: doc.contentType || 'unknown', 
+          name: doc.name || doc.filename || doc.id, // Try both possible field names
+          uploadedAt: uploadedAt || new Date(), // Fallback to current date if no timestamp
+          contentType: doc.contentType || 'unknown',
           downloadURL: doc.downloadURL || null,
+          storagePath: doc.storagePath || null,
+          status: doc.status || 'processed',
+          userId: doc.userId || user?.uid || '',
+          size: doc.size || 0,
+          createdAt: doc.createdAt || uploadedAt || new Date()
         } as MyDocumentData; // Cast to your frontend type
+        
+        console.log('Processed document:', processedDoc);
+        return processedDoc;
       });
       
       console.log(`[Request ${requestId}] Processed ${userDocuments.length} documents with timestamp handling`);
