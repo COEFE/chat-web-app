@@ -7,13 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import * as XLSX from 'xlsx'; // Import xlsx library
 import mammoth from 'mammoth'; // Import mammoth for DOCX handling
-import { HotTable } from '@handsontable/react'; // Import HotTable
-import 'handsontable/dist/handsontable.full.min.css'; // Import Handsontable CSS
-import { registerAllModules } from 'handsontable/registry'; // Needed for features
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"; // Import Shadcn Tabs
-
-// Register Handsontable modules
-registerAllModules();
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"; // Import Shadcn Tabs
 
 // Import CSS for PDF rendering
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
@@ -50,9 +44,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
   const imageContainerRef = useRef<HTMLDivElement>(null);
-  // Reference to the Handsontable container
-  const hotTableRef = useRef<HTMLDivElement>(null);
-  const [hotInstance, setHotInstance] = useState<any>(null);
+  // No longer needed for HTML table implementation
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -152,57 +144,12 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     fetchDocumentContent();
   }, [document]); // Re-run when the document prop changes
 
-  // Effect to handle Handsontable initialization and configuration
+  // Effect to set active sheet when workbookData changes
   useEffect(() => {
-    if (workbookData && activeSheetName && hotInstance) {
-      // Force Handsontable to render properly with multiple attempts
-      // This addresses the common issue with Handsontable not rendering all columns
-      // when initialized in a hidden container or when switching between tabs
-      const renderWithRetry = (attempt = 1, maxAttempts = 5) => {
-        console.log(`Rendering Handsontable attempt ${attempt}/${maxAttempts}`);
-        
-        // Ensure all columns have proper width
-        const columnCount = hotInstance.countCols();
-        console.log(`Setting widths for ${columnCount} columns`);
-        
-        for (let i = 0; i < columnCount; i++) {
-          hotInstance.setColWidth(i, 120); // Set explicit width for each column
-        }
-        
-        // Force render to apply column widths
-        hotInstance.render();
-        
-        // Check if we need to retry (if columns aren't properly rendered)
-        if (attempt < maxAttempts) {
-          setTimeout(() => {
-            // Get the actual rendered column count from the DOM
-            const renderedCols = hotInstance.rootElement.querySelectorAll('.ht_master .htCore thead tr th').length;
-            console.log(`Currently rendered columns: ${renderedCols} of ${columnCount}`);
-            
-            // If not all columns are rendered, retry
-            if (renderedCols < columnCount) {
-              renderWithRetry(attempt + 1, maxAttempts);
-            }
-          }, 200 * attempt); // Increasing delay with each attempt
-        }
-      };
-      
-      // Start the render process
-      renderWithRetry();
-      
-      // Additional render when window is resized to ensure proper display
-      const handleResize = () => {
-        if (hotInstance) {
-          hotInstance.render();
-        }
-      };
-      
-      window.addEventListener('resize', handleResize);
-      return () => {
-        window.removeEventListener('resize', handleResize);
-      };
+    if (workbookData && workbookData.length > 0 && !activeSheetName) {
+      setActiveSheetName(workbookData[0].sheetName);
     }
-  }, [workbookData, activeSheetName, hotInstance]);
+  }, [workbookData, activeSheetName]);
 
   // Define supported types for clarity
   const isPdf = document?.contentType === 'application/pdf';
@@ -245,10 +192,14 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         </div>
       )}
 
-      {/* Excel/CSV Viewer using Handsontable - Simplified Configuration */}
-      {!isLoading && !error && isSheet && workbookData && activeSheetName && (
+      {/* Excel/CSV Viewer using native HTML tables */}
+      {!isLoading && !error && isSheet && workbookData && (
         <div className="flex-1 flex flex-col overflow-hidden">
-          <Tabs value={activeSheetName} onValueChange={setActiveSheetName} className="flex-shrink-0">
+          <Tabs 
+            value={activeSheetName || workbookData[0]?.sheetName || ''} 
+            onValueChange={setActiveSheetName} 
+            className="flex-1 flex flex-col"
+          >
             <TabsList className="bg-muted p-1 rounded-t-md h-auto justify-start overflow-x-auto">
               {workbookData.map((sheet) => (
                 <TabsTrigger 
@@ -260,101 +211,59 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                 </TabsTrigger>
               ))}
             </TabsList>
+            
+            {workbookData.map((sheet) => (
+              <div key={sheet.sheetName} className={activeSheetName === sheet.sheetName ? 'block' : 'hidden'}>
+                <div className="border border-t-0 rounded-b-md overflow-auto" style={{ height: '500px' }}>
+                  <table className="min-w-full border-collapse">
+                    <thead className="bg-muted sticky top-0 z-10">
+                      <tr>
+                        {/* Empty cell for row header column */}
+                        <th className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground sticky left-0 z-20"></th>
+                        
+                        {/* Column headers - using first row data to determine columns */}
+                        {sheet.data[0]?.map((_, colIndex) => (
+                          <th 
+                            key={colIndex}
+                            className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground min-w-[100px]"
+                          >
+                            {XLSX.utils.encode_col(colIndex)}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sheet.data.map((row, rowIndex) => (
+                        <tr key={rowIndex} className={rowIndex % 2 === 0 ? 'bg-background' : 'bg-muted/30'}>
+                          {/* Row header */}
+                          <td className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground sticky left-0 z-10">
+                            {rowIndex + 1}
+                          </td>
+                          
+                          {/* Row data */}
+                          {row.map((cell, cellIndex) => (
+                            <td 
+                              key={cellIndex}
+                              className="border border-border p-2 text-sm"
+                            >
+                              {cell !== null && cell !== undefined ? String(cell) : ''}
+                            </td>
+                          ))}
+                          
+                          {/* If row has fewer cells than the header, add empty cells */}
+                          {sheet.data[0] && row.length < sheet.data[0].length && 
+                            Array(sheet.data[0].length - row.length).fill(0).map((_, i) => (
+                              <td key={`empty-${i}`} className="border border-border p-2 text-sm"></td>
+                            ))
+                          }
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
           </Tabs>
-          <div 
-            ref={hotTableRef}
-            className="flex-1 border border-t-0 rounded-b-md"
-            style={{ 
-              height: '500px', // Fixed height for stability
-              width: '100%',
-              overflow: 'hidden',
-              visibility: 'visible', // Ensure visibility for proper rendering
-              position: 'relative' // Needed for proper positioning
-            }}
-          >
-            {/* Robust Handsontable configuration with fixed dimensions */}
-            <HotTable
-              data={workbookData.find(sheet => sheet.sheetName === activeSheetName)?.data || []}
-              colHeaders={true}
-              rowHeaders={true}
-              width="100%"
-              height="100%"
-              colWidths={120} // Fixed column width
-              autoColumnSize={false} // Disable auto sizing for better performance
-              manualColumnResize={true} // Allow manual column resizing
-              contextMenu={true} // Enable context menu for Excel-like functionality
-              licenseKey="non-commercial-and-evaluation"
-              fixedColumnsLeft={0} // No fixed columns
-              stretchH="none" // Don't stretch columns
-              wordWrap={false} // No word wrapping
-              preventOverflow="horizontal" // Prevent horizontal overflow
-              outsideClickDeselects={false} // Better UX for selection
-              afterGetColHeader={(col: number, TH: HTMLTableCellElement) => {
-                // Ensure header cells have minimum width
-                if (TH) {
-                  TH.style.minWidth = '120px';
-                }
-              }}
-              beforeRender={() => {
-                // Before rendering, ensure the container is visible to the browser
-                if (hotTableRef.current) {
-                  hotTableRef.current.style.visibility = 'visible';
-                }
-              }}
-              afterRender={() => {
-                // Get the Handsontable instance
-                if (!hotInstance && hotTableRef.current) {
-                  const instance = (hotTableRef.current as any).__hotInstance;
-                  if (instance) {
-                    setHotInstance(instance);
-                    
-                    // Log the number of columns for debugging
-                    console.log(`Handsontable rendered with ${instance.countCols()} columns`);
-                    
-                    // Force another render after a short delay
-                    setTimeout(() => {
-                      instance.render();
-                    }, 50);
-                  }
-                }
-              }}
-            />
-            <style jsx global>{`
-              /* Force horizontal scrollbar to be visible */
-              .handsontable .wtHolder {
-                overflow-x: auto !important;
-              }
-              /* Ensure minimum column width */
-              .handsontable th, .handsontable td {
-                min-width: 120px !important;
-              }
-              /* Make sure all columns are rendered */
-              .handsontable .htCore {
-                width: auto !important;
-                table-layout: fixed !important;
-              }
-              /* Ensure column headers are visible */
-              .handsontable .htCore thead th {
-                display: table-cell !important;
-                visibility: visible !important;
-              }
-              /* Improve scrollbar appearance */
-              .handsontable ::-webkit-scrollbar {
-                height: 10px;
-                width: 10px;
-              }
-              .handsontable ::-webkit-scrollbar-track {
-                background: #f1f1f1;
-              }
-              .handsontable ::-webkit-scrollbar-thumb {
-                background: #888;
-                border-radius: 5px;
-              }
-              .handsontable ::-webkit-scrollbar-thumb:hover {
-                background: #555;
-              }
-            `}</style>
-          </div>
         </div>
       )}
       
