@@ -192,47 +192,57 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         </div>
       )}
 
-      {/* Excel/CSV Viewer using native HTML tables */}
+      {/* Excel Viewer */}
       {!isLoading && !error && isSheet && workbookData && (
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <Tabs 
-            value={activeSheetName || workbookData[0]?.sheetName || ''} 
-            onValueChange={setActiveSheetName} 
-            className="flex-1 flex flex-col"
-          >
-            <TabsList className="bg-muted p-1 rounded-t-md h-auto justify-start overflow-x-auto">
-              {workbookData.map((sheet) => (
+        <div className="flex-1 overflow-auto">
+          <Tabs defaultValue={activeSheetName || (workbookData[0]?.sheetName || '')}>
+            <TabsList className="mb-2">
+              {workbookData.map(sheet => (
                 <TabsTrigger 
                   key={sheet.sheetName} 
                   value={sheet.sheetName}
-                  className="text-xs px-2 py-1 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                  onClick={() => setActiveSheetName(sheet.sheetName)}
                 >
                   {sheet.sheetName}
                 </TabsTrigger>
               ))}
             </TabsList>
-            
-            {workbookData.map((sheet) => (
-              <div key={sheet.sheetName} className={activeSheetName === sheet.sheetName ? 'block' : 'hidden'}>
-                <div className="border border-t-0 rounded-b-md overflow-auto" style={{ height: '500px' }}>
-                  <table className="min-w-full border-collapse">
-                    <thead className="bg-muted sticky top-0 z-10">
+            {workbookData.map(sheet => (
+              <TabsContent key={sheet.sheetName} value={sheet.sheetName}>
+                <div className="overflow-auto border rounded-md" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+                  <table className="border-collapse w-full" style={{ tableLayout: 'fixed' }}>
+                    <colgroup>
+                      {/* Column for row headers */}
+                      <col style={{ width: '60px' }} />
+                      
+                      {/* Columns for data - generate one col element per column */}
+                      {sheet.data[0]?.map((_, colIndex) => (
+                        <col key={colIndex} style={{ width: '120px' }} />
+                      ))}
+                    </colgroup>
+                    <thead>
                       <tr>
                         {/* Empty cell for row header column */}
-                        <th className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground sticky left-0 z-20"></th>
+                        <th className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground sticky top-0 left-0 z-30">
+                          {/* Corner cell */}
+                        </th>
                         
                         {/* Column headers - using first row data to determine columns */}
                         {sheet.data[0]?.map((_, colIndex) => {
                           // Generate Excel-style column headers (A, B, C, ... Z, AA, AB, etc.)
-                          const colName = colIndex < 26 ? 
-                            String.fromCharCode(65 + colIndex) : // A-Z
-                            String.fromCharCode(65 + Math.floor(colIndex / 26) - 1) + 
-                            String.fromCharCode(65 + (colIndex % 26)); // AA-ZZ
+                          let colName = '';
+                          if (colIndex < 26) {
+                            colName = String.fromCharCode(65 + colIndex); // A-Z
+                          } else {
+                            const firstChar = String.fromCharCode(65 + Math.floor(colIndex / 26) - 1);
+                            const secondChar = String.fromCharCode(65 + (colIndex % 26));
+                            colName = firstChar + secondChar; // AA-ZZ
+                          }
                           
                           return (
                             <th 
                               key={colIndex}
-                              className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground min-w-[100px]"
+                              className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground sticky top-0 z-20"
                             >
                               {colName}
                             </th>
@@ -244,7 +254,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                       {sheet.data.map((row, rowIndex) => (
                         <tr key={rowIndex} className={rowIndex % 2 === 0 ? 'bg-background' : 'bg-muted/30'}>
                           {/* Row header */}
-                          <td className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground sticky left-0 z-10">
+                          <td className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground sticky left-0 z-10 text-center">
                             {rowIndex + 1}
                           </td>
                           
@@ -252,7 +262,8 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                           {row.map((cell, cellIndex) => (
                             <td 
                               key={cellIndex}
-                              className="border border-border p-2 text-sm"
+                              className="border border-border p-2 text-sm overflow-hidden text-ellipsis whitespace-nowrap"
+                              title={cell !== null && cell !== undefined ? String(cell) : ''}
                             >
                               {cell !== null && cell !== undefined ? String(cell) : ''}
                             </td>
@@ -269,7 +280,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                     </tbody>
                   </table>
                 </div>
-              </div>
+              </TabsContent>
             ))}
           </Tabs>
         </div>
