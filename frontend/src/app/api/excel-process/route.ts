@@ -1,14 +1,14 @@
-console.log("--- MODULE LOAD CHECKPOINT 1: /api/excel/route.ts ---"); 
+console.log("--- MODULE LOAD CHECKPOINT 1: /api/excel-process/route.ts ---");
 
 import { NextRequest, NextResponse } from 'next/server';
 console.log("--- MODULE LOAD CHECKPOINT 2: Imports done ---"); // Log after imports
 
-import { initializeFirebaseAdmin, getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig';
+// Keep these commented for now
+// import { initializeFirebaseAdmin, getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig';
 // import * as XLSX from 'xlsx';
-import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4 } from 'uuid'; // Keep UUID for dummy funcs
 
-// Initialize Firebase Admin SDK
-console.log("--- MODULE LOAD CHECKPOINT 3: Before Firebase Init (Commented Out) ---"); 
+console.log("--- MODULE LOAD CHECKPOINT 3: Before Firebase Init (Commented Out) ---");
 /*
 try {
   console.log('Initializing Firebase Admin SDK in excel API route (Module Level)');
@@ -18,134 +18,106 @@ try {
   console.error('Failed to initialize Firebase Admin SDK in excel API route (Module Level):', error);
 }
 */
-console.log("--- MODULE LOAD CHECKPOINT 4: After Firebase Init (Commented Out) ---"); 
+console.log("--- MODULE LOAD CHECKPOINT 4: After Firebase Init (Commented Out) ---");
 
-// Helper function to authenticate user from token
-/*
-async function authenticateUser(req: NextRequest) {
-  console.log("Attempting authentication...");
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    console.log("Authentication failed: Missing or invalid Authorization header.");
-    return { user: null, error: NextResponse.json({ success: false, message: 'Unauthorized: Missing token' }, { status: 401 }) };
-  }
-  const token = authHeader.split('Bearer ')[1];
-
-  try {
-    const adminAuth = getAdminAuth(); // Assuming getAdminAuth is safe to call even if not fully initialized?
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    console.log("Authentication successful for user:", decodedToken.uid);
-    return { user: decodedToken, error: null };
-  } catch (error: any) {
-    console.error("Authentication failed: Error verifying token:", error);
-    // Log specific error codes if available
-    if (error.code === 'auth/id-token-expired') {
-      return { user: null, error: NextResponse.json({ success: false, message: 'Unauthorized: Token expired' }, { status: 401 }) };
-    } else if (error.code === 'auth/argument-error') {
-        return { user: null, error: NextResponse.json({ success: false, message: 'Unauthorized: Invalid token format' }, { status: 401 }) };
-    } else {
-        return { user: null, error: NextResponse.json({ success: false, message: 'Unauthorized: Invalid token' }, { status: 401 }) };
-    }
-  }
-}
-*/
-
-// ... (rest of helper functions potentially using Firebase, keep them commented out for now if needed)
-
+// --- Dummy Helper Functions (Firebase/XLSX commented out) ---
 async function createExcelFile(db: any, storage: any, bucket: any, userId: string, documentId: string, data: any[]) {
-    // Dummy implementation for now
-    console.log("createExcelFile called (Firebase commented out)");
-    return { success: true, message: "File creation skipped (Firebase disabled)" };
+    console.log("createExcelFile called (Firebase/XLSX commented out)");
+    // Actual implementation would use db, storage, bucket, XLSX
+    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate async work
+    return { success: true, message: "Dummy: File creation skipped", documentId: documentId || `new-${uuidv4()}` };
 }
 
 async function editExcelFile(db: any, storage: any, bucket: any, userId: string, documentId: string, data: any[]) {
-    // Dummy implementation for now
-    console.log("editExcelFile called (Firebase commented out)");
-    return { success: true, message: "File edit skipped (Firebase disabled)" };
+    console.log("editExcelFile called (Firebase/XLSX commented out)");
+    // Actual implementation would use db, storage, bucket, XLSX
+    if (!documentId) {
+      return { success: false, message: "Dummy: Document ID required for edit" };
+    }
+    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate async work
+    return { success: true, message: "Dummy: File edit skipped", documentId };
 }
 
-export async function POST(req: NextRequest) {
-  console.log('--- ENTERING POST /api/excel ---'); 
-  
-  // Temporarily skip authentication
-  console.log("--- Skipping Authentication (Firebase commented out) ---");
-  const userId = "test-user"; // Dummy user ID
+// --- New Exported Function for Direct Calls ---
+export async function processExcelOperation(
+  operation: string,
+  documentId: string | null, // Allow null for create
+  data: any[],
+  userId: string
+): Promise<NextResponse> { // Return NextResponse for consistency
+  console.log('--- ENTERING processExcelOperation ---');
+  console.log('Arguments:', { operation, documentId, data: data ? 'Present' : 'Absent', userId });
 
-  // Skip Firebase instance retrieval
-  // let db, storage, bucket;
+  // Skip Firebase instance retrieval (still commented out)
   console.log("--- Skipping Firebase Instance Retrieval (Firebase commented out) ---");
-  /*
-  try {
-      db = getAdminDb();
-      storage = getAdminStorage();
-      bucket = storage.bucket(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET);
-      if (!process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) {
-          throw new Error("Firebase Storage bucket name not configured.");
-      }
-      console.log("Successfully retrieved Firebase DB/Storage instances and bucket.");
-  } catch (error: any) {
-      console.error('--- ERROR retrieving Firebase instances ---');
-      console.error('Error Details:', {
-          message: error.message,
-          stack: error.stack,
-          name: error.name,
-          code: error.code
-      });
-      return NextResponse.json({ success: false, message: 'Server Configuration Error' }, { status: 500 });
-  }
-  */
+  // let db = null, storage = null, bucket = null; // Dummy vars if needed below
 
-  let body;
-  try {
-    body = await req.json();
-    console.log("Request Body Parsed:", body); 
-  } catch (error: any) {
-    console.error('--- ERROR parsing request body ---');
-    console.error('Error Details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name,
-        code: error.code
-    });
-    return NextResponse.json({ success: false, message: 'Invalid request body' }, { status: 400 });
-  }
-
-  const { operation, documentId: reqDocumentId, data } = body;
-
-  if (!operation || !reqDocumentId || !data) {
-    console.log('--- ERROR: Missing required fields (operation, documentId, data) ---');
+  if (!operation || !data || (operation === 'edit' && !documentId)) {
+    console.log('--- ERROR: Missing required fields (operation, data, or documentId for edit) ---');
     return NextResponse.json({ success: false, message: 'Missing required fields' }, { status: 400 });
   }
 
-  // Use dummy documentId if needed for logic flow, actual operations are skipped
-  const effectiveDocumentId = reqDocumentId || "test-doc-id";
-
   try {
     let result;
+    // Use dummy documentId if needed for logic flow, actual operations are skipped/dummied
+    const effectiveDocumentId = documentId || `temp-create-${Date.now()}`; // Use temp ID for create if null
+
     if (operation === 'create') {
-      console.log(`Processing CREATE operation for user ${userId}, document ${effectiveDocumentId}`);
-      // result = await createExcelFile(db, storage, bucket, userId, effectiveDocumentId, data);
-      result = await createExcelFile(null, null, null, userId, effectiveDocumentId, data); // Call dummy version
+      console.log(`Processing CREATE operation for user ${userId}, potential docId based on data?`);
+      // Pass null for db, storage, bucket for now
+      result = await createExcelFile(null, null, null, userId, effectiveDocumentId, data);
     } else if (operation === 'edit') {
       console.log(`Processing EDIT operation for user ${userId}, document ${effectiveDocumentId}`);
-      // result = await editExcelFile(db, storage, bucket, userId, effectiveDocumentId, data);
-      result = await editExcelFile(null, null, null, userId, effectiveDocumentId, data); // Call dummy version
+       // Pass null for db, storage, bucket for now
+      result = await editExcelFile(null, null, null, userId, effectiveDocumentId, data);
     } else {
       console.log(`--- ERROR: Invalid operation type: ${operation} ---`);
       return NextResponse.json({ success: false, message: 'Invalid operation type' }, { status: 400 });
     }
 
-    console.log("Operation Result (Firebase commented out):", result);
-    return NextResponse.json(result);
+    console.log("Operation Result (Firebase/XLSX commented out):", result);
+    // Ensure result has a success flag for consistent handling
+    if (result && typeof result.success === 'boolean') {
+        return NextResponse.json(result);
+    } else {
+        console.error("--- ERROR: Unexpected result format from create/edit function ---", result);
+        return NextResponse.json({ success: false, message: 'Internal processing error: Unexpected result format' }, { status: 500 });
+    }
 
   } catch (error: any) {
-    console.error('--- ERROR in POST /api/excel (Main Try/Catch) ---');
+    console.error('--- ERROR in processExcelOperation (Main Try/Catch) ---');
     console.error('Error Details:', {
         message: error.message,
         stack: error.stack,
         name: error.name,
         code: error.code
     });
-    return NextResponse.json({ success: false, message: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ success: false, message: 'Internal Server Error during processing' }, { status: 500 });
   }
+}
+
+
+// --- Original POST function (now calls the new function) ---
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  console.log('--- ENTERING HTTP POST /api/excel-process ---');
+
+  // Authentication should be added back here when Firebase is re-enabled
+  // For now, using a dummy user ID. In a real scenario, you'd get this from the token.
+  const dummyUserId = "http-test-user";
+  console.log("--- Skipping Authentication (Firebase commented out) ---");
+
+  let body;
+  try {
+    body = await req.json();
+    console.log("HTTP Request Body Parsed:", body);
+  } catch (error: any) {
+    console.error('--- ERROR parsing HTTP request body ---');
+    console.error('Error Details:', error);
+    return NextResponse.json({ success: false, message: 'Invalid request body' }, { status: 400 });
+  }
+
+  const { operation, documentId, data } = body;
+
+  // Call the core processing function
+  return processExcelOperation(operation, documentId, data, dummyUserId);
 }

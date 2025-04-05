@@ -1,14 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  getAdminAuth,
-  getAdminDb,
-  getAdminStorage,
-} from '@/lib/firebaseAdminConfig'; // Import getters
-import { File } from '@google-cloud/storage';
-import { extractText } from 'unpdf'; // Import unpdf's extractText function
+// Vercel AI SDK imports
+import { Message as VercelChatMessage } from 'ai';
+// Note: If these imports are failing, you may need to install the correct packages
+// npm install ai
+let StreamingTextResponse: any;
+let experimental_StreamData: any;
+try {
+  const aiImports = require('ai');
+  StreamingTextResponse = aiImports.StreamingTextResponse;
+  experimental_StreamData = aiImports.experimental_StreamData;
+} catch (e) {
+  console.error('Error importing from ai package:', e);
+  // Fallback empty implementations to prevent crashes
+  StreamingTextResponse = class {};
+  experimental_StreamData = class {};
+}
+// LangChain imports - commented out until packages are installed
+// import { ChatAnthropic } from '@langchain/anthropic';
+// import { PromptTemplate } from '@langchain/core/prompts';
+// import { RunnableSequence } from '@langchain/core/runnables';
+// import { BytesOutputParser } from '@langchain/core/output_parsers';
+// Temporary placeholders to prevent errors
+const ChatAnthropic = {};
+const PromptTemplate = {};
+const RunnableSequence = {};
+const BytesOutputParser = {};
+import { initializeFirebaseAdmin, getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig';
+import * as XLSX from 'xlsx';
 import Anthropic from '@anthropic-ai/sdk';
 import { FirebaseError } from 'firebase-admin/app';
-import * as XLSX from 'xlsx'; // Import xlsx library for Excel processing
+// Import the function from the other route
+import { processExcelOperation } from '../excel-process/route';
+// Imports for file/PDF handling
+import { File as GoogleCloudFile } from '@google-cloud/storage';
+import { extractText } from 'unpdf';
+
+console.log('--- MODULE LOAD: /api/chat/route.ts ---');
 
 // Type guard to check if an error is a Firebase Storage error with a specific code
 function isFirebaseStorageError(error: unknown, code: number): error is FirebaseError {
@@ -37,142 +64,99 @@ function extractSheetName(message: string): string | null {
 }
 
 // Helper function to handle Excel operations directly
-async function handleExcelOperation(authToken: string, userId: string, message: string, currentDocument: any) {
+// Return type specifies the expected structure
+async function handleExcelOperation(authToken: string, userId: string, message: string, currentDocument: any): Promise<{ success: boolean; response?: object }> {
   console.log('Handling Excel operation directly for document:', currentDocument?.id);
-  
-  // Extract the cell and value from the message using multiple regex patterns
-  const patterns = [
-    // Standard pattern: cell A1 to "value"
-    /(?:cell\s+)?([A-Z]+\d+)\s+(?:to|with|as|=|:)\s+["']?([^"']+)["']?/i,
-    
-    // Put "value" in cell A1
-    /(?:put|add|set)\s+["']?([^"']+)["']?\s+(?:in|into|to)\s+(?:cell\s+)?([A-Z]+\d+)/i,
-    
-    // Change A1 to "value"
-    /(?:change|update|edit)\s+(?:cell\s+)?([A-Z]+\d+)\s+(?:to|with|as|=|:)\s+["']?([^"']+)["']?/i,
-    
-    // Add "value" to A1
-    /(?:add|put)\s+["']?([^"']+)["']?\s+(?:in|into|to)\s+([A-Z]+\d+)/i
+
+  // --- Regex and sheet name extraction logic --- 
+  // Regex to find cell references like A1, B2, etc., and the value in quotes
+  const editPatterns = [
+    // Pattern 1: set cell to "value"
+    /(?:update|change|set|put)\s+(?:cell\s+)?([A-Z]+[0-9]+)\s+to\s+["']?([^"']+)["']?/i,
+    // Pattern 2: set "value" in cell
+    /(?:update|change|set|put)\s+["']?([^"']+)["']?\s+in\s+(?:cell\s+)?([A-Z]+[0-9]+)/i,
+    // Pattern 3: cell = "value"
+    /([A-Z]+[0-9]+)\s*=\s*["']?([^"']+)["']?/i 
   ];
-  
-  let cell = '';
-  let value = '';
-  let match = null;
-  
-  // Try each pattern until we find a match
-  for (const pattern of patterns) {
-    match = message.match(pattern);
+
+  let cellRef: string | null = null;
+  let cellValue: string | null = null;
+  let matched = false;
+
+  for (const pattern of editPatterns) {
+    const match = message.match(pattern);
     if (match) {
-      // For patterns where cell is first capture group
-      if (pattern.toString().includes('([A-Z]+\\d+)\\s+(?:to|with|as|=|:)')) {
-        cell = match[1];
-        value = match[2];
-      } else {
-        // For patterns where value is first capture group
-        value = match[1];
-        cell = match[2];
+      // Determine which capture group is the cell and which is the value based on pattern structure
+      if (pattern.source.includes('to\\s+[\"\']')) { // Pattern 1
+        cellRef = match[1];
+        cellValue = match[2];
+      } else if (pattern.source.includes('in\\s+(?:cell\\s+)?')) { // Pattern 2
+        cellValue = match[1];
+        cellRef = match[2];
+      } else if (pattern.source.includes('=\\s*[\"\']')) { // Pattern 3
+        cellRef = match[1];
+        cellValue = match[2];
       }
-      break;
+      
+      if (cellRef && cellValue) {
+        matched = true;
+        break; // Found a valid match
+      }
     }
   }
   
-  if (match && cell && value) {
-    console.log(`Detected cell ${cell} and value ${value}`);
+  // --- End of Regex Logic ---
+  
+  // Check if we found a valid match AND have the necessary document info
+  if (matched && cellRef && cellValue && currentDocument && currentDocument.id) {
+    console.log(`Detected cell ${cellRef} and value ${cellValue} for document ${currentDocument.id}`);
     
-    // Helper function to extract sheet name from a message
-    function extractSheetName(message: string): string | null {
-      // Try to find sheet name in various formats
-      const patterns = [
-        /in\s+(?:sheet|tab)\s+["']?([^"']+)["']?/i,
-        /on\s+(?:sheet|tab)\s+["']?([^"']+)["']?/i,
-        /sheet\s+["']?([^"']+)["']?/i,
-        /tab\s+["']?([^"']+)["']?/i
-      ];
-      
-      for (const pattern of patterns) {
-        const match = message.match(pattern);
-        if (match && match[1]) {
-          return match[1].trim();
-        }
+    // Create the Excel operation JSON structure needed by processExcelOperation
+    const operationData = [
+      {
+        sheetName: extractSheetName(message) || "Sheet1", // Use the global extractSheetName function
+        cellUpdates: [
+          { cell: cellRef, value: cellValue } // Explicit property assignment
+        ]
       }
-      
-      return null;
-    }
+    ];
     
-    // Create the Excel operation JSON
-    const excelOperation = {
-      operation: "edit", // This needs to match the parameter name in the Excel API
-      documentId: currentDocument.id,
-      data: [
-        {
-          // Try to extract sheet name from message, default to Sheet1
-          sheetName: extractSheetName(message) || "Sheet1",
-          cellUpdates: [
-            {cell, value}
-          ]
-        }
-      ]
-    };
-    
-    // Log the Excel operation being sent
-    console.log('Sending Excel operation to API:', JSON.stringify(excelOperation));
+    console.log('Calling processExcelOperation directly:', { 
+      operation: 'edit', 
+      documentId: currentDocument.id, 
+      data: operationData, 
+      userId: userId 
+    });
     
     try {
-      // Call the Excel API to perform the operation
-      // Construct the base URL carefully
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || ''; // Or determine origin differently if needed server-side
-      const apiUrl = `${baseUrl}/api/excel-process`;
-      console.log(`Direct Excel Edit - Calling API at: ${apiUrl}`);
+      // Call the imported function directly
+      const excelResponse: NextResponse = await processExcelOperation('edit', currentDocument.id, operationData, userId);
+      
+      console.log('processExcelOperation Response Status:', excelResponse.status);
+      
+      // Check if the Excel operation was successful by parsing the response
+      const excelResult = await excelResponse.json();
+      console.log('processExcelOperation Response Parsed Body:', excelResult);
 
-      const excelResponse = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': authToken, // Use the passed authToken directly
-        },
-        body: JSON.stringify(excelOperation),
-      });
-      
-      console.log('Excel API Response Status:', excelResponse.status);
-      
-      // Check if the Excel API call was successful before parsing JSON
-      if (!excelResponse.ok) {
-        // Try to get error details, but handle cases where body might not be JSON
-        let errorBody = `Status: ${excelResponse.status}, StatusText: ${excelResponse.statusText}`;
-        try {
-          const errorJson = await excelResponse.json();
-          errorBody = JSON.stringify(errorJson);
-        } catch (e) {
-          // If parsing error JSON fails, use text
-          errorBody = await excelResponse.text(); 
-        }
-        console.error('Excel API returned an error:', errorBody);
-        throw new Error(`Excel API request failed: ${errorBody}`);
-      }
-      
-      // Only parse JSON if the response was ok
-      const excelResult = await excelResponse.json(); 
-      console.log('Excel API Response Parsed Body:', excelResult);
-      
-      if (excelResponse.ok) {
+      if (excelResult.success) { // Check the success flag from the result
         // Create a success message
-        const successMessage = `I've updated ${cell} to "${value}" in your Excel file "${currentDocument.name}".`;
+        const successMessage = `I've updated ${cellRef} to "${cellValue}" in your Excel file "${currentDocument.name || 'document'}".`;
         
-        // Return the success response
+        // Return the success response for the chat
         return { 
           success: true,
           response: {
             id: `ai-${Date.now()}`,
             role: 'ai',
             content: successMessage,
-            excelOperation: excelResult,
+            excelOperation: excelResult, // Include the result from the excel processing
           }
         };
       } else {
-        // Create an error message
-        const errorMessage = `I tried to update ${cell} to "${value}" in your Excel file, but encountered an error: ${excelResult.error || 'Unknown error'}`;
+        // Create an error message using the message from the result
+        const errorMessage = `I tried to update ${cellRef} to "${cellValue}" in your Excel file, but encountered an error: ${excelResult.message || 'Unknown error'}`;
         
-        // Return the error response
+        // Return the error response for the chat
         return { 
           success: false,
           response: {
@@ -183,19 +167,26 @@ async function handleExcelOperation(authToken: string, userId: string, message: 
         };
       }
     } catch (error) {
-      console.error('Error calling Excel API:', error);
+      console.error('Error calling/processing processExcelOperation:', error);
+      // Generic error if the call itself fails or JSON parsing fails
       return {
         success: false,
         response: {
           id: `ai-${Date.now()}`,
           role: 'ai',
-          content: `I tried to update ${cell} to "${value}" in your Excel file, but encountered a system error. Please try again later.`,
+          content: `Sorry, I encountered an internal error while trying to edit the Excel file.`,
         }
       };
     }
+  } else {
+    // Log why it failed if match was found but doc info missing
+    if (matched && (!currentDocument || !currentDocument.id)) {
+      console.log('Extracted cell/value but missing currentDocument info for direct edit.');
+    } else {
+      console.log('Could not extract cell/value for direct Excel operation.');
+    }
+    return { success: false }; // Indicate direct handling failed
   }
-  
-  return { success: false };
 }
 
 // Helper function to create success messages
@@ -309,7 +300,7 @@ export async function POST(req: NextRequest) {
         throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET environment variable not set!");
       }
       const bucket = adminStorage.bucket(`gs://${bucketName}`);
-      const file: File = bucket.file(storagePath); // Use File type from @google-cloud/storage
+      const file: GoogleCloudFile = bucket.file(storagePath);
 
       console.log(`Attempting to download from gs://${bucketName}/${storagePath}`);
       const [contentBuffer] = await file.download();
@@ -728,48 +719,31 @@ User Question: ${message}`,
           throw new Error('Parsed inner JSON is missing required fields.');
         }
 
-        console.log('Calling Excel API with parsed/normalized data:', parsedJson);
-        const excelResponse = await fetch(`${req.nextUrl.origin}/api/excel-process`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': req.headers.get('Authorization') || '',
-          },
-          body: JSON.stringify(parsedJson),
-        });
+        console.log('Calling processExcelOperation with parsed/normalized data:', parsedJson);
+        const excelResponse: NextResponse = await processExcelOperation(
+          parsedJson.operation,
+          parsedJson.documentId, 
+          parsedJson.data,
+          userId // Pass the authenticated userId
+        );
 
-        console.log('Excel API Response Status:', excelResponse.status);
+        const excelResult = await excelResponse.json();
+        console.log('processExcelOperation result from JSON path:', excelResult);
 
-        // Check if the Excel API call was successful before parsing JSON
-        if (!excelResponse.ok) {
-          // Try to get error details, but handle cases where body might not be JSON
-          let errorBody = `Status: ${excelResponse.status}, StatusText: ${excelResponse.statusText}`;
-          try {
-            const errorJson = await excelResponse.json();
-            errorBody = JSON.stringify(errorJson);
-          } catch (e) {
-            // If parsing error JSON fails, use text
-            errorBody = await excelResponse.text(); 
-          }
-          console.error('Excel API returned an error:', errorBody);
-          throw new Error(`Excel API request failed: ${errorBody}`);
+        if (excelResult.success) {
+          excelOperationResult = excelResult;
+          console.log("Excel operation via JSON was successful:", excelResult.message || 'Operation completed.');
+          // Optionally modify Claude's response or just let it continue?
+          // Let's allow Claude's original response to stream back for now.
+        } else {
+           // Handle error from processExcelOperation
+           console.error("Error from processExcelOperation (JSON path):", excelResult.message);
+           // Append error info to the stream data?
+           excelOperationResult = excelResult;
+           console.error("Error from processExcelOperation (JSON path):", excelResult.message);
+           // Maybe send an error message back immediately?
+           // For now, let Claude's original response stream back.
         }
-
-        // Only parse JSON if the response was ok
-        const excelResult = await excelResponse.json(); 
-        console.log('Excel API Response Parsed Body:', excelResult);
-
-        // We already know excelResponse.ok is true here
-        excelOperationResult = excelResult;
-
-        const successMessage = createSuccessMessage(parsedJson, excelResult);
-
-        console.log("Excel operation successful. Replacing inner JSON string with success message.");
-        console.log("Inner JSON string to replace:", aiContentString);
-        // Replace the inner JSON *string* within the original aiResponseContent
-        finalResponseContent = aiResponseContent.replace(aiContentString, successMessage);
-        console.log("Final content after replacement:", finalResponseContent);
-
       } catch (error) {
         console.error('*** Error during inner JSON parsing or Excel API call ***', error);
         // Log the full error object for detailed diagnosis
@@ -783,14 +757,21 @@ User Question: ${message}`,
       finalResponseContent = aiResponseContent;
     }
 
-    // Return the final response
+            // Return a regular JSON response instead of streaming
+    // Streaming is disabled until we can fix the ReadableStream implementation
+    const finalResponse = {
+      id: `ai-${Date.now()}`,
+      role: 'ai',
+      content: finalResponseContent,
+    };
+    
+    // If we have an Excel operation result, include it in the response
+    if (excelOperationResult) {
+      Object.assign(finalResponse, { excelOperation: excelOperationResult });
+    }
+    
     return NextResponse.json({
-      response: {
-        id: `ai-${Date.now()}`,
-        role: 'ai',
-        content: finalResponseContent,
-        excelOperation: excelOperationResult,
-      }
+      response: finalResponse
     }, { status: 200 });
 
   } catch (error) {
@@ -800,6 +781,7 @@ User Question: ${message}`,
   }
 }
 
+// Helper function to authenticate the user - internal to this file
 async function authenticateUser(req: NextRequest): Promise<{ userId: string; token: string } | null> {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
