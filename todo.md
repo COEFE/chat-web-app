@@ -124,3 +124,21 @@
     - How to view and revert version history.
 - [ ] **Roadmap Planning**
   - Outline tasks for future features (e.g., multi-user support, mobile app, advanced diff view).
+
+## Completed and Pending Tasks
+- [x] Set up basic Next.js project structure.
+- [x] Implement user authentication using NextAuth.js.
+- [x] Integrate Firebase for backend services (Firestore, Storage).
+- [x] Implement PDF file upload functionality to Firebase Storage.
+- [x] Set up API route for handling chat interactions.
+- [x] Integrate Anthropic API for generating chat responses.
+- [x] Connect frontend chat interface to the API route.
+- [x] Resolve Firebase Admin SDK initialization issues in Vercel deployment.
+- [x] Ensure chat functionality works with uploaded PDFs.
+- [ ] Implement document selection/management UI.
+- [ ] Add context awareness (remembering previous messages in a chat session).
+- [ ] Implement UI for displaying chat history.
+- [ ] Add error handling and loading states to the UI.
+- [ ] Improve UI/UX (styling, responsiveness).
+- [ ] Refactor code for clarity and maintainability.
+- [ ] Add tests (unit, integration).
