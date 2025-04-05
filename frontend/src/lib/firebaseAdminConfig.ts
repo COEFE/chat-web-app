@@ -44,12 +44,33 @@ export function initializeFirebaseAdmin(): admin.app.App {
   console.log(`- FIREBASE_PRIVATE_KEY starts with: ${privateKey.substring(0, 50)}...`);
   console.log(`- FIREBASE_PRIVATE_KEY ends with: ${privateKey.slice(-50)}`);
 
-  // IMPORTANT: Replace the literal \n characters (and potentially escaped \\n)
-  // in the private key ENV var with actual newline characters for the SDK.
-  // The key from ENV is expected to be like: "-----BEGIN PRIVATE KEY-----\nMIIE...\n...\n-----END PRIVATE KEY-----\n"
-  // First, remove surrounding quotes if present.
-  // Then, replace both \\n (escaped backslash + n) and \n (literal backslash + n) with actual newlines.
-  privateKey = privateKey.replace(/^"|"$/g, '').replace(/\\n/g, '\n').replace(/\n/g, '\n');
+  // IMPORTANT: Handle different formats of private key that might come from environment variables
+  // Vercel sometimes adds extra escaping or changes the format of the private key
+  // This handles various formats that might be encountered
+  
+  // First, check if the key is JSON-stringified
+  try {
+    const parsedKey = JSON.parse(privateKey);
+    if (typeof parsedKey === 'string') {
+      privateKey = parsedKey;
+      console.log('Successfully parsed private key from JSON string');
+    }
+  } catch (e) {
+    // Not JSON-stringified, continue with normal processing
+    console.log('Private key is not JSON-stringified, continuing with normal processing');
+  }
+  
+  // Remove surrounding quotes if present
+  privateKey = privateKey.replace(/^"|"$/g, '');
+  
+  // Replace escaped newlines with actual newlines
+  // This handles both \n (escaped in code) and literal \n characters in the string
+  privateKey = privateKey.replace(/\\n/g, '\n');
+  
+  // If the key doesn't contain actual newlines after replacing \n, replace literal "\n" text
+  if (!privateKey.includes('\n')) {
+    privateKey = privateKey.split('\\n').join('\n');
+  }
 
   console.log('Private Key after replacing \\n/\n and removing quotes:');
   console.log(`- Length: ${privateKey.length}`);
