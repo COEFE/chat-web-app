@@ -39,11 +39,17 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     try {
       // Parse the URL to extract the path parameter
       const parsedUrl = new URL(url);
+      
+      // The path is in the format /v0/b/BUCKET_NAME/o/PATH?alt=media&token=TOKEN
+      // We need to extract just the PATH part
       const objectPath = parsedUrl.pathname.split('/o/')[1];
       if (!objectPath) return null;
       
+      // Remove any query parameters if present
+      const pathWithoutQuery = objectPath.split('?')[0];
+      
       // URL decode the path
-      return decodeURIComponent(objectPath);
+      return decodeURIComponent(pathWithoutQuery);
     } catch (e) {
       console.error('Failed to parse storage URL:', e);
       return null;

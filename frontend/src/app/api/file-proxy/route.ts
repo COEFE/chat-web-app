@@ -17,7 +17,12 @@ export async function GET(request: NextRequest) {
     // Initialize Firebase Admin if needed
     const admin = getFirebaseAdmin();
     const storage = admin.storage();
-    const bucket = storage.bucket();
+    
+    // Explicitly specify the bucket name
+    const bucketName = 'web-chat-app-fa7f0.firebasestorage.app';
+    const bucket = storage.bucket(bucketName);
+    
+    console.log('Using bucket:', bucketName);
     
     // Get the file from Firebase Storage
     const file = bucket.file(decodeURIComponent(filePath));
