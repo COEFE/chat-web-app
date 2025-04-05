@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 console.log("--- MODULE LOAD CHECKPOINT 2: Imports done ---"); // Log after imports
 
 import { initializeFirebaseAdmin, getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig';
-import * as XLSX from 'xlsx';
+// import * as XLSX from 'xlsx';
 import { v4 as uuidv4 } from 'uuid';
 
 // Initialize Firebase Admin SDK
