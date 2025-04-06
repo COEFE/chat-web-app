@@ -358,9 +358,12 @@ async function editExcelFile(db: admin.firestore.Firestore, storage: admin.stora
         console.log(`[editExcelFile] Proceeding to update document with final ID: ${docRef.id}`);
 
         // Define storage path using the *found* document's name/path if available, or generate new
-        const storagePath = existingData.storagePath || `users/${userId}/documents/${existingData.name}`;
-        const filename = existingData.name;
-        console.log(`[editExcelFile] Using existing storagePath: ${storagePath}`);
+        let storagePath = existingData.storagePath || `users/${userId}/documents/${existingData.name}`;
+        let filename = existingData.name;
+        const normResult = normalizeTimestampedPath(storagePath, filename);
+        storagePath = normResult.storagePath; // Use normalized path
+        filename = normResult.filename;     // Use normalized filename
+        console.log(`[editExcelFile] Using normalized storagePath: ${storagePath}, filename: ${filename}`);
 
         try {
             // Download the existing file from storage
@@ -411,7 +414,8 @@ async function editExcelFile(db: admin.firestore.Firestore, storage: admin.stora
                 storagePath: storagePath,
                 downloadURL: downloadURL,
                 size: updatedBuffer.length, // Add file size
-                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // Add content type
+                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // Add content type
+                name: filename // *** Add normalized filename update ***
             });
 
             console.log(`[editExcelFile] Successfully updated Firestore document: ${docRef.id}`);
