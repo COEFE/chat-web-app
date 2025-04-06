@@ -459,13 +459,21 @@ function normalizeTimestampedPath(storagePath: string, filename: string): { stor
     let finalFilename = filename;
 
     if (timestampPattern.test(storagePath)) {
-        const basePath = storagePath.replace(timestampPattern, '');
-        finalStoragePath = `${basePath}.xlsx`;
+        let basePath = storagePath.replace(timestampPattern, '');
+        // Only add .xlsx if it doesn't already end with it
+        if (!basePath.toLowerCase().endsWith('.xlsx')) {
+            basePath += '.xlsx';
+        }
+        finalStoragePath = basePath;
         console.log("[normalizeTimestampedPath] Normalizing storage path from", storagePath, "to", finalStoragePath);
     }
     if (timestampPattern.test(filename)) {
-        const baseFilename = filename.replace(timestampPattern, '');
-        finalFilename = `${baseFilename}.xlsx`;
+        let baseFilename = filename.replace(timestampPattern, '');
+        // Only add .xlsx if it doesn't already end with it
+        if (!baseFilename.toLowerCase().endsWith('.xlsx')) {
+            baseFilename += '.xlsx';
+        }
+        finalFilename = baseFilename;
         console.log("[normalizeTimestampedPath] Normalizing filename from", filename, "to", finalFilename);
     }
     return { storagePath: finalStoragePath, filename: finalFilename };
