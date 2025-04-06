@@ -70,7 +70,8 @@ async function createExcelFile(db: admin.firestore.Firestore, storage: admin.sto
         console.log(`[createExcelFile] Canonical storage path: ${canonicalStoragePath}`);
         
         // Check if document already exists with this ID
-        const docRef = db.collection('documents').doc(finalDocumentId);
+        // Use the same collection path as in editExcelFile
+        const docRef = db.collection('users').doc(userId).collection('documents').doc(finalDocumentId);
         const existingDoc = await docRef.get();
         
         // Flag to track if we're updating an existing document
@@ -201,7 +202,8 @@ async function editExcelFile(db: admin.firestore.Firestore, storage: admin.stora
     
     try {
         // Get a reference to the document
-        docRef = db.collection('documents').doc(documentId);
+        // Use the same collection path as in createExcelFile
+        docRef = db.collection('users').doc(userId).collection('documents').doc(documentId);
         console.log(`[editExcelFile] Looking up document with ID: ${docRef.id}`);
         
         // Get the document data
