@@ -31,7 +31,7 @@ try {
  * Creates a new Excel file based on the provided data
  */
 async function createExcelFile(db: any, storage: any, bucket: any, userId: string, documentId: string, data: any[]) {
-    console.log("Creating Excel file for user:", userId);
+    console.log("Creating Excel file for user:", userId, "with documentId:", documentId);
     
     // Check if Firebase services are available
     if (!db || !storage || !bucket) {
@@ -45,6 +45,22 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
     }
     
     try {
+        // Check if document already exists (for documentId provided by Claude)
+        let existingDoc = null;
+        let existingDocRef = null;
+        
+        if (documentId) {
+            console.log("Checking if document already exists with ID:", documentId);
+            existingDocRef = db.collection('users').doc(userId).collection('documents').doc(documentId);
+            existingDoc = await existingDocRef.get();
+            
+            if (existingDoc.exists) {
+                console.log("Document already exists, will update instead of creating new");
+            } else {
+                console.log("Document ID provided but document not found, will create new");
+            }
+        }
+        
         // Create a new workbook
         const workbook = XLSX.utils.book_new();
         
@@ -62,9 +78,21 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
         // Convert workbook to buffer
         const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
         
-        // Generate a unique filename
-        const filename = `${documentId || uuidv4()}.xlsx`;
-        const storagePath = `users/${userId}/${filename}`;
+        // Use existing filename if updating, otherwise generate a new one
+        let filename, storagePath;
+        
+        if (existingDoc && existingDoc.exists) {
+            const existingData = existingDoc.data();
+            // Use the existing storage path to overwrite the file
+            storagePath = existingData.storagePath;
+            filename = existingData.name;
+            console.log("Using existing storage path:", storagePath);
+        } else {
+            // Generate a unique filename without timestamp to avoid duplicates
+            filename = `${documentId || uuidv4()}.xlsx`;
+            storagePath = `users/${userId}/${filename}`;
+            console.log("Creating new storage path:", storagePath);
+        }
         
         // Upload to Firebase Storage
         const file = bucket.file(storagePath);
@@ -74,29 +102,47 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
             }
         });
         
-        // Create document reference in Firestore
-        const docRef = db.collection('users').doc(userId).collection('documents').doc(documentId || uuidv4());
-        await docRef.set({
-            name: filename,
-            uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
-            contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            storagePath,
-            status: 'processed',
-            userId,
-            size: excelBuffer.length,
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
-        });
+        // Update existing document or create a new one
+        const docRef = existingDocRef || db.collection('users').doc(userId).collection('documents').doc(documentId || uuidv4());
         
-        return { 
-            success: true, 
-            message: "Excel file created successfully", 
-            documentId: docRef.id 
-        };
+        if (existingDoc && existingDoc.exists) {
+            // Update existing document
+            await docRef.update({
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                size: excelBuffer.length
+            });
+            console.log("Updated existing document:", docRef.id);
+            
+            return { 
+                success: true, 
+                message: "Excel file updated successfully", 
+                documentId: docRef.id 
+            };
+        } else {
+            // Create new document
+            await docRef.set({
+                name: filename,
+                uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
+                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                storagePath,
+                status: 'processed',
+                userId,
+                size: excelBuffer.length,
+                createdAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            console.log("Created new document:", docRef.id);
+            
+            return { 
+                success: true, 
+                message: "Excel file created successfully", 
+                documentId: docRef.id 
+            };
+        }
     } catch (error: any) {
-        console.error("Error creating Excel file:", error);
+        console.error("Error creating/updating Excel file:", error);
         return { 
             success: false, 
-            message: `Error creating Excel file: ${error.message}` 
+            message: `Error creating/updating Excel file: ${error.message}` 
         };
     }
 }

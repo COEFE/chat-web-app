@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, MouseEvent, WheelEvent } from 'reac
 import dynamic from 'next/dynamic';
 import { Timestamp } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
-import { Loader2, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
+import { Loader2, ZoomIn, ZoomOut, RotateCw, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx'; // Import xlsx library
 import mammoth from 'mammoth'; // Import mammoth for DOCX handling
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"; // Import Shadcn Tabs
@@ -44,18 +44,24 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
   const imageContainerRef = useRef<HTMLDivElement>(null);
-  // No longer needed for HTML table implementation
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // State to track refresh counter for cache busting
   const [refreshCounter, setRefreshCounter] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Function to force refresh document content
   const refreshDocument = () => {
     console.log('Forcing document refresh');
+    setIsRefreshing(true);
     setRefreshCounter(prev => prev + 1);
+    
+    // Reset refreshing state after a short delay
+    setTimeout(() => {
+      setIsRefreshing(false);
+    }, 1000);
   };
 
   // Listen for document refresh events from the chat interface
@@ -121,6 +127,9 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
           throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
         }
 
+        // PDF is handled by the dynamic PDFViewer component, no direct fetch/state update needed here
+        // unless we want to explicitly track PDF state for some reason.
+
         // Handle different content types
         if (document.contentType === 'text/plain') {
           const text = await response.text();
@@ -185,10 +194,6 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         } else if (['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'].includes(document.contentType)) {
           // Handle image files
           setImageUrl(proxyUrl);
-        } else if (document.contentType !== 'application/pdf') {
-          // If it's not PDF and not handled above, set an error or specific state
-          console.log(`Unsupported preview for contentType: ${document.contentType}`);
-          //setError(`Preview not available for ${document.contentType}`);
         }
         // PDF is handled by the dynamic PDFViewer component, no fetch needed here
 
@@ -201,35 +206,42 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     };
 
     fetchDocumentContent();
-  }, [document]); // Re-run when the document prop changes
+  }, [document, refreshCounter]); // Re-run when the document prop changes or refresh is triggered
 
   // Effect to set active sheet when workbookData changes
   useEffect(() => {
     if (workbookData && workbookData.length > 0 && !activeSheetName) {
       setActiveSheetName(workbookData[0].sheetName);
     }
-  }, [workbookData, activeSheetName]);
+  }, [workbookData, activeSheetName, refreshCounter]);
 
-  // Define supported types for clarity
-  const isPdf = document?.contentType === 'application/pdf';
-  const isText = document?.contentType === 'text/plain';
-  const isSheet = document && [
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
-      'application/vnd.ms-excel', 
-      'text/csv'
-    ].includes(document.contentType);
+  // --- Derived Constants for Content Type ---
+  const isPdf = document?.contentType?.includes('pdf');
+  const isText = [
+    'text/plain', 
+    'text/markdown', 
+    'application/json'
+  ].includes(document?.contentType || '');
+  const isSheet = [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+    'application/vnd.ms-excel', // .xls
+    'text/csv' // .csv
+  ].includes(document?.contentType || '');
+  const isImage = document?.contentType?.startsWith('image/');
   const isDocx = document?.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-  const isImage = document && ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'].includes(document.contentType);
-  const isPreviewSupported = isPdf || isText || isSheet || isDocx || isImage;
+
+  // Determine if any preview is supported
+  const isPreviewSupported = isPdf || isText || isSheet || isImage || isDocx;
+  // --- End Derived Constants ---
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Document ID display for Excel files */}
+    <div className="flex flex-col h-full bg-background relative">
+      {/* Header with Title and Refresh Button */}
       {isSheet && document.id && (
         <div className="mb-2 p-2 bg-muted/20 border rounded-md">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-            <div className="text-sm font-medium">Document ID:</div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
+              <div className="text-sm font-medium">Document ID:</div>
               <code className="px-2 py-1 bg-primary/10 rounded text-xs">{document.id}</code>
               <Button 
                 variant="ghost" 
@@ -243,34 +255,53 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               >
                 Copy
               </Button>
-              {document.storagePath && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  asChild
-                >
-                  <a 
-                    href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${encodeURIComponent(document.userId || '')}&download=true`} 
-                    download={document.name || 'document.xlsx'}
-                    title="Download Excel file"
-                  >
-                    Download
-                  </a>
-                </Button>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={refreshDocument}
+              disabled={isRefreshing}
+              className="h-7 px-2 text-xs"
+            >
+              {isRefreshing ? (
+                <>
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  Refreshing...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-3 w-3 mr-1" />
+                  Refresh Document
+                </>
               )}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              Use this ID when asking Claude to edit this Excel file
-            </div>
+            </Button>
+            {document.storagePath && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                asChild
+              >
+                <a 
+                  href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}&_refresh=${refreshCounter}`}
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  download={document.name || 'document.xlsx'}
+                >
+                  Download
+                </a>
+              </Button>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Use this ID when asking Claude to edit this Excel file
           </div>
         </div>
       )}
-      {/* Loading state */}
+      {/* Loading indicator */}
       {isLoading && (
-        <div className="flex-1 flex justify-center items-center">
+        <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <span className="ml-2">Loading preview...</span>
         </div>
       )}
 
@@ -282,8 +313,8 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       )}
 
       {/* PDF Viewer */} 
-      {!isLoading && !error && isPdf && document.storagePath && (
-        <PDFViewer documentUrl={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}`} />
+      {!isLoading && !error && isPdf && document?.storagePath && (
+        <PDFViewer documentUrl={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}&_refresh=${refreshCounter}`} />
       )}
 
       {/* Text Viewer */}
@@ -298,7 +329,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         <div className="flex-1 overflow-auto">
           <Tabs defaultValue={activeSheetName || (workbookData[0]?.sheetName || '')}>
             <TabsList className="mb-2">
-              {workbookData.map(sheet => (
+              {workbookData.map((sheet) => (
                 <TabsTrigger 
                   key={sheet.sheetName} 
                   value={sheet.sheetName}
@@ -308,7 +339,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                 </TabsTrigger>
               ))}
             </TabsList>
-            {workbookData.map(sheet => (
+            {workbookData.map((sheet) => (
               <TabsContent key={sheet.sheetName} value={sheet.sheetName}>
                 <div className="overflow-auto border rounded-md" style={{ maxHeight: 'calc(100vh - 200px)' }}>
                   <table className="border-collapse w-full" style={{ tableLayout: 'fixed' }}>
@@ -317,7 +348,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                       <col style={{ width: '60px' }} />
                       
                       {/* Columns for data - generate one col element per column */}
-                      {sheet.data[0]?.map((_, colIndex) => (
+                      {sheet.data[0]?.map((_: any, colIndex: number) => (
                         <col key={colIndex} style={{ width: '120px' }} />
                       ))}
                     </colgroup>
@@ -329,7 +360,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                         </th>
                         
                         {/* Column headers - using first row data to determine columns */}
-                        {sheet.data[0]?.map((_, colIndex) => {
+                        {sheet.data[0]?.map((_: any, colIndex: number) => {
                           // Generate Excel-style column headers (A, B, C, ... Z, AA, AB, etc.)
                           let colName = '';
                           if (colIndex < 26) {
@@ -352,30 +383,22 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                       </tr>
                     </thead>
                     <tbody>
-                      {sheet.data.map((row, rowIndex) => (
-                        <tr key={rowIndex} className={rowIndex % 2 === 0 ? 'bg-background' : 'bg-muted/30'}>
-                          {/* Row header */}
-                          <td className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground sticky left-0 z-10 text-center">
+                      {sheet.data.map((row: any, rowIndex: number) => (
+                        <tr key={rowIndex}>
+                          {/* Row header - row number */}
+                          <th className="border border-border bg-muted p-2 text-xs font-medium text-muted-foreground sticky left-0">
                             {rowIndex + 1}
-                          </td>
+                          </th>
                           
-                          {/* Row data */}
-                          {row.map((cell, cellIndex) => (
+                          {/* Row cells */}
+                          {row.map((cell: any, cellIndex: number) => (
                             <td 
-                              key={cellIndex}
+                              key={cellIndex} 
                               className="border border-border p-2 text-sm overflow-hidden text-ellipsis whitespace-nowrap"
-                              title={cell !== null && cell !== undefined ? String(cell) : ''}
                             >
                               {cell !== null && cell !== undefined ? String(cell) : ''}
                             </td>
                           ))}
-                          
-                          {/* If row has fewer cells than the header, add empty cells */}
-                          {sheet.data[0] && row.length < sheet.data[0].length && 
-                            Array(sheet.data[0].length - row.length).fill(0).map((_, i) => (
-                              <td key={`empty-${i}`} className="border border-border p-2 text-sm"></td>
-                            ))
-                          }
                         </tr>
                       ))}
                     </tbody>
@@ -480,10 +503,15 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       {!isLoading && !error && !isPreviewSupported && (
         <div className="flex-1 flex items-center justify-center border rounded-md bg-muted/10">
           <div className="text-center p-4">
-            <p className="text-muted-foreground mb-2">Preview not available for {document?.contentType || 'this file type'}</p>
+            <p className="text-muted-foreground mb-2">Preview not available for {document?.contentType || 'this file type'}.</p>
             {document?.storagePath && (
               <Button asChild variant="outline">
-                <a href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}`} target="_blank" rel="noopener noreferrer">
+                <a 
+                  href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}&_refresh=${refreshCounter}`}
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  download={document.name || 'download'} // Suggest original filename for download
+                >
                   Download File
                 </a>
               </Button>
