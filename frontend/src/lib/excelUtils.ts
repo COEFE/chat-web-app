@@ -4,6 +4,13 @@ import * as XLSX from 'xlsx';
 import admin from 'firebase-admin';
 import { getAdminDb, getAdminStorage } from './firebaseAdminConfig';
 
+// Define a reusable interface for document with ID
+interface DocWithId {
+    id: string;
+    updatedAt?: admin.firestore.Timestamp;
+    [key: string]: any;
+}
+
 // Get Firestore and Storage instances from the centralized Firebase Admin config
 let db: any = null;
 let storage: any = null;
@@ -81,19 +88,22 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
                 
                 if (!snapshot.empty) {
                     // Use the most recent document if multiple matches found
-                    let mostRecent: { id: string; updatedAt?: admin.firestore.Timestamp; [key: string]: any } | null = null;
+                    let mostRecent: DocWithId | null = null;
                     
                     snapshot.forEach((docSnapshot: admin.firestore.QueryDocumentSnapshot) => {
                         const docData = docSnapshot.data();
                         if (!mostRecent || (docData.updatedAt && mostRecent.updatedAt && 
                             docData.updatedAt.toDate() > mostRecent.updatedAt.toDate())) {
-                            mostRecent = { id: docSnapshot.id, ...docData };
+                            mostRecent = { id: docSnapshot.id, ...docData } as DocWithId;
                         }
                     });
                     
-                    if (mostRecent && mostRecent.id) {
-                        console.log("Found similar document with ID:", mostRecent.id);
-                        existingDocRef = db.collection('users').doc(userId).collection('documents').doc(mostRecent.id);
+                    if (mostRecent && typeof mostRecent === 'object') {
+                        // Ensure mostRecent is properly typed
+                        const typedMostRecent = mostRecent as DocWithId;
+                        const docId = typedMostRecent.id;
+                        console.log("Found similar document with ID:", docId);
+                        existingDocRef = db.collection('users').doc(userId).collection('documents').doc(docId);
                         existingDoc = await existingDocRef.get();
                         documentFound = true;
                     }
