@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const filePath = searchParams.get('path');
     const userId = searchParams.get('userId');
+    const download = searchParams.get('download') === 'true';
 
     if (!filePath) {
       return NextResponse.json({ error: 'No file path provided' }, { status: 400, headers: corsHeaders });
@@ -116,12 +117,17 @@ export async function GET(request: NextRequest) {
             console.log(`[file-proxy] File downloaded successfully, size: ${fileBuffer.length} bytes`);
             
             // Create a response with the file content
+            const fileName = mostRecentFile.name.split('/').pop() || 'document';
+            const contentDisposition = download 
+              ? `attachment; filename="${fileName}"` 
+              : `inline; filename="${fileName}"`;
+              
             const response = new NextResponse(fileBuffer, {
               status: 200,
               headers: {
                 'Content-Type': contentType,
                 'Content-Length': String(fileBuffer.length),
-                'Content-Disposition': `inline; filename="${mostRecentFile.name.split('/').pop()}"`,
+                'Content-Disposition': contentDisposition,
                 'Cache-Control': 'public, max-age=86400', // Cache for 24 hours
                 ...corsHeaders, // Add consistent CORS headers
               },

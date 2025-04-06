@@ -540,10 +540,10 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 ) : (
-                  // Default split view (80/20)
+                  // Default split view (70/30)
                   <div className="flex h-full">
-                    {/* Document panel - fixed 80% width */}
-                    <div className="w-4/5 border-r">
+                    {/* Document panel - fixed 70% width */}
+                    <div className="w-[70%] border-r">
                       <div className="flex h-full flex-col p-6 overflow-auto">
                         {selectedDocument ? (
                           <div className="flex h-full flex-col">
@@ -579,8 +579,8 @@ export default function DashboardPage() {
                       </div>
                     </div>
                     
-                    {/* Chat panel - fixed 20% width */}
-                    <div className="w-1/5">
+                    {/* Chat panel - fixed 30% width */}
+                    <div className="w-[30%]">
                       <div className="flex h-full flex-col p-6">
                         {selectedDocumentId ? (
                           <ChatInterface documentId={selectedDocumentId} document={selectedDocument || undefined} />

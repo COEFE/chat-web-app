@@ -216,6 +216,22 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               >
                 Copy
               </Button>
+              {document.storagePath && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  asChild
+                >
+                  <a 
+                    href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${encodeURIComponent(document.userId || '')}&download=true`} 
+                    download={document.name || 'document.xlsx'}
+                    title="Download Excel file"
+                  >
+                    Download
+                  </a>
+                </Button>
+              )}
             </div>
             <div className="text-xs text-muted-foreground">
               Use this ID when asking Claude to edit this Excel file
