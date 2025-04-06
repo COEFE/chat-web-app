@@ -600,10 +600,12 @@ IMPORTANT: For the "documentId" field when editing a file, you MUST use the actu
 
 REMEMBER: If the user is asking to edit the current Excel file they are viewing, you already have the document ID in your context. Use it automatically without asking for it.
 
-CRITICAL: You MUST output ONLY the raw JSON with no additional text, explanation, or markdown formatting when editing Excel files. Do not add any text before or after the JSON. Do not wrap the JSON in code blocks or any other formatting. Just output the raw JSON directly. The system will automatically process it.
+CRITICAL: You MUST output ONLY the raw JSON with no additional text, explanation, or markdown formatting when editing Excel files. Do not add any text before or after the JSON. DO NOT WRAP THE JSON IN CODE BLOCKS (```json ... ```) OR ANY OTHER FORMATTING. Just output the raw JSON directly. The system will automatically process it.
 
 EXAMPLE OF CORRECT RESPONSE FORMAT FOR EXCEL EDIT (notice there is no explanation or code blocks):
-{"excel_operation":"edit","documentId":"abc123","data":[{"sheetName":"Sheet1","cellUpdates":[{"cell":"A1","value":"New Value"}]}]}
+{\"excel_operation\":\"edit\",\"documentId\":\"abc123\",\"data\":[{\"sheetName\":\"Sheet1\",\"cellUpdates\":[{\"cell\":\"A1\",\"value\":\"New Value\"}]}]}
+
+AGAIN: DO NOT USE CODE BLOCKS (```json ... ```) UNDER ANY CIRCUMSTANCES WHEN RESPONDING WITH JSON. JUST OUTPUT THE RAW JSON DIRECTLY.
 
 User Question: ${message}`,
           },
@@ -681,16 +683,35 @@ User Question: ${message}`,
 
     let parsedJson: any = null;
     
-    // First, try parsing the entire aiResponseContent directly as JSON
-    try {
-      // Clean up the response - Claude 3.7 sometimes adds whitespace or invisible characters
-      const cleanedResponse = aiResponseContent.trim();
-      parsedJson = JSON.parse(cleanedResponse);
-      console.log('Successfully parsed AI response as JSON directly');
-    } catch (directParseError) {
-      console.log('Could not parse aiResponseContent directly as JSON. Trying to extract JSON from text.', directParseError);
-      
-      // Try to extract JSON from the text using regex - more aggressive pattern for Claude 3.7
+    // First, try to find JSON in code blocks - Claude often wraps JSON in code blocks despite instructions
+    const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
+    const codeMatch = aiResponseContent.match(codeBlockRegex);
+    
+    if (codeMatch && codeMatch[1]) {
+      try {
+        // Clean the extracted JSON from code block
+        const cleanedCodeJson = codeMatch[1].trim();
+        parsedJson = JSON.parse(cleanedCodeJson);
+        console.log('Successfully extracted and parsed JSON from code block');
+      } catch (codeBlockParseError) {
+        console.log('Failed to parse JSON from code block:', codeBlockParseError);
+      }
+    }
+    
+    // If code block extraction failed, try parsing the entire response directly as JSON
+    if (!parsedJson) {
+      try {
+        // Clean up the response - Claude sometimes adds whitespace or invisible characters
+        const cleanedResponse = aiResponseContent.trim();
+        parsedJson = JSON.parse(cleanedResponse);
+        console.log('Successfully parsed AI response as JSON directly');
+      } catch (directParseError) {
+        console.log('Could not parse aiResponseContent directly as JSON.', directParseError);
+      }
+    }
+    
+    // If direct parsing failed, try to extract JSON from the text using regex
+    if (!parsedJson) {
       const jsonRegex = /(\{[\s\S]*?\})(?=\s*$|\n|$)/;
       const jsonMatch = aiResponseContent.match(jsonRegex);
       
@@ -703,33 +724,20 @@ User Question: ${message}`,
         } catch (extractedParseError) {
           console.log('Failed to parse extracted JSON:', extractedParseError);
         }
-      } else {
-        // Try to find JSON in code blocks - Claude 3.7 might still use them despite instructions
-        const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
-        const codeMatch = aiResponseContent.match(codeBlockRegex);
-        
-        if (codeMatch && codeMatch[1]) {
-          try {
-            // Clean the extracted JSON from code block
-            const cleanedCodeJson = codeMatch[1].trim();
-            parsedJson = JSON.parse(cleanedCodeJson);
-            console.log('Successfully extracted and parsed JSON from code block');
-          } catch (codeBlockParseError) {
-            console.log('Failed to parse JSON from code block:', codeBlockParseError);
-            
-            // Last resort - try to find anything that looks like JSON
-            const lastResortRegex = /\{[\s\S]*"excel_operation"[\s\S]*\}/;
-            const lastMatch = aiResponseContent.match(lastResortRegex);
-            
-            if (lastMatch && lastMatch[0]) {
-              try {
-                parsedJson = JSON.parse(lastMatch[0]);
-                console.log('Successfully extracted JSON with last resort regex');
-              } catch (lastResortError) {
-                console.log('Failed to parse JSON with last resort regex:', lastResortError);
-              }
-            }
-          }
+      }
+    }
+    
+    // Last resort - try to find anything that looks like JSON with excel_operation
+    if (!parsedJson) {
+      const lastResortRegex = /\{[\s\S]*"excel_operation"[\s\S]*\}/;
+      const lastMatch = aiResponseContent.match(lastResortRegex);
+      
+      if (lastMatch && lastMatch[0]) {
+        try {
+          parsedJson = JSON.parse(lastMatch[0]);
+          console.log('Successfully extracted JSON with last resort regex');
+        } catch (lastResortError) {
+          console.log('Failed to parse JSON with last resort regex:', lastResortError);
         }
       }
     }
