@@ -513,7 +513,7 @@ export async function POST(req: NextRequest) {
         maxRetries: 3, // Add retries for transient errors
       });
 
-      console.log(`Calling Anthropic Claude 3.5 Sonnet with content length: ${documentContent.length}`);
+      console.log(`Calling Anthropic Claude 3.7 Sonnet with content length: ${documentContent.length}`);
 
       // Prepare context about the current document for Claude
       let currentDocumentContext = '';
@@ -599,6 +599,11 @@ IMPORTANT: For the "documentId" field when editing a file, you MUST use the actu
 
 REMEMBER: If the user is asking to edit the current Excel file they are viewing, you already have the document ID in your context. Use it automatically without asking for it.
 
+CRITICAL: You MUST output ONLY the raw JSON with no additional text, explanation, or markdown formatting when editing Excel files. Do not add any text before or after the JSON. Do not wrap the JSON in code blocks or any other formatting. Just output the raw JSON directly. The system will automatically process it.
+
+EXAMPLE OF CORRECT RESPONSE FORMAT FOR EXCEL EDIT (notice there is no explanation or code blocks):
+{"excel_operation":"edit","documentId":"abc123","data":[{"sheetName":"Sheet1","cellUpdates":[{"cell":"A1","value":"New Value"}]}]}
+
 User Question: ${message}`,
           },
         ],
@@ -677,33 +682,52 @@ User Question: ${message}`,
     
     // First, try parsing the entire aiResponseContent directly as JSON
     try {
-      parsedJson = JSON.parse(aiResponseContent);
+      // Clean up the response - Claude 3.7 sometimes adds whitespace or invisible characters
+      const cleanedResponse = aiResponseContent.trim();
+      parsedJson = JSON.parse(cleanedResponse);
       console.log('Successfully parsed AI response as JSON directly');
     } catch (directParseError) {
       console.log('Could not parse aiResponseContent directly as JSON. Trying to extract JSON from text.', directParseError);
       
-      // Try to extract JSON from the text using regex
-      const jsonRegex = /(\{[\s\S]*?\})(?=\s*$|\n)/;
+      // Try to extract JSON from the text using regex - more aggressive pattern for Claude 3.7
+      const jsonRegex = /(\{[\s\S]*?\})(?=\s*$|\n|$)/;
       const jsonMatch = aiResponseContent.match(jsonRegex);
       
       if (jsonMatch && jsonMatch[1]) {
         try {
-          parsedJson = JSON.parse(jsonMatch[1]);
+          // Clean the extracted JSON string
+          const cleanedJson = jsonMatch[1].trim();
+          parsedJson = JSON.parse(cleanedJson);
           console.log('Successfully extracted and parsed JSON from text');
         } catch (extractedParseError) {
           console.log('Failed to parse extracted JSON:', extractedParseError);
         }
       } else {
-        // Try to find JSON in code blocks
+        // Try to find JSON in code blocks - Claude 3.7 might still use them despite instructions
         const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
         const codeMatch = aiResponseContent.match(codeBlockRegex);
         
         if (codeMatch && codeMatch[1]) {
           try {
-            parsedJson = JSON.parse(codeMatch[1]);
+            // Clean the extracted JSON from code block
+            const cleanedCodeJson = codeMatch[1].trim();
+            parsedJson = JSON.parse(cleanedCodeJson);
             console.log('Successfully extracted and parsed JSON from code block');
           } catch (codeBlockParseError) {
             console.log('Failed to parse JSON from code block:', codeBlockParseError);
+            
+            // Last resort - try to find anything that looks like JSON
+            const lastResortRegex = /\{[\s\S]*"excel_operation"[\s\S]*\}/;
+            const lastMatch = aiResponseContent.match(lastResortRegex);
+            
+            if (lastMatch && lastMatch[0]) {
+              try {
+                parsedJson = JSON.parse(lastMatch[0]);
+                console.log('Successfully extracted JSON with last resort regex');
+              } catch (lastResortError) {
+                console.log('Failed to parse JSON with last resort regex:', lastResortError);
+              }
+            }
           }
         }
       }
