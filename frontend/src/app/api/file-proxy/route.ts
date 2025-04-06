@@ -18,11 +18,12 @@ export async function GET(request: NextRequest) {
     const admin = getFirebaseAdmin();
     const storage = admin.storage();
     
-    // Explicitly specify the bucket name
-    const bucketName = 'web-chat-app-fa7f0.firebasestorage.app';
-    const bucket = storage.bucket(bucketName);
-    
+    // Get the bucket name from environment variables or use default
+    const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com';
     console.log('Using bucket:', bucketName);
+    
+    // Get the bucket with the specific name
+    const bucket = storage.bucket(bucketName);
     
     // Get the file from Firebase Storage
     const file = bucket.file(decodeURIComponent(filePath));

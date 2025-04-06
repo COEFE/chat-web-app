@@ -189,10 +189,12 @@ export async function DELETE(req: NextRequest) {
     // Delete from storage if storagePath exists
     if (docData?.storagePath) {
       try {
-        // Explicitly specify the bucket name
-        const bucketName = 'web-chat-app-fa7f0.firebasestorage.app';
-        const bucket = storage.bucket(bucketName);
+        // Get the bucket name from environment variables or use default
+        const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com';
         console.log(`DELETE /api/documents - Using bucket: ${bucketName}`);
+        
+        // Get the bucket with the specific name
+        const bucket = storage.bucket(bucketName);
         
         await bucket.file(docData.storagePath).delete();
         console.log(`DELETE /api/documents - Deleted file from storage: ${docData.storagePath}`);
