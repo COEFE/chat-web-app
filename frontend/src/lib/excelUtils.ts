@@ -357,17 +357,18 @@ async function editExcelFile(db: admin.firestore.Firestore, storage: admin.stora
         // We can safely assume they are non-null here.
         console.log(`[editExcelFile] Proceeding to update document with final ID: ${docRef.id}`);
 
-        // Define storage path using the *found* document's name/path if available, or generate new
-        let storagePath = existingData.storagePath || `users/${userId}/documents/${existingData.name}`;
-        let filename = existingData.name;
-        const normResult = normalizeTimestampedPath(storagePath, filename);
-        storagePath = normResult.storagePath; // Use normalized path
-        filename = normResult.filename;     // Use normalized filename
-        console.log(`[editExcelFile] Using normalized storagePath: ${storagePath}, filename: ${filename}`);
+        // Determine the CANONICAL normalized path and filename based on existing data name
+        const { baseName: normalizedBaseName } = extractBaseFilename(existingData.name);
+        let canonicalStoragePath = `users/${userId}/documents/${normalizedBaseName}.xlsx`;
+        let canonicalFilename = `${normalizedBaseName}.xlsx`;
+
+        // Log the canonical path we INTEND to use
+        console.log(`[editExcelFile] Determined canonical storagePath: ${canonicalStoragePath}, filename: ${canonicalFilename}`);
 
         try {
-            // Download the existing file from storage
-            const file = bucket.file(storagePath);
+            // Attempt to download the existing file from the CANONICAL storage path
+            console.log(`[editExcelFile] Attempting download from canonical path: ${canonicalStoragePath}`);
+            const file = bucket.file(canonicalStoragePath);
             const [fileBuffer] = await file.download();
             
             // Load the workbook
@@ -394,14 +395,15 @@ async function editExcelFile(db: admin.firestore.Firestore, storage: admin.stora
             // Convert workbook to buffer
             const updatedBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
             
-            // Upload updated file back to storage
+            // Upload updated file back to the CANONICAL storage path
+            console.log(`[editExcelFile] Uploading updated file to canonical path: ${canonicalStoragePath}`);
             await file.save(updatedBuffer, {
                 metadata: {
                     contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
                 }
             });
             
-            console.log(`[editExcelFile] Successfully uploaded updated Excel file to: ${storagePath}`);
+            console.log(`[editExcelFile] Successfully uploaded updated Excel file to: ${canonicalStoragePath}`);
 
             // Update Firestore document metadata
             const downloadURL = await file.getSignedUrl({
@@ -411,11 +413,11 @@ async function editExcelFile(db: admin.firestore.Firestore, storage: admin.stora
 
             await docRef.update({
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(), // Use server timestamp
-                storagePath: storagePath,
+                storagePath: canonicalStoragePath, // Update Firestore with the canonical path
                 downloadURL: downloadURL,
                 size: updatedBuffer.length, // Add file size
                 contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // Add content type
-                name: filename // *** Add normalized filename update ***
+                name: canonicalFilename // Update Firestore with the canonical filename
             });
 
             console.log(`[editExcelFile] Successfully updated Firestore document: ${docRef.id}`);
