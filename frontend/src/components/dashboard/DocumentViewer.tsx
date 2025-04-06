@@ -40,45 +40,11 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
   const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [dragStart, setDragStart] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
   const imageContainerRef = useRef<HTMLDivElement>(null);
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // State to track refresh counter for cache busting
-  const [refreshCounter, setRefreshCounter] = useState(0);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // Function to force refresh document content
-  const refreshDocument = () => {
-    console.log('Forcing document refresh');
-    setIsRefreshing(true);
-    setRefreshCounter(prev => prev + 1);
-    
-    // Reset refreshing state after a short delay
-    setTimeout(() => {
-      setIsRefreshing(false);
-    }, 1000);
-  };
-
-  // Listen for document refresh events from the chat interface
-  useEffect(() => {
-    const handleExcelUpdate = () => {
-      console.log('Excel update detected, refreshing document viewer');
-      refreshDocument();
-    };
-
-    // Add event listener for Excel updates
-    window.addEventListener('excel-document-updated', handleExcelUpdate);
-
-    // Clean up event listener
-    return () => {
-      window.removeEventListener('excel-document-updated', handleExcelUpdate);
-    };
-  }, []);
 
   // Fetch content based on document type
   useEffect(() => {
@@ -110,10 +76,8 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         // Use our proxy API instead of direct Firebase Storage URL
         // Include userId to help with file lookup if needed
         const userId = document.userId || '';
-        // Add cache-busting timestamp parameter to force fresh content
-        const cacheBuster = `&t=${refreshCounter}`;
-        const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(storagePath)}&userId=${encodeURIComponent(userId)}${cacheBuster}`;
-        console.log('Using proxy URL with cache busting:', proxyUrl);
+        const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(storagePath)}&userId=${encodeURIComponent(userId)}`;
+        console.log('Using proxy URL:', proxyUrl);
         console.log('Document metadata:', { 
           name: document.name, 
           storagePath: document.storagePath,
@@ -206,14 +170,14 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     };
 
     fetchDocumentContent();
-  }, [document, refreshCounter]); // Re-run when the document prop changes or refresh is triggered
+  }, [document]); // Re-run when the document prop changes
 
   // Effect to set active sheet when workbookData changes
   useEffect(() => {
     if (workbookData && workbookData.length > 0 && !activeSheetName) {
       setActiveSheetName(workbookData[0].sheetName);
     }
-  }, [workbookData, activeSheetName, refreshCounter]);
+  }, [workbookData, activeSheetName]);
 
   // --- Derived Constants for Content Type ---
   const isPdf = document?.contentType?.includes('pdf');
@@ -259,21 +223,13 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             <Button 
               variant="outline" 
               size="sm" 
-              onClick={refreshDocument}
-              disabled={isRefreshing}
+              onClick={() => {
+                // Removed refreshDocument function
+              }}
               className="h-7 px-2 text-xs"
             >
-              {isRefreshing ? (
-                <>
-                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                  Refreshing...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="h-3 w-3 mr-1" />
-                  Refresh Document
-                </>
-              )}
+              <RefreshCw className="h-3 w-3 mr-1" />
+              Refresh Document
             </Button>
             {document.storagePath && (
               <Button
@@ -283,7 +239,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                 asChild
               >
                 <a 
-                  href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}&_refresh=${refreshCounter}`}
+                  href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}`}
                   target="_blank" 
                   rel="noopener noreferrer"
                   download={document.name || 'document.xlsx'}
@@ -314,7 +270,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
 
       {/* PDF Viewer */} 
       {!isLoading && !error && isPdf && document?.storagePath && (
-        <PDFViewer documentUrl={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}&_refresh=${refreshCounter}`} />
+        <PDFViewer documentUrl={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}`} />
       )}
 
       {/* Text Viewer */}
@@ -464,20 +420,24 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             className="flex-1 overflow-hidden relative"
             onMouseDown={(e: MouseEvent) => {
               if (e.button === 0) { // Left click only
-                setIsDragging(true);
+                // Removed setIsDragging(true);
                 setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
               }
             }}
             onMouseMove={(e: MouseEvent) => {
-              if (isDragging) {
+              // Removed if (isDragging) {
                 setPosition({
                   x: e.clientX - dragStart.x,
                   y: e.clientY - dragStart.y
                 });
-              }
+              // }
             }}
-            onMouseUp={() => setIsDragging(false)}
-            onMouseLeave={() => setIsDragging(false)}
+            onMouseUp={() => {
+              // Removed setIsDragging(false);
+            }}
+            onMouseLeave={() => {
+              // Removed setIsDragging(false);
+            }}
             onWheel={(e: WheelEvent) => {
               e.preventDefault();
               const delta = e.deltaY * -0.01;
@@ -490,8 +450,8 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               style={{
                 transform: `translate(${position.x}px, ${position.y}px) scale(${zoom}) rotate(${rotation}deg)`,
                 transformOrigin: 'center',
-                transition: isDragging ? 'none' : 'transform 0.2s ease-out',
-                cursor: isDragging ? 'grabbing' : 'grab'
+                transition: 'transform 0.2s ease-out',
+                cursor: 'grab'
               }}
               className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 max-w-none"
             />
@@ -507,7 +467,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             {document?.storagePath && (
               <Button asChild variant="outline">
                 <a 
-                  href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}&_refresh=${refreshCounter}`}
+                  href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}`}
                   target="_blank" 
                   rel="noopener noreferrer"
                   download={document.name || 'download'} // Suggest original filename for download
