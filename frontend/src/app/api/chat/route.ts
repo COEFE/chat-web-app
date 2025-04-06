@@ -755,6 +755,19 @@ User Question: ${message}`
           delete parsedJson.excel_operation;
           console.log('Normalized "excel_operation" key to "operation"');
         }
+        
+        // Force operation to be 'edit' when we have a current document to prevent duplicates
+        if (currentDocument && currentDocument.id) {
+          if (parsedJson.operation === 'create') {
+            console.log('Forcing operation to be "edit" instead of "create" to prevent duplicates');
+            parsedJson.operation = 'edit';
+          }
+          // Ensure documentId matches the current document
+          if (parsedJson.documentId !== currentDocument.id) {
+            console.log(`Updating documentId from ${parsedJson.documentId} to ${currentDocument.id} to prevent duplicates`);
+            parsedJson.documentId = currentDocument.id;
+          }
+        }
 
         // Ensure essential fields are present after parsing
         if (!parsedJson.operation && !parsedJson.excel_operation) {
