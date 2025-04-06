@@ -777,8 +777,11 @@ User Question: ${message}`,
         if (excelResult.success) {
           excelOperationResult = excelResult;
           console.log("Excel operation via JSON was successful:", excelResult.message || 'Operation completed.');
-          // Optionally modify Claude's response or just let it continue?
-          // Let's allow Claude's original response to stream back for now.
+          // Replace the JSON in Claude's response with a user-friendly message
+          finalResponseContent = `I've successfully ${parsedJson.operation === 'create' ? 'created' : 'updated'} the Excel file as requested.`;
+          if (excelResult.message) {
+            finalResponseContent += ` ${excelResult.message}`;
+          }
         } else {
            // Handle error from processExcelOperation
            console.error("Error from processExcelOperation (JSON path):", excelResult.message);
