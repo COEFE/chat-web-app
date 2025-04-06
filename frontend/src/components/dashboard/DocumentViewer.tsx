@@ -77,8 +77,16 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         }
 
         // Use our proxy API instead of direct Firebase Storage URL
-        const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(storagePath)}`;
+        // Include userId to help with file lookup if needed
+        const userId = document.userId || '';
+        const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(storagePath)}&userId=${encodeURIComponent(userId)}`;
         console.log('Using proxy URL:', proxyUrl);
+        console.log('Document metadata:', { 
+          name: document.name, 
+          storagePath: document.storagePath,
+          userId: document.userId,
+          contentType: document.contentType
+        });
         
         const response = await fetch(proxyUrl);
         if (!response.ok) {

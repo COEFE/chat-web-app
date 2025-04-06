@@ -42,15 +42,16 @@ export function initializeFirebaseAdmin(): admin.app.App {
     // Initialize with the hardcoded service account
     console.log('Initializing with direct service account configuration...');
     
-    // Get the bucket name from environment variables or use default
-    const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${serviceAccount.project_id}.appspot.com`;
-    console.log(`Initializing Firebase Admin with storage bucket: ${bucketName}`);
+    // Use the correct bucket name format from the Firestore document: web-chat-app-fa7f0.firebasestorage.app
+    const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app';
+    console.log(`Using storage bucket: ${storageBucket}`);
     
-    // Use the service account directly
     firebaseAdminInstance = admin.initializeApp({
       credential: admin.credential.cert(serviceAccount as ServiceAccount),
-      storageBucket: bucketName
+      storageBucket: storageBucket
     });
+    
+    console.log(`Firebase Admin SDK initialized with storage bucket: ${firebaseAdminInstance.options.storageBucket}`);
     
     console.log(`Firebase Admin SDK initialized successfully with project ID: ${serviceAccount.project_id}`);
     return firebaseAdminInstance;
@@ -60,13 +61,13 @@ export function initializeFirebaseAdmin(): admin.app.App {
     // Fallback to Application Default Credentials if available
     try {
       console.log('Trying to initialize with Application Default Credentials as fallback...');
-      // Get the bucket name from environment variables or use default
-      const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com';
-      console.log(`Initializing Firebase Admin with ADC and storage bucket: ${bucketName}`);
+      // Use the same storage bucket name for consistency
+      const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app';
+      console.log(`Using storage bucket with ADC: ${storageBucket}`);
       
       firebaseAdminInstance = admin.initializeApp({
         credential: admin.credential.applicationDefault(),
-        storageBucket: bucketName
+        storageBucket: storageBucket
       });
       console.log('Firebase Admin SDK initialized successfully with Application Default Credentials.');
       return firebaseAdminInstance;
@@ -80,40 +81,24 @@ export function initializeFirebaseAdmin(): admin.app.App {
 
 /**
  * Gets the initialized Firebase Admin SDK instance.
- * Throws an error if the SDK hasn't been initialized.
+ * Initializes it if it hasn't been initialized yet.
  */
 export function getFirebaseAdmin(): admin.app.App {
-  if (!firebaseAdminInstance) {
-    // Attempt initialization if not already done (e.g., in edge cases)
-    console.warn('Firebase Admin SDK was not initialized. Attempting initialization now...');
-    try {
-      return initializeFirebaseAdmin();
-    } catch (initError) {
-      console.error('Failed to auto-initialize Firebase Admin SDK.', initError);
-      throw new Error('Firebase Admin SDK has not been initialized. Call initializeFirebaseAdmin first.');
-    }
-  }
-  return firebaseAdminInstance;
+  return firebaseAdminInstance || initializeFirebaseAdmin();
 }
 
-// Export functions to get specific services, ensuring initialization first
-export function getAdminAuth() {
-  const app = initializeFirebaseAdmin();
-  return app.auth();
-}
-
-export function getAdminDb() {
-  const app = initializeFirebaseAdmin();
+/**
+ * Gets the Firestore database instance.
+ */
+export function getAdminDb(): admin.firestore.Firestore {
+  const app = getFirebaseAdmin();
   return app.firestore();
 }
 
-export function getAdminStorage() {
-  const app = initializeFirebaseAdmin();
+/**
+ * Gets the Firebase Storage instance.
+ */
+export function getAdminStorage(): admin.storage.Storage {
+  const app = getFirebaseAdmin();
   return app.storage();
-}
-
-// Keep the admin export if needed elsewhere, but ensure it's initialized
-export const getAdmin = () => {
-  initializeFirebaseAdmin();
-  return admin; 
 }
