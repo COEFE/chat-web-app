@@ -744,52 +744,75 @@ User Question: ${message}`
     
     // If we have parsed JSON, proceed with Excel operation
     if (parsedJson) {
-      console.log("Successfully parsed JSON object:", parsedJson);
+      // Log the full structure for debugging
+      console.log("Successfully parsed JSON object:", JSON.stringify(parsedJson, null, 2)); 
+
+      // Check if the relevant data is nested within a 'response' object
+      let operationDataSource = parsedJson; // Default to top-level
+      if (parsedJson.response && typeof parsedJson.response === 'object' && parsedJson.response !== null) {
+        // Check if the nested response looks like it contains the operation data
+        if (parsedJson.response.operation || parsedJson.response.excel_operation) {
+          console.log("Excel operation data found nested under 'response' key. Using nested object.");
+          operationDataSource = parsedJson.response; // Use the nested object as the source
+        } else {
+           console.log("Found 'response' key, but it doesn't contain expected operation fields. Using top-level object.");
+        }
+      } else {
+        console.log("Using top-level parsed JSON object for Excel operation data.");
+      }
+      
+      // Make sure operationDataSource is treated as 'any' to avoid TS errors temporarily
+      const operationData: any = operationDataSource; 
 
       try {
         // --- Normalization & API Call --- 
 
         // Normalize key: Check for 'excel_operation' and rename to 'operation'
-        if (parsedJson && parsedJson.excel_operation && !parsedJson.operation) {
-          parsedJson.operation = parsedJson.excel_operation;
-          delete parsedJson.excel_operation;
+        // *** Use operationData (which points to either top-level or nested) ***
+        if (operationData && operationData.excel_operation && !operationData.operation) {
+          operationData.operation = operationData.excel_operation;
+          delete operationData.excel_operation;
           console.log('Normalized "excel_operation" key to "operation"');
         }
         
         // Force operation to be 'edit' when we have a current document to prevent duplicates
+        // *** Use operationData ***
         if (currentDocument && currentDocument.id) {
-          if (parsedJson.operation === 'create') {
+          if (operationData.operation === 'create') {
             console.log('Forcing operation to be "edit" instead of "create" to prevent duplicates');
-            parsedJson.operation = 'edit';
+            operationData.operation = 'edit';
           }
           // Ensure documentId matches the current document
-          if (parsedJson.documentId !== currentDocument.id) {
-            console.log(`Updating documentId from ${parsedJson.documentId} to ${currentDocument.id} to prevent duplicates`);
-            parsedJson.documentId = currentDocument.id;
+          // *** Use operationData ***
+          if (operationData.documentId !== currentDocument.id) {
+            console.log(`Updating documentId from ${operationData.documentId} to ${currentDocument.id} to prevent duplicates`);
+            operationData.documentId = currentDocument.id;
           }
         }
 
         // Ensure essential fields are present after parsing
-        if (!parsedJson.operation && !parsedJson.excel_operation) {
-          console.error('Parsed JSON is missing operation field');
-          throw new Error('Parsed JSON is missing operation field');
+        // *** Use operationData ***
+        if (!operationData.operation) { // Check the normalized key
+          console.error('Operation data is missing "operation" field');
+          throw new Error('Operation data is missing "operation" field');
         }
         
-        if (!parsedJson.documentId) {
-          console.error('Parsed JSON is missing documentId field');
-          throw new Error('Parsed JSON is missing documentId field');
+        if (!operationData.documentId) {
+          console.error('Operation data is missing "documentId" field');
+          throw new Error('Operation data is missing "documentId" field');
         }
         
-        if (!parsedJson.data) {
-          console.error('Parsed JSON is missing data field');
-          throw new Error('Parsed JSON is missing data field');
+        if (!operationData.data) {
+          console.error('Operation data is missing "data" field');
+          throw new Error('Operation data is missing "data" field');
         }
 
-        console.log('Calling processExcelOperation with parsed/normalized data:', parsedJson);
+        // *** Use operationData for the call ***
+        console.log('Calling processExcelOperation with parsed/normalized data:', operationData);
         const excelResponse: NextResponse = await processExcelOperation(
-          parsedJson.operation,
-          parsedJson.documentId, 
-          parsedJson.data,
+          operationData.operation,
+          operationData.documentId, 
+          operationData.data,
           userId // Pass the authenticated userId
         );
 
@@ -800,32 +823,32 @@ User Question: ${message}`
           excelOperationResult = excelResult;
           console.log("Excel operation via JSON was successful:", excelResult.message || 'Operation completed.');
           // Replace the JSON in Claude's response with a user-friendly message
-          finalResponseContent = `I've successfully ${parsedJson.operation === 'create' ? 'created' : 'updated'} the Excel file as requested.`;
+          // *** Use operationData here ***
+          finalResponseContent = `I've successfully ${operationData.operation === 'create' ? 'created' : 'updated'} the Excel file as requested.`;
           if (excelResult.message) {
             finalResponseContent += ` ${excelResult.message}`;
           }
           
           // Add a special marker that the frontend can detect to trigger a refresh
-          finalResponseContent += '\n\n[EXCEL_DOCUMENT_UPDATED]';
+          finalResponseContent += '\\n\\n[EXCEL_DOCUMENT_UPDATED]';
         } else {
            // Handle error from processExcelOperation
            console.error("Error from processExcelOperation (JSON path):", excelResult.message);
-           // Append error info to the stream data?
-           excelOperationResult = excelResult;
-           console.error("Error from processExcelOperation (JSON path):", excelResult.message);
-           // Maybe send an error message back immediately?
-           // For now, let Claude's original response stream back.
+           excelOperationResult = excelResult; // Still pass the failure result back
+           // Create a user-friendly error message based on the failure
+           finalResponseContent = `I encountered an error while trying to process the Excel operation: ${excelResult.message || 'Unknown error'}`;
         }
-      } catch (error) {
-        console.error('*** Error during inner JSON parsing or Excel API call ***', error);
-        // Log the full error object for detailed diagnosis
-        console.error('Full Error Object:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
-        console.log('Falling back to original aiResponseContent due to inner processing error.');
-        finalResponseContent = aiResponseContent;
+
+      } catch (excelError: any) {
+        console.error("Error processing Excel operation from JSON:", excelError);
+        // Create a user-friendly error message
+        finalResponseContent = `I encountered an error while trying to handle the Excel operation: ${excelError.message || 'Processing failed'}`;
+        // Optionally set excelOperationResult to indicate failure
+        excelOperationResult = { success: false, message: excelError.message || 'Processing failed' };
       }
     } else {
-      console.log('Could not extract a valid content string to parse for inner JSON.');
-      // Keep original response if no JSON detected
+      // No JSON found, use the original AI response content
+      console.log("No specific JSON structure for Excel operation found in AI response.");
       finalResponseContent = aiResponseContent;
     }
 
