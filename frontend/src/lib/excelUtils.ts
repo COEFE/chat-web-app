@@ -53,25 +53,10 @@ async function createExcelFile(db: admin.firestore.Firestore, storage: admin.sto
     }
     
     try {
-        // Determine if we need to create a new document ID or use the provided one
-        let finalDocumentId = documentId;
-        if (!finalDocumentId || finalDocumentId.trim() === '') {
-            // Generate a new document ID if none was provided
-            finalDocumentId = uuidv4();
-            console.log(`[createExcelFile] No document ID provided, generated new ID: ${finalDocumentId}`);
-        } else if (finalDocumentId.includes('-')) {
-            // If the document ID contains a timestamp (like temp-create-1234567890), extract the base ID
-            // This prevents duplicate documents when the same file is edited multiple times
-            const timestampMatch = finalDocumentId.match(/^(.*?)-(\d+)$/);
-            if (timestampMatch) {
-                // Use just the base part without the timestamp
-                const baseId = timestampMatch[1];
-                if (baseId !== 'temp-create') { // Don't use 'temp-create' as a base ID
-                    finalDocumentId = baseId;
-                    console.log(`[createExcelFile] Extracted base ID from timestamped ID: ${finalDocumentId}`);
-                }
-            }
-        }
+        // Use the document ID passed from processExcelOperation directly
+        // It's already been normalized or generated there.
+        const finalDocumentId = documentId;
+        console.log(`[createExcelFile] Using provided document ID: ${finalDocumentId}`);
         
         // IMPORTANT: Use document ID as the canonical filename
         // This ensures we always use the same filename for the same document
