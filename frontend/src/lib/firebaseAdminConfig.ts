@@ -102,3 +102,11 @@ export function getAdminStorage(): admin.storage.Storage {
   const app = getFirebaseAdmin();
   return app.storage();
 }
+
+/**
+ * Gets the Firebase Auth instance.
+ */
+export function getAdminAuth(): admin.auth.Auth {
+  const app = getFirebaseAdmin();
+  return app.auth();
+}
