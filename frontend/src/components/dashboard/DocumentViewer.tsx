@@ -41,8 +41,10 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [position, setPosition] = useState({ x: 0, y: 0 });
-  const imageContainerRef = useRef<HTMLDivElement>(null);
-  
+  const viewerRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+  const startPos = useRef({ x: 0, y: 0 });
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -416,27 +418,26 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             </Button>
           </div>
           <div 
-            ref={imageContainerRef}
+            ref={viewerRef}
             className="flex-1 overflow-hidden relative"
             onMouseDown={(e: MouseEvent) => {
               if (e.button === 0) { // Left click only
-                // Removed setIsDragging(true);
-                setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
+                isDragging.current = true;
+                startPos.current = { x: e.clientX - position.x, y: e.clientY - position.y }; 
               }
             }}
             onMouseMove={(e: MouseEvent) => {
-              // Removed if (isDragging) {
-                setPosition({
-                  x: e.clientX - dragStart.x,
-                  y: e.clientY - dragStart.y
-                });
-              // }
+              if (!isDragging.current) return;
+              setPosition({ 
+                x: e.clientX - startPos.current.x, 
+                y: e.clientY - startPos.current.y 
+              });
             }}
             onMouseUp={() => {
-              // Removed setIsDragging(false);
+              isDragging.current = false;
             }}
             onMouseLeave={() => {
-              // Removed setIsDragging(false);
+              isDragging.current = false;
             }}
             onWheel={(e: WheelEvent) => {
               e.preventDefault();
@@ -451,7 +452,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                 transform: `translate(${position.x}px, ${position.y}px) scale(${zoom}) rotate(${rotation}deg)`,
                 transformOrigin: 'center',
                 transition: 'transform 0.2s ease-out',
-                cursor: 'grab'
+                cursor: isDragging.current ? 'grabbing' : 'grab' 
               }}
               className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 max-w-none"
             />
