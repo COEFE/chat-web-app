@@ -16,14 +16,13 @@ export async function GET(request: NextRequest) {
 
     // Initialize Firebase Admin if needed
     const admin = getFirebaseAdmin();
-    const storage = admin.storage();
     
-    // Use the same bucket name format as in firebaseAdminConfig.ts
+    // Explicitly configure the storage bucket for this route
     const projectId = 'web-chat-app-fa7f0';
     const bucketName = `${projectId}.appspot.com`;
+    console.log('[file-proxy] Explicitly targeting bucket:', bucketName);
+    const storage = admin.storage();
     const bucket = storage.bucket(bucketName);
-    
-    console.log('Using bucket:', bucketName);
     
     // Decode the file path
     const decodedPath = decodeURIComponent(filePath);
