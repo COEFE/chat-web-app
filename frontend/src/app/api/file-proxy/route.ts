@@ -18,7 +18,8 @@ export async function GET(request: NextRequest) {
     const storage = admin.storage();
 
     // Get the bucket with the correct name format
-    const bucketName = 'web-chat-app-fa7f0.appspot.com';
+    // Use the fileBucket from the Firestore document: web-chat-app-fa7f0.firebasestorage.app
+    const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app';
     console.log(`[file-proxy] Using bucket name: ${bucketName}`);
     const bucket = storage.bucket(bucketName);
     

@@ -43,9 +43,13 @@ export function initializeFirebaseAdmin(): admin.app.App {
     console.log('Initializing with direct service account configuration...');
     
     // Use the service account directly
+    // Use the correct bucket name format from the Firestore document: web-chat-app-fa7f0.firebasestorage.app
+    const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app';
+    console.log(`Using storage bucket: ${storageBucket}`);
+    
     firebaseAdminInstance = admin.initializeApp({
       credential: admin.credential.cert(serviceAccount as ServiceAccount),
-      storageBucket: 'web-chat-app-fa7f0.appspot.com'
+      storageBucket: storageBucket
     });
     
     console.log(`Firebase Admin SDK initialized with storage bucket: ${firebaseAdminInstance.options.storageBucket}`);
@@ -58,8 +62,13 @@ export function initializeFirebaseAdmin(): admin.app.App {
     // Fallback to Application Default Credentials if available
     try {
       console.log('Trying to initialize with Application Default Credentials as fallback...');
+      // Use the same storage bucket name for consistency
+      const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app';
+      console.log(`Using storage bucket with ADC: ${storageBucket}`);
+      
       firebaseAdminInstance = admin.initializeApp({
         credential: admin.credential.applicationDefault(),
+        storageBucket: storageBucket
       });
       console.log('Firebase Admin SDK initialized successfully with Application Default Credentials.');
       return firebaseAdminInstance;
