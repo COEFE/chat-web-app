@@ -28,7 +28,7 @@ const PDFViewer = dynamic(() => import('./PDFViewer'), {
 });
 
 // Main DocumentViewer component
-export default function DocumentViewer({ document, onActiveSheetChange }: { document: MyDocumentData, onActiveSheetChange?: (sheetName: string | null) => void }) {
+export default function DocumentViewer({ document }: { document: MyDocumentData }) {
   // For text files
   const [textContent, setTextContent] = useState<string | null>(null);
   // State for workbook data and active sheet
@@ -174,12 +174,7 @@ export default function DocumentViewer({ document, onActiveSheetChange }: { docu
               
               setWorkbookData(sheets);
               if (sheets.length > 0) {
-                const firstSheet = sheets[0].sheetName;
-                setActiveSheetName(firstSheet);
-                // Call the callback if provided
-                if (onActiveSheetChange) {
-                  onActiveSheetChange(firstSheet);
-                }
+                setActiveSheetName(sheets[0].sheetName);
               }
             } catch (error) {
               console.error('Error parsing Excel file:', error);
@@ -338,13 +333,7 @@ export default function DocumentViewer({ document, onActiveSheetChange }: { docu
                 <TabsTrigger 
                   key={sheet.sheetName} 
                   value={sheet.sheetName}
-                  onClick={() => {
-                    setActiveSheetName(sheet.sheetName);
-                    // Call the callback if provided
-                    if (onActiveSheetChange) {
-                      onActiveSheetChange(sheet.sheetName);
-                    }
-                  }}
+                  onClick={() => setActiveSheetName(sheet.sheetName)}
                 >
                   {sheet.sheetName}
                 </TabsTrigger>

@@ -31,15 +31,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [activeSheetName, setActiveSheetName] = useState<string | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null); 
   const { user } = useAuth(); 
-  
-  // Function to handle active sheet change from DocumentViewer
-  const handleActiveSheetChange = (sheetName: string | null) => {
-    console.log('Active sheet changed to:', sheetName);
-    setActiveSheetName(sheetName);
-  };
 
   // Function to handle sending a message
   const handleSend = async () => {
@@ -76,10 +69,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
         body: JSON.stringify({ 
           message: userMessage.content, // Send the user's message content
           documentId: documentId,
-          currentDocument: document ? {
-            ...document,
-            activeSheetName: activeSheetName // Add the active sheet name to the document object
-          } : null // Pass the full document object if available
+          currentDocument: document // Pass the full document object if available
         }),
       });
 

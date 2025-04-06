@@ -522,19 +522,14 @@ export async function POST(req: NextRequest) {
         'application/vnd.ms-excel', // .xls
         'text/csv' // .csv
       ].includes(currentDocument.contentType)) {
-        // Extract active sheet name from the request body if available
-        const activeSheetName = currentDocument.activeSheetName || null;
-        
         currentDocumentContext = `
 \nCURRENT EXCEL DOCUMENT INFORMATION:
 You are currently viewing an Excel document with the following details:
 - Document ID: ${currentDocument.id}
 - Document Name: ${currentDocument.name || 'Unnamed'}
 - Content Type: ${currentDocument.contentType}
-${activeSheetName ? `- Active Sheet: ${activeSheetName}` : ''}
 
 If the user asks you to edit this Excel file, you should automatically use this document ID in your response.
-${activeSheetName ? `IMPORTANT: When editing cells, you should use the active sheet "${activeSheetName}" unless the user explicitly specifies a different sheet.` : ''}
 `;
       }
 
