@@ -45,8 +45,10 @@ export function initializeFirebaseAdmin(): admin.app.App {
     // Use the service account directly
     firebaseAdminInstance = admin.initializeApp({
       credential: admin.credential.cert(serviceAccount as ServiceAccount),
-      storageBucket: `${serviceAccount.project_id}.appspot.com`
+      storageBucket: 'web-chat-app-fa7f0.appspot.com'
     });
+    
+    console.log(`Firebase Admin SDK initialized with storage bucket: ${firebaseAdminInstance.options.storageBucket}`);
     
     console.log(`Firebase Admin SDK initialized successfully with project ID: ${serviceAccount.project_id}`);
     return firebaseAdminInstance;

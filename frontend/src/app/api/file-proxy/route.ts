@@ -16,11 +16,12 @@ export async function GET(request: NextRequest) {
 
     // Initialize Firebase Admin if needed
     const admin = getFirebaseAdmin();
-    
-    // Explicitly configure the storage bucket for this route
     const storage = admin.storage();
-    // Get the default bucket configured during admin initialization
-    const bucket = storage.bucket();
+    
+    // Get the bucket with the correct name format
+    const bucketName = 'web-chat-app-fa7f0.appspot.com';
+    console.log(`[file-proxy] Using bucket name: ${bucketName}`);
+    const bucket = storage.bucket(bucketName);
     
     // Decode the file path
     const decodedPath = decodeURIComponent(filePath);
@@ -28,13 +29,13 @@ export async function GET(request: NextRequest) {
     
     // Get the file from Firebase Storage
     const file = bucket.file(decodedPath);
-    console.log(`Attempting to access file at: gs://${bucket.name}/${decodedPath}`);
+    console.log(`[file-proxy] Attempting to access file at: gs://${bucketName}/${decodedPath}`);
     
     // Check if file exists
-    console.log('Checking if file exists...');
+    console.log('[file-proxy] Checking if file exists...');
     const [exists] = await file.exists();
     if (!exists) {
-      console.log(`File not found: gs://${bucket.name}/${decodedPath}`);
+      console.log(`[file-proxy] File not found: gs://${bucketName}/${decodedPath}`);
       
       // Try to list files in the parent directory to help diagnose the issue
       try {
