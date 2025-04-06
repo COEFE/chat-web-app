@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getFirebaseAdmin, getAdminDb } from '@/lib/firebaseAdminConfig';
 
+// CORS headers for all responses
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+// Handle OPTIONS requests for CORS preflight
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: corsHeaders,
+  });
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -8,7 +23,7 @@ export async function GET(request: NextRequest) {
     const userId = searchParams.get('userId');
 
     if (!filePath) {
-      return NextResponse.json({ error: 'No file path provided' }, { status: 400 });
+      return NextResponse.json({ error: 'No file path provided' }, { status: 400, headers: corsHeaders });
     }
 
     console.log(`[file-proxy] Request for file: ${filePath}, userId: ${userId || 'not provided'}`);
@@ -83,19 +98,43 @@ export async function GET(request: NextRequest) {
           
           console.log(`[file-proxy] Using most recent similar file instead: ${mostRecentFile.name}`);
           
-          // Generate a fresh signed URL for this file
-          const expirationDate = new Date();
-          expirationDate.setDate(expirationDate.getDate() + 7); // 7 days expiration
+          // Instead of redirecting to a signed URL (which causes CORS issues),
+          // download the file and serve it directly through our API
+          console.log('[file-proxy] Downloading file content to proxy...');
           
-          const [signedUrl] = await mostRecentFile.getSignedUrl({
-            action: 'read',
-            expires: expirationDate.toISOString(),
-          });
-          
-          console.log(`[file-proxy] Generated fresh signed URL for similar file`);
-          
-          // Redirect to the signed URL
-          return NextResponse.redirect(signedUrl);
+          try {
+            // Get file metadata to determine content type
+            const [metadata] = await mostRecentFile.getMetadata();
+            const contentType = metadata.contentType || 'application/octet-stream';
+            const contentLength = metadata.size;
+            
+            console.log(`[file-proxy] File metadata: contentType=${contentType}, size=${contentLength}`);
+            
+            // Download the file
+            const [fileBuffer] = await mostRecentFile.download();
+            
+            console.log(`[file-proxy] File downloaded successfully, size: ${fileBuffer.length} bytes`);
+            
+            // Create a response with the file content
+            const response = new NextResponse(fileBuffer, {
+              status: 200,
+              headers: {
+                'Content-Type': contentType,
+                'Content-Length': String(fileBuffer.length),
+                'Content-Disposition': `inline; filename="${mostRecentFile.name.split('/').pop()}"`,
+                'Cache-Control': 'public, max-age=86400', // Cache for 24 hours
+                ...corsHeaders, // Add consistent CORS headers
+              },
+            });
+            
+            return response;
+          } catch (error: any) {
+            console.error('[file-proxy] Error downloading file:', error);
+            return NextResponse.json(
+              { error: 'Error downloading file', details: error?.message || 'Unknown error' },
+              { status: 500, headers: corsHeaders }
+            );
+          }
         }
         
         // If we couldn't find a similar file, list all files in the bucket for diagnostics
@@ -110,44 +149,46 @@ export async function GET(request: NextRequest) {
       
       return NextResponse.json(
         { error: 'File not found' },
-        { status: 404 }
+        { status: 404, headers: corsHeaders }
       );
     }
     
-    // Get the file metadata to determine content type
-    const [metadata] = await file.getMetadata();
-    const contentType = metadata.contentType || 'application/octet-stream';
-    
-    // Generate a fresh signed URL with a longer expiration (7 days)
-    const expirationDate = new Date();
-    expirationDate.setDate(expirationDate.getDate() + 7); // 7 days expiration
-    
-    console.log(`[file-proxy] Generating fresh signed URL with expiration: ${expirationDate.toISOString()}`);
+    // Instead of redirecting to a signed URL (which causes CORS issues),
+    // download the file and serve it directly through our API
+    console.log('[file-proxy] Downloading file content to proxy...');
     
     try {
-      const [signedUrl] = await file.getSignedUrl({
-        action: 'read',
-        expires: expirationDate.toISOString(),
-      });
+      // Get file metadata to determine content type
+      const [metadata] = await file.getMetadata();
+      const contentType = metadata.contentType || 'application/octet-stream';
+      const contentLength = metadata.size;
       
-      console.log(`[file-proxy] Generated fresh signed URL: ${signedUrl.substring(0, 100)}...`);
+      console.log(`[file-proxy] File metadata: contentType=${contentType}, size=${contentLength}`);
       
-      // Redirect to the signed URL instead of proxying the content
-      return NextResponse.redirect(signedUrl);
-    } catch (signUrlError) {
-      console.error('[file-proxy] Error generating signed URL:', signUrlError);
+      // Download the file
+      const [fileBuffer] = await file.download();
       
-      // Fallback to direct download if signed URL generation fails
-      console.log('[file-proxy] Falling back to direct download');
-      const [fileContent] = await file.download();
+      console.log(`[file-proxy] File downloaded successfully, size: ${fileBuffer.length} bytes`);
       
-      // Return the file with the appropriate content type
-      return new NextResponse(fileContent, {
+      // Create a response with the file content
+      const response = new NextResponse(fileBuffer, {
+        status: 200,
         headers: {
           'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=3600'
-        }
+          'Content-Length': String(fileBuffer.length),
+          'Content-Disposition': `inline; filename="${file.name.split('/').pop()}"`,
+          'Cache-Control': 'public, max-age=86400', // Cache for 24 hours
+          ...corsHeaders, // Add consistent CORS headers
+        },
       });
+      
+      return response;
+    } catch (error: any) {
+      console.error('[file-proxy] Error downloading file:', error);
+      return NextResponse.json(
+        { error: 'Error downloading file', details: error?.message || 'Unknown error' },
+        { status: 500, headers: corsHeaders }
+      );
     }
   } catch (error: any) {
     console.error('Error in file-proxy:', error);
@@ -166,7 +207,7 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json(
       { error: errorMessage, code: error.code },
-      { status: statusCode }
+      { status: statusCode, headers: corsHeaders }
     );
   }
 }
