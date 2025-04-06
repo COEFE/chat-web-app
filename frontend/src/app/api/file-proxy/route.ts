@@ -36,31 +36,75 @@ export async function GET(request: NextRequest) {
     if (!exists) {
       console.log(`[file-proxy] File not found: gs://${bucketName}/${decodedPath}`);
       
-      // Try to list files in the parent directory to help diagnose the issue
+      // Try to find a similar file if the exact match doesn't exist
       try {
-        // Get parent directory path
+        // Get parent directory path and filename parts
         const parentDir = decodedPath.split('/').slice(0, -1).join('/');
-        console.log(`[file-proxy] Listing files in parent directory: ${parentDir || '/'}`);
+        const fileName = decodedPath.split('/').pop() || '';
         
-        // List all files in the bucket to see what's available
-        console.log(`[file-proxy] Listing ALL files in bucket for diagnostics:`);
+        // Extract base name without timestamp (assuming format is filename-timestamp)
+        // This handles the case where timestamps in filenames might be different
+        const baseNameParts = fileName.split('-');
+        // If we have at least 2 parts (name and timestamp), use all but the last part as the base name
+        const baseName = baseNameParts.length >= 2 
+          ? baseNameParts.slice(0, -1).join('-')
+          : fileName;
+        
+        console.log(`[file-proxy] Original file not found. Looking for similar files with base name: ${baseName}`);
+        
+        // If userId is provided, use it to construct a more specific search path
+        let searchPrefix = parentDir;
+        if (userId && !parentDir.includes(userId)) {
+          // If the path doesn't already include the userId, try looking in the user's directory
+          searchPrefix = `users/${userId}`;
+          console.log(`[file-proxy] Using userId to search in user's directory: ${searchPrefix}`);
+        }
+        
+        // List files in the search directory
+        const [files] = await bucket.getFiles({ prefix: searchPrefix });
+        console.log(`[file-proxy] Found ${files.length} files in search directory:`);
+        files.forEach(f => console.log(`- ${f.name}`));
+        
+        // Find files with the same base name (ignoring timestamps)
+        const similarFiles = files.filter(f => {
+          const name = f.name.split('/').pop() || '';
+          return name.startsWith(baseName);
+        });
+        
+        console.log(`[file-proxy] Found ${similarFiles.length} files with similar base name:`);
+        similarFiles.forEach(f => console.log(`- ${f.name}`));
+        
+        // If we found a similar file, use the most recent one (assuming the timestamp is at the end)
+        if (similarFiles.length > 0) {
+          // Sort by name in descending order to get the most recent file first (assuming timestamp is at the end)
+          similarFiles.sort((a, b) => b.name.localeCompare(a.name));
+          const mostRecentFile = similarFiles[0];
+          
+          console.log(`[file-proxy] Using most recent similar file instead: ${mostRecentFile.name}`);
+          
+          // Generate a fresh signed URL for this file
+          const expirationDate = new Date();
+          expirationDate.setDate(expirationDate.getDate() + 7); // 7 days expiration
+          
+          const [signedUrl] = await mostRecentFile.getSignedUrl({
+            action: 'read',
+            expires: expirationDate.toISOString(),
+          });
+          
+          console.log(`[file-proxy] Generated fresh signed URL for similar file`);
+          
+          // Redirect to the signed URL
+          return NextResponse.redirect(signedUrl);
+        }
+        
+        // If we couldn't find a similar file, list all files in the bucket for diagnostics
+        console.log(`[file-proxy] No similar files found. Listing ALL files in bucket for diagnostics:`);
         const [allFiles] = await bucket.getFiles();
         console.log(`[file-proxy] Found ${allFiles.length} total files in bucket:`);
         allFiles.forEach(f => console.log(`- ${f.name}`));
         
-        // List files in the specific parent directory
-        const [files] = await bucket.getFiles({ prefix: parentDir });
-        console.log(`[file-proxy] Found ${files.length} files in parent directory:`);
-        files.forEach(f => console.log(`- ${f.name}`));
-        
-        // Check if there are any files with similar names (without timestamp)
-        const baseName = decodedPath.split('-').slice(0, -1).join('-');
-        console.log(`[file-proxy] Looking for files with similar base name: ${baseName}`);
-        const similarFiles = allFiles.filter(f => f.name.includes(baseName));
-        console.log(`[file-proxy] Found ${similarFiles.length} files with similar base name:`);
-        similarFiles.forEach(f => console.log(`- ${f.name}`));
       } catch (listError) {
-        console.error('[file-proxy] Error listing files in parent directory:', listError);
+        console.error('[file-proxy] Error finding similar files:', listError);
       }
       
       return NextResponse.json(
