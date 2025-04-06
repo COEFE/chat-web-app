@@ -600,14 +600,14 @@ IMPORTANT: For the "documentId" field when editing a file, you MUST use the actu
 
 REMEMBER: If the user is asking to edit the current Excel file they are viewing, you already have the document ID in your context. Use it automatically without asking for it.
 
-CRITICAL: You MUST output ONLY the raw JSON with no additional text, explanation, or markdown formatting when editing Excel files. Do not add any text before or after the JSON. DO NOT WRAP THE JSON IN CODE BLOCKS (```json ... ```) OR ANY OTHER FORMATTING. Just output the raw JSON directly. The system will automatically process it.
+CRITICAL: You MUST output ONLY the raw JSON with no additional text, explanation, or markdown formatting when editing Excel files. Do not add any text before or after the JSON. DO NOT WRAP THE JSON IN CODE BLOCKS (\`\`\`json ... \`\`\`) OR ANY OTHER FORMATTING. Just output the raw JSON directly. The system will automatically process it.
 
 EXAMPLE OF CORRECT RESPONSE FORMAT FOR EXCEL EDIT (notice there is no explanation or code blocks):
-{\"excel_operation\":\"edit\",\"documentId\":\"abc123\",\"data\":[{\"sheetName\":\"Sheet1\",\"cellUpdates\":[{\"cell\":\"A1\",\"value\":\"New Value\"}]}]}
+{"excel_operation":"edit","documentId":"abc123","data":[{"sheetName":"Sheet1","cellUpdates":[{"cell":"A1","value":"New Value"}]}]}
 
-AGAIN: DO NOT USE CODE BLOCKS (```json ... ```) UNDER ANY CIRCUMSTANCES WHEN RESPONDING WITH JSON. JUST OUTPUT THE RAW JSON DIRECTLY.
+AGAIN: DO NOT USE CODE BLOCKS (\`\`\`json ... \`\`\`) UNDER ANY CIRCUMSTANCES WHEN RESPONDING WITH JSON. JUST OUTPUT THE RAW JSON DIRECTLY.
 
-User Question: ${message}`,
+User Question: ${message}`
           },
         ],
       });
