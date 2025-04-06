@@ -1,23 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFirebaseAdmin } from '@/lib/firebaseAdminConfig';
+import { getFirebaseAdmin, getAdminDb } from '@/lib/firebaseAdminConfig';
 
 export async function GET(request: NextRequest) {
   try {
-    // Get the file path from the URL parameter
-    const searchParams = request.nextUrl.searchParams;
+    const { searchParams } = new URL(request.url);
     const filePath = searchParams.get('path');
-    
+    const userId = searchParams.get('userId');
+
     if (!filePath) {
-      return NextResponse.json(
-        { error: 'File path is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'No file path provided' }, { status: 400 });
     }
+
+    console.log(`[file-proxy] Request for file: ${filePath}, userId: ${userId || 'not provided'}`);
 
     // Initialize Firebase Admin if needed
     const admin = getFirebaseAdmin();
     const storage = admin.storage();
-    
+
     // Get the bucket with the correct name format
     const bucketName = 'web-chat-app-fa7f0.appspot.com';
     console.log(`[file-proxy] Using bucket name: ${bucketName}`);
@@ -58,16 +57,37 @@ export async function GET(request: NextRequest) {
     const [metadata] = await file.getMetadata();
     const contentType = metadata.contentType || 'application/octet-stream';
     
-    // Get the file content
-    const [fileContent] = await file.download();
+    // Generate a fresh signed URL with a longer expiration (7 days)
+    const expirationDate = new Date();
+    expirationDate.setDate(expirationDate.getDate() + 7); // 7 days expiration
     
-    // Return the file with the appropriate content type
-    return new NextResponse(fileContent, {
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=3600'
-      }
-    });
+    console.log(`[file-proxy] Generating fresh signed URL with expiration: ${expirationDate.toISOString()}`);
+    
+    try {
+      const [signedUrl] = await file.getSignedUrl({
+        action: 'read',
+        expires: expirationDate.toISOString(),
+      });
+      
+      console.log(`[file-proxy] Generated fresh signed URL: ${signedUrl.substring(0, 100)}...`);
+      
+      // Redirect to the signed URL instead of proxying the content
+      return NextResponse.redirect(signedUrl);
+    } catch (signUrlError) {
+      console.error('[file-proxy] Error generating signed URL:', signUrlError);
+      
+      // Fallback to direct download if signed URL generation fails
+      console.log('[file-proxy] Falling back to direct download');
+      const [fileContent] = await file.download();
+      
+      // Return the file with the appropriate content type
+      return new NextResponse(fileContent, {
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=3600'
+        }
+      });
+    }
   } catch (error: any) {
     console.error('Error in file-proxy:', error);
     

@@ -149,10 +149,12 @@ export const processDocumentUpload = onObjectFinalized(
       const storage = getStorage();
       const fileRef = storage.bucket(fileBucket).file(filePath);
 
-      // Use a reasonable expiration time (24 hours from now)
+      // Use a longer expiration time (7 days) for better user experience
       const expirationDate = new Date();
-      expirationDate.setDate(expirationDate.getDate() + 1);
+      expirationDate.setDate(expirationDate.getDate() + 7); // 7 days instead of 1
 
+      logger.info(`Setting signed URL expiration to: ${expirationDate.toISOString()}`);
+      
       const [downloadURL] = await fileRef.getSignedUrl({
         action: "read",
         expires: expirationDate.toISOString(),
