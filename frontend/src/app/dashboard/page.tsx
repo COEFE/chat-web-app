@@ -483,6 +483,15 @@ export default function DashboardPage() {
           const toggleFullScreen = () => setViewMode(viewMode === 'full' ? 'split' : 'full');
           const toggleChatOnly = () => setViewMode(viewMode === 'chat-only' ? 'split' : 'chat-only');
           
+          // State to track active sheet name
+          const [activeSheetName, setActiveSheetName] = useState<string | null>(null);
+          
+          // Handler for active sheet change
+          const handleActiveSheetChange = (sheetName: string | null) => {
+            console.log('Active sheet changed to:', sheetName);
+            setActiveSheetName(sheetName);
+          };
+          
           return (
             <div className="h-full flex flex-col">
               {/* View mode controls - only show when a document is selected */}
@@ -516,7 +525,7 @@ export default function DashboardPage() {
                       <div className="flex h-full flex-col p-6 overflow-auto">
                         <div className="flex h-full flex-col">
                           <div className="flex-1 overflow-hidden">
-                            {selectedDocument && <DocumentViewer document={selectedDocument} />}
+                            {selectedDocument && <DocumentViewer document={selectedDocument} onActiveSheetChange={handleActiveSheetChange} />}
                           </div>
                         </div>
                       </div>
@@ -531,7 +540,10 @@ export default function DashboardPage() {
                   <div className="h-full">
                     <div className="flex h-full flex-col p-6">
                       {selectedDocumentId ? (
-                        <ChatInterface documentId={selectedDocumentId} document={selectedDocument || undefined} />
+                        <ChatInterface 
+                          documentId={selectedDocumentId} 
+                          document={selectedDocument || undefined} 
+                        />
                       ) : (
                         <div className="flex h-full items-center justify-center text-muted-foreground">
                           Select a document to start chatting.
@@ -548,7 +560,7 @@ export default function DashboardPage() {
                         {selectedDocument ? (
                           <div className="flex h-full flex-col">
                             <div className="flex-1 overflow-hidden">
-                              {selectedDocument && <DocumentViewer document={selectedDocument} />}
+                              {selectedDocument && <DocumentViewer document={selectedDocument} onActiveSheetChange={handleActiveSheetChange} />}
                             </div>
                           </div>
                         ) : (
@@ -583,7 +595,10 @@ export default function DashboardPage() {
                     <div className="w-[30%]">
                       <div className="flex h-full flex-col p-6">
                         {selectedDocumentId ? (
-                          <ChatInterface documentId={selectedDocumentId} document={selectedDocument || undefined} />
+                          <ChatInterface 
+                            documentId={selectedDocumentId} 
+                            document={selectedDocument || undefined} 
+                          />
                         ) : (
                           <div className="flex h-full items-center justify-center text-muted-foreground">
                             Select a document to start chatting.
