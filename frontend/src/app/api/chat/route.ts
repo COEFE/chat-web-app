@@ -286,48 +286,23 @@ export async function POST(req: NextRequest) {
       const docData = docSnap.data();
       storagePath = docData?.storagePath;
       const contentType = docData?.contentType;
-      console.log(`Document info retrieved: ID=${documentId}, Path=${storagePath}, Type=${contentType}`);
+      console.log(`Found document: ID=${documentId}, Path=${storagePath}, Type=${contentType}`);
 
-      // --- Ensure storagePath is defined before proceeding ---
       if (!storagePath) {
         console.error(`Storage path missing for document ID: ${documentId}`);
         return NextResponse.json({ error: 'Document metadata incomplete (missing storage path)' }, { status: 500 });
       }
 
-      // --- Clean and validate the storage path ---
-      const cleanedPath = cleanStoragePath(storagePath);
-      if (!cleanedPath) {
-        console.error(`Invalid storage path for document ID: ${documentId}, path: ${storagePath}`);
-        return NextResponse.json({ error: 'Invalid document storage path' }, { status: 500 });
+      // 2. Fetch file content from Storage using storagePath
+      // Ensure storage bucket is configured if not done during initialization
+      const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
+      if (!bucketName) {
+        throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET environment variable not set!");
       }
-      
-      // Update the storagePath with the cleaned version for consistent logging
-      storagePath = cleanedPath;
-      console.log(`Using cleaned storage path: ${storagePath}`);
+      const bucket = adminStorage.bucket(`gs://${bucketName}`);
+      const file: GoogleCloudFile = bucket.file(storagePath);
 
-      // --- Download Content from Storage ---
-      // Get bucket name from env vars with fallback, ensure NO domain suffix
-      const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0';
-      console.log(`Using storage bucket name: ${bucketName}`);
-      
-      // Get the bucket and file reference
-      const bucket = adminStorage.bucket(bucketName);
-      console.log(`Attempting to download from storage bucket: [${bucketName}], path: [${storagePath}]`);
-      
-      // Get the file reference
-      const file = bucket.file(storagePath);
-      
-      // Check if file exists before attempting to download
-      const [exists] = await file.exists();
-      if (!exists) {
-        console.error(`File does not exist in storage: ${storagePath}`);
-        return NextResponse.json({ 
-          error: 'Document file not found in storage',
-          details: `The file referenced by this document (${storagePath}) could not be found in storage.`
-        }, { status: 404 });
-      }
-      
-      // Download the file
+      console.log(`Attempting to download from gs://${bucketName}/${storagePath}`);
       const [contentBuffer] = await file.download();
       console.log(`Successfully downloaded ${contentBuffer.byteLength} bytes from storage.`);
 
@@ -354,7 +329,7 @@ export async function POST(req: NextRequest) {
           console.log(`Successfully parsed PDF content with unpdf, length: ${documentContent.length}`);
         } catch (extractError) {
           console.error('Error extracting PDF text:', extractError);
-          documentContent = `[Error extracting PDF text: ${(extractError instanceof Error) ? extractError.message : 'Unknown error'}]`;
+          documentContent = `[Error extracting PDF text: ${ (extractError instanceof Error) ? extractError.message : 'Unknown error'}]`;
         }
       } else if (
         contentType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || // .xlsx
@@ -454,6 +429,7 @@ export async function POST(req: NextRequest) {
         documentContent = `[Content of type ${contentType}, length ${contentBuffer.byteLength} bytes - needs specific parsing]`; 
       }
       // --- End Content Parsing ---
+
     } catch (error) {
       console.error('Error fetching document info or content:', error);
       
@@ -480,8 +456,8 @@ export async function POST(req: NextRequest) {
       // Return a more descriptive error message
       const errorMessage = error instanceof Error ? `Failed to fetch document data: ${error.message}` : 'Failed to fetch document data';
       return NextResponse.json({ error: errorMessage }, { status: 500 });
-      }
-      // --- End Document Fetching ---
+    }
+    // --- End Document Fetching ---
 
     // --- Call AI API ---
     let aiResponseContent = 'Sorry, I could not get a response from the AI.'; // Default error message
@@ -777,58 +753,16 @@ User Question: ${message}`,
         if (excelResult.success) {
           excelOperationResult = excelResult;
           console.log("Excel operation via JSON was successful:", excelResult.message || 'Operation completed.');
-          
-          // Modify Claude's response to acknowledge the successful Excel operation
-          // Extract any meaningful context from Claude's original response
-          const originalResponseLines = aiResponseContent.split('\n');
-          let contextualResponse = '';
-          
-          // Look for contextual information in Claude's response (before the JSON)
-          if (originalResponseLines.length > 3) {
-            // Take up to the first 3 lines that don't contain JSON syntax
-            const contextLines = originalResponseLines
-              .filter(line => !line.includes('{') && !line.includes('}') && line.trim() !== '')
-              .slice(0, 3);
-            if (contextLines.length > 0) {
-              contextualResponse = contextLines.join('\n') + '\n\n';
-            }
-          }
-          
-          // Create a confirmation message with details about what was updated
-          let updateDetails = '';
-          try {
-            if (parsedJson.data && Array.isArray(parsedJson.data)) {
-              // Get sheet and cell information
-              parsedJson.data.forEach((sheetData: { sheetName?: string; cellUpdates?: Array<{ cell: string; value: any }> }) => {
-                if (sheetData.sheetName && sheetData.cellUpdates && Array.isArray(sheetData.cellUpdates)) {
-                  updateDetails += `Updated sheet "${sheetData.sheetName}" with the following changes:\n`;
-                  sheetData.cellUpdates.forEach((update: { cell: string; value: any }) => {
-                    updateDetails += `- Cell ${update.cell}: Value set to "${update.value}"\n`;
-                  });
-                }
-              });
-            }
-          } catch (error) {
-            console.error('Error creating update details:', error);
-          }
-          
-          // Create the final response with confirmation and details
-          finalResponseContent = 
-            contextualResponse +
-            `✅ Excel file has been successfully updated!\n\n` +
-            updateDetails + '\n' +
-            `The changes have been saved to your document.`;
+          // Optionally modify Claude's response or just let it continue?
+          // Let's allow Claude's original response to stream back for now.
         } else {
            // Handle error from processExcelOperation
            console.error("Error from processExcelOperation (JSON path):", excelResult.message);
-           // Append error info to the stream data
+           // Append error info to the stream data?
            excelOperationResult = excelResult;
-           
-           // Modify Claude's response to show the error
-           finalResponseContent = 
-             `❌ Sorry, I wasn't able to update the Excel file.\n\n` +
-             `Error: ${excelResult.message}\n\n` +
-             `Please try again or check if the document exists and you have permission to edit it.`;
+           console.error("Error from processExcelOperation (JSON path):", excelResult.message);
+           // Maybe send an error message back immediately?
+           // For now, let Claude's original response stream back.
         }
       } catch (error) {
         console.error('*** Error during inner JSON parsing or Excel API call ***', error);
@@ -889,38 +823,4 @@ async function authenticateUser(req: NextRequest): Promise<{ userId: string; tok
   }
   
   return { userId, token: idToken };
-}
-
-// Helper function to validate and clean storage paths
-function cleanStoragePath(path: string | undefined): string | null {
-  if (!path) return null;
-  
-  // Remove any leading slashes
-  let cleanPath = path.startsWith('/') ? path.substring(1) : path;
-  
-  // Remove any protocol prefixes (gs://, etc.)
-  if (cleanPath.includes('://')) {
-    cleanPath = cleanPath.split('://')[1];
-  }
-  
-  // Remove any bucket name prefixes if they exist in the path
-  const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0';
-  if (cleanPath.startsWith(bucketName + '/')) {
-    cleanPath = cleanPath.substring(bucketName.length + 1);
-  }
-  
-  return cleanPath;
-}
-
-// Helper function to check if a file exists in Firebase Storage
-async function checkFileExists(storage: any, bucketName: string, filePath: string): Promise<boolean> {
-  try {
-    const bucket = storage.bucket(bucketName);
-    const file = bucket.file(filePath);
-    const [exists] = await file.exists();
-    return exists;
-  } catch (error) {
-    console.error(`Error checking if file exists: ${error}`);
-    return false;
-  }
 }

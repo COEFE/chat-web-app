@@ -16,9 +16,7 @@ try {
   storage = getAdminStorage();
   
   // Get the bucket name from environment variables
-  // IMPORTANT: Do NOT include the domain (.firebasestorage.app) as part of the bucket name
-  // Just use the project ID or the custom bucket name without domain
-  const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0';
+  const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com';
   console.log(`Using storage bucket: ${bucketName}`);
   
   // Get the bucket with the specific name
