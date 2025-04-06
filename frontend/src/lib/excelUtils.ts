@@ -59,6 +59,18 @@ async function createExcelFile(db: admin.firestore.Firestore, storage: admin.sto
             // Generate a new document ID if none was provided
             finalDocumentId = uuidv4();
             console.log(`[createExcelFile] No document ID provided, generated new ID: ${finalDocumentId}`);
+        } else if (finalDocumentId.includes('-')) {
+            // If the document ID contains a timestamp (like temp-create-1234567890), extract the base ID
+            // This prevents duplicate documents when the same file is edited multiple times
+            const timestampMatch = finalDocumentId.match(/^(.*?)-(\d+)$/);
+            if (timestampMatch) {
+                // Use just the base part without the timestamp
+                const baseId = timestampMatch[1];
+                if (baseId !== 'temp-create') { // Don't use 'temp-create' as a base ID
+                    finalDocumentId = baseId;
+                    console.log(`[createExcelFile] Extracted base ID from timestamped ID: ${finalDocumentId}`);
+                }
+            }
         }
         
         // IMPORTANT: Use document ID as the canonical filename
@@ -408,8 +420,22 @@ export async function processExcelOperation(
 
   try {
     let result;
-    // Use dummy documentId if needed for logic flow, actual operations are skipped/dummied
-    const effectiveDocumentId = documentId || `temp-create-${Date.now()}`; // Use temp ID for create if null
+    // Handle document ID consistently to prevent duplicates
+    let effectiveDocumentId = documentId || '';
+    
+    if (!effectiveDocumentId || effectiveDocumentId.trim() === '') {
+      // For new documents, generate a stable ID without timestamps
+      effectiveDocumentId = `doc-${uuidv4()}`;
+      console.log(`[processExcelOperation] Generated stable document ID: ${effectiveDocumentId}`);
+    } else if (effectiveDocumentId.includes('-')) {
+      // If the document ID contains a timestamp (like temp-create-1234567890), extract the base ID
+      const timestampMatch = effectiveDocumentId.match(/^(.*?)-(\d+)$/);
+      if (timestampMatch && timestampMatch[1] !== 'doc') {
+        // Use a stable prefix to ensure consistency
+        effectiveDocumentId = `doc-${timestampMatch[1]}`;
+        console.log(`[processExcelOperation] Normalized timestamped ID to: ${effectiveDocumentId}`);
+      }
+    }
 
     if (operation === 'create') {
       console.log(`Processing CREATE operation for user ${userId}, potential docId based on data?`);
