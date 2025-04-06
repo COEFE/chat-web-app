@@ -18,18 +18,38 @@ export async function GET(request: NextRequest) {
     const admin = getFirebaseAdmin();
     const storage = admin.storage();
     
-    // Explicitly specify the bucket name
-    const bucketName = 'web-chat-app-fa7f0.firebasestorage.app';
+    // Use the same bucket name format as in firebaseAdminConfig.ts
+    const projectId = 'web-chat-app-fa7f0';
+    const bucketName = `${projectId}.appspot.com`;
     const bucket = storage.bucket(bucketName);
     
     console.log('Using bucket:', bucketName);
     
+    // Decode the file path
+    const decodedPath = decodeURIComponent(filePath);
+    console.log(`File path after decoding: ${decodedPath}`);
+    
     // Get the file from Firebase Storage
-    const file = bucket.file(decodeURIComponent(filePath));
+    const file = bucket.file(decodedPath);
+    console.log(`Attempting to access file at: gs://${bucketName}/${decodedPath}`);
     
     // Check if file exists
+    console.log('Checking if file exists...');
     const [exists] = await file.exists();
     if (!exists) {
+      console.log(`File not found: gs://${bucketName}/${decodedPath}`);
+      
+      // Try to list files in the parent directory to help diagnose the issue
+      try {
+        const parentDir = decodedPath.split('/').slice(0, -1).join('/');
+        console.log(`Listing files in parent directory: ${parentDir || '/'}`);
+        const [files] = await bucket.getFiles({ prefix: parentDir });
+        console.log(`Found ${files.length} files in parent directory:`);
+        files.forEach(f => console.log(`- ${f.name}`));
+      } catch (listError) {
+        console.error('Error listing files in parent directory:', listError);
+      }
+      
       return NextResponse.json(
         { error: 'File not found' },
         { status: 404 }
@@ -50,11 +70,24 @@ export async function GET(request: NextRequest) {
         'Cache-Control': 'public, max-age=3600'
       }
     });
-  } catch (error) {
-    console.error('Error proxying file:', error);
+  } catch (error: any) {
+    console.error('Error in file-proxy:', error);
+    
+    // Provide more detailed error information
+    let errorMessage = error.message || 'Internal server error';
+    let statusCode = 500;
+    
+    if (error.code === 'storage/object-not-found') {
+      errorMessage = 'File not found in storage';
+      statusCode = 404;
+    } else if (error.code?.startsWith('storage/')) {
+      errorMessage = `Storage error: ${error.code}`;
+      statusCode = 400;
+    }
+    
     return NextResponse.json(
-      { error: `Failed to proxy file: ${error instanceof Error ? error.message : String(error)}` },
-      { status: 500 }
+      { error: errorMessage, code: error.code },
+      { status: statusCode }
     );
   }
 }
