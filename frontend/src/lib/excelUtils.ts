@@ -88,10 +88,23 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
             filename = existingData.name;
             console.log("Using existing storage path:", storagePath);
         } else {
-            // Generate a unique filename without timestamp to avoid duplicates
-            filename = `${documentId || uuidv4()}.xlsx`;
+            // Generate a filename without timestamp to avoid duplicates
+            // Check if documentId contains a timestamp pattern (e.g., "filename-1234567890123")
+            const timestampPattern = /-\d{13,}(\.xlsx)?$/;
+            let baseFilename;
+            
+            if (documentId && timestampPattern.test(documentId)) {
+                // Extract the base filename without the timestamp
+                baseFilename = documentId.replace(timestampPattern, '');
+                console.log("Extracted base filename from documentId:", baseFilename);
+            } else {
+                baseFilename = documentId || uuidv4();
+            }
+            
+            // Use the base filename without appending a timestamp
+            filename = `${baseFilename}.xlsx`;
             storagePath = `users/${userId}/${filename}`;
-            console.log("Creating new storage path:", storagePath);
+            console.log("Creating new storage path (without timestamp):", storagePath);
         }
         
         // Upload to Firebase Storage
