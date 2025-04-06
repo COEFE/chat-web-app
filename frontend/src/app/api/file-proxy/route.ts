@@ -38,13 +38,29 @@ export async function GET(request: NextRequest) {
       
       // Try to list files in the parent directory to help diagnose the issue
       try {
+        // Get parent directory path
         const parentDir = decodedPath.split('/').slice(0, -1).join('/');
-        console.log(`Listing files in parent directory: ${parentDir || '/'}`);
+        console.log(`[file-proxy] Listing files in parent directory: ${parentDir || '/'}`);
+        
+        // List all files in the bucket to see what's available
+        console.log(`[file-proxy] Listing ALL files in bucket for diagnostics:`);
+        const [allFiles] = await bucket.getFiles();
+        console.log(`[file-proxy] Found ${allFiles.length} total files in bucket:`);
+        allFiles.forEach(f => console.log(`- ${f.name}`));
+        
+        // List files in the specific parent directory
         const [files] = await bucket.getFiles({ prefix: parentDir });
-        console.log(`Found ${files.length} files in parent directory:`);
+        console.log(`[file-proxy] Found ${files.length} files in parent directory:`);
         files.forEach(f => console.log(`- ${f.name}`));
+        
+        // Check if there are any files with similar names (without timestamp)
+        const baseName = decodedPath.split('-').slice(0, -1).join('-');
+        console.log(`[file-proxy] Looking for files with similar base name: ${baseName}`);
+        const similarFiles = allFiles.filter(f => f.name.includes(baseName));
+        console.log(`[file-proxy] Found ${similarFiles.length} files with similar base name:`);
+        similarFiles.forEach(f => console.log(`- ${f.name}`));
       } catch (listError) {
-        console.error('Error listing files in parent directory:', listError);
+        console.error('[file-proxy] Error listing files in parent directory:', listError);
       }
       
       return NextResponse.json(
