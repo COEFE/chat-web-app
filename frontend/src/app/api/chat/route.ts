@@ -782,6 +782,9 @@ User Question: ${message}`,
           if (excelResult.message) {
             finalResponseContent += ` ${excelResult.message}`;
           }
+          
+          // Add a special marker that the frontend can detect to trigger a refresh
+          finalResponseContent += '\n\n[EXCEL_DOCUMENT_UPDATED]';
         } else {
            // Handle error from processExcelOperation
            console.error("Error from processExcelOperation (JSON path):", excelResult.message);

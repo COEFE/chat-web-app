@@ -49,6 +49,31 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // State to track refresh counter for cache busting
+  const [refreshCounter, setRefreshCounter] = useState(0);
+
+  // Function to force refresh document content
+  const refreshDocument = () => {
+    console.log('Forcing document refresh');
+    setRefreshCounter(prev => prev + 1);
+  };
+
+  // Listen for document refresh events from the chat interface
+  useEffect(() => {
+    const handleExcelUpdate = () => {
+      console.log('Excel update detected, refreshing document viewer');
+      refreshDocument();
+    };
+
+    // Add event listener for Excel updates
+    window.addEventListener('excel-document-updated', handleExcelUpdate);
+
+    // Clean up event listener
+    return () => {
+      window.removeEventListener('excel-document-updated', handleExcelUpdate);
+    };
+  }, []);
+
   // Fetch content based on document type
   useEffect(() => {
     const fetchDocumentContent = async () => {
@@ -79,8 +104,10 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         // Use our proxy API instead of direct Firebase Storage URL
         // Include userId to help with file lookup if needed
         const userId = document.userId || '';
-        const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(storagePath)}&userId=${encodeURIComponent(userId)}`;
-        console.log('Using proxy URL:', proxyUrl);
+        // Add cache-busting timestamp parameter to force fresh content
+        const cacheBuster = `&t=${refreshCounter}`;
+        const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(storagePath)}&userId=${encodeURIComponent(userId)}${cacheBuster}`;
+        console.log('Using proxy URL with cache busting:', proxyUrl);
         console.log('Document metadata:', { 
           name: document.name, 
           storagePath: document.storagePath,

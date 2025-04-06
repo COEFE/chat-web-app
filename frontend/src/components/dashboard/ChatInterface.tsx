@@ -98,10 +98,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
             };
             setMessages((prev) => [...prev, aiResponse]);
             
-            // If there was an Excel operation, refresh the document list
+            // If there was an Excel operation or the special marker is found, trigger a document refresh
             if (aiResponse.excelOperation && aiResponse.excelOperation.success) {
-              // You could trigger a document list refresh here if needed
-              console.log('Excel operation successful:', aiResponse.excelOperation);
+              console.log('Excel operation successful, triggering document refresh');
+              window.dispatchEvent(new Event('excel-document-updated'));
+            }
+            
+            // Check for the special marker in the response content
+            if (aiResponse.content.includes('[EXCEL_DOCUMENT_UPDATED]')) {
+              console.log('Detected Excel document update marker, triggering refresh');
+              window.dispatchEvent(new Event('excel-document-updated'));
+              
+              // Remove the marker from the displayed message
+              aiResponse.content = aiResponse.content.replace('[EXCEL_DOCUMENT_UPDATED]', '');
             }
           } else if (aiData && typeof aiData === 'object') {
             // Try to extract content from different possible structures
