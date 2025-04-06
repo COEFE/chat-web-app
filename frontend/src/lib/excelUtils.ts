@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
 import admin from 'firebase-admin';
+import { Bucket } from '@google-cloud/storage'; // Import Bucket type
 import { getAdminDb, getAdminStorage } from './firebaseAdminConfig';
 
 // Define a reusable interface for document with ID
@@ -12,9 +13,9 @@ interface DocWithId {
 }
 
 // Get Firestore and Storage instances from the centralized Firebase Admin config
-let db: any = null;
-let storage: any = null;
-let bucket: any = null;
+let db: admin.firestore.Firestore | null = null;
+let storage: admin.storage.Storage | null = null;
+let bucket: Bucket | null = null; // Use imported Bucket type
 
 // Try to initialize Firebase services, but handle gracefully if they fail
 try {
@@ -35,12 +36,12 @@ try {
 }
 
 /**
- * Creates a new Excel file based on the provided data
+ * Creates a new Excel file based on the provided data. 
+ * If a document with a matching base name already exists, it updates that document.
  */
-async function createExcelFile(db: any, storage: any, bucket: any, userId: string, documentId: string, data: any[]) {
-    console.log("Creating Excel file for user:", userId, "with documentId:", documentId);
+async function createExcelFile(db: admin.firestore.Firestore, storage: admin.storage.Storage, bucket: Bucket, userId: string, documentId: string, data: any[]) {
+    console.log(`[createExcelFile] Starting create/update for user: ${userId}, initial documentId: ${documentId}`);
     
-    // Check if Firebase services are available
     if (!db || !storage || !bucket) {
         console.log("Firebase services not available, using dummy implementation");
         await new Promise(resolve => setTimeout(resolve, 50)); // Simulate async work
@@ -115,6 +116,81 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
             }
         }
         
+        // --- Robust Document Lookup/Handling ---
+        console.log(`[createExcelFile] Checking direct match for ID: ${documentId}`);
+        const { baseName, isTimestamped } = extractBaseFilename(documentId);
+        console.log(`[createExcelFile] Extracted baseName: '${baseName}', isTimestamped: ${isTimestamped}`);
+
+        let docRef: admin.firestore.DocumentReference;
+        let existingDocData: DocWithId | null = null;
+
+        // 1. Try direct match first (especially if ID wasn't timestamped)
+        const directDocRef = db.collection('users').doc(userId).collection('documents').doc(documentId);
+        const directDocSnap = await directDocRef.get();
+
+        if (directDocSnap.exists) {
+            console.log(`[createExcelFile] Found direct match with ID: ${documentId}. Will update.`);
+            docRef = directDocRef;
+            existingDocData = { id: directDocSnap.id, ...directDocSnap.data() } as DocWithId;
+        } else {
+            console.log(`[createExcelFile] No direct match for ID: ${documentId}. Searching by baseName: '${baseName}'`);
+            // 2. If no direct match, search by baseName
+            const querySnapshot = await db.collection('users').doc(userId).collection('documents')
+                .where('name', '>=', baseName)
+                .where('name', '<=', baseName + '\uf8ff')
+                .get();
+            
+            console.log(`[createExcelFile] BaseName search found ${querySnapshot.size} potential matches.`);
+
+            if (!querySnapshot.empty) {
+                // Filter results to match baseName exactly (ignoring timestamps) and sort
+                const matchingDocs = querySnapshot.docs
+                    .map((doc: admin.firestore.QueryDocumentSnapshot) => ({ id: doc.id, ...doc.data() } as DocWithId))
+                    .filter((doc: DocWithId) => extractBaseFilename(doc.name).baseName === baseName)
+                    .sort((a: DocWithId, b: DocWithId) => (b.updatedAt?.toMillis() || 0) - (a.updatedAt?.toMillis() || 0)); // Sort descending by update time
+
+                if (matchingDocs.length > 0) {
+                    existingDocData = matchingDocs[0]; // Use the most recently updated
+                    docRef = db.collection('users').doc(userId).collection('documents').doc(existingDocData.id); // Assign docRef for existing baseName match
+                    console.log(`[createExcelFile] Found best match by baseName. Will update document ID: ${existingDocData.id} (Name: ${existingDocData.name}, Updated: ${existingDocData.updatedAt?.toDate()})`);
+                } else {
+                    console.log(`[createExcelFile] No documents found matching baseName '${baseName}' after filtering. Will create new.`);
+                    docRef = directDocRef; // Assign docRef for new document (using original ID)
+                    existingDocData = null;
+                }
+            } else {
+                console.log(`[createExcelFile] No documents found with baseName starting with '${baseName}'. Will create new.`);
+                docRef = directDocRef; // Assign docRef for new document (using original ID)
+                existingDocData = null;
+            }
+        }
+        // --- End Robust Document Lookup/Handling ---
+
+        // Sanity check: docRef must be assigned by this point
+        if (!docRef) { // This check should now pass reliably
+            console.error("[createExcelFile] Critical error: docRef was not assigned after lookup logic.");
+            throw new Error("Internal server error: Document reference could not be established.");
+        }
+
+        // Define storage path and filename
+        let storagePath: string;
+        let filename: string;
+
+        if (existingDocData) {
+            // Use existing path and name, potentially normalizing timestamped names
+            filename = existingDocData.name;
+            storagePath = existingDocData.storagePath || `users/${userId}/documents/${filename}`;
+            const normResult = normalizeTimestampedPath(storagePath, filename);
+            storagePath = normResult.storagePath;
+            filename = normResult.filename;
+            console.log(`[createExcelFile] Using existing doc data. Final path: ${storagePath}, filename: ${filename}`);
+        } else {
+            // Generate new filename and path for a *new* document using the *clean base name*
+            filename = `${baseName}.xlsx`; 
+            storagePath = `users/${userId}/documents/${filename}`;
+            console.log(`[createExcelFile] Creating new doc. Path: ${storagePath}, filename: ${filename}`);
+        }
+
         // Create a new workbook
         const workbook = XLSX.utils.book_new();
         
@@ -132,54 +208,6 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
         // Convert workbook to buffer
         const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
         
-        // Use existing filename if updating, otherwise generate a new one
-        let filename, storagePath;
-        
-        if (existingDoc && existingDoc.exists) {
-            const existingData = existingDoc.data();
-            // Use the existing storage path to overwrite the file
-            storagePath = existingData.storagePath;
-            filename = existingData.name;
-            console.log("Using existing storage path:", storagePath);
-            
-            // If the existing path contains a timestamp, normalize it
-            const timestampPattern = /-\d{13,}(\.xlsx)?$/;
-            if (timestampPattern.test(storagePath)) {
-                const basePath = storagePath.replace(timestampPattern, '');
-                const newPath = `${basePath}.xlsx`;
-                console.log("Normalizing storage path from", storagePath, "to", newPath);
-                storagePath = newPath;
-                
-                // Also normalize the filename
-                if (timestampPattern.test(filename)) {
-                    const baseFilename = filename.replace(timestampPattern, '');
-                    filename = `${baseFilename}.xlsx`;
-                    console.log("Normalizing filename from", existingData.name, "to", filename);
-                }
-            }
-        } else {
-            // Generate a consistent filename without timestamp to avoid duplicates
-            // Check if documentId contains a timestamp pattern (e.g., "filename-1234567890123")
-            const timestampPattern = /-\d{13,}(\.xlsx)?$/;
-            let baseFilename;
-            
-            if (documentId && timestampPattern.test(documentId)) {
-                // Extract the base filename without the timestamp
-                baseFilename = documentId.replace(timestampPattern, '');
-                console.log("Extracted base filename from documentId:", baseFilename);
-            } else {
-                baseFilename = documentId || uuidv4();
-            }
-            
-            // Remove any existing .xlsx extension
-            baseFilename = baseFilename.replace(/\.xlsx$/i, '');
-            
-            // Use the base filename without appending a timestamp
-            filename = `${baseFilename}.xlsx`;
-            storagePath = `users/${userId}/${filename}`;
-            console.log("Creating new storage path (without timestamp):", storagePath);
-        }
-        
         // Upload to Firebase Storage
         const file = bucket.file(storagePath);
         await file.save(excelBuffer, {
@@ -189,46 +217,53 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
         });
         
         // Update existing document or create a new one
-        const docRef = existingDocRef || db.collection('users').doc(userId).collection('documents').doc(documentId || uuidv4());
-        
-        if (existingDoc && existingDoc.exists) {
+        if (existingDocData) {
             // Update existing document
+            console.log(`[createExcelFile] Updating existing Firestore document: ${docRef.id}`);
             await docRef.update({
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                size: excelBuffer.length
+                storagePath: storagePath,
+                downloadURL: await file.getSignedUrl({
+                    action: 'read',
+                    expires: Date.now() + 60 * 60 * 1000 // 1 hour
+                }),
+                size: excelBuffer.length,
+                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                name: filename // Ensure name is updated if normalized
             });
-            console.log("Updated existing document:", docRef.id);
-            
-            return { 
-                success: true, 
-                message: "Excel file updated successfully", 
-                documentId: docRef.id 
-            };
         } else {
             // Create new document
+            console.log(`[createExcelFile] Creating new Firestore document: ${docRef.id}`);
             await docRef.set({
+                userId: userId,
                 name: filename,
-                uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
-                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                storagePath,
-                status: 'processed',
-                userId,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                storagePath: storagePath,
+                downloadURL: await file.getSignedUrl({
+                    action: 'read',
+                    expires: Date.now() + 60 * 60 * 1000 // 1 hour
+                }),
                 size: excelBuffer.length,
-                createdAt: admin.firestore.FieldValue.serverTimestamp()
+                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                // Add any other necessary initial fields
             });
-            console.log("Created new document:", docRef.id);
-            
-            return { 
-                success: true, 
-                message: "Excel file created successfully", 
-                documentId: docRef.id 
-            };
         }
+
+        console.log(`[createExcelFile] Successfully processed Firestore document: ${docRef.id}`);
+        
+        // Return success within the try block
+        return { 
+            success: true, 
+            message: "Excel file created/updated successfully", 
+            documentId: docRef.id 
+        };
     } catch (error: any) {
-        console.error("Error creating/updating Excel file:", error);
+        console.error(`[createExcelFile] Error processing file for documentId ${documentId}:`, error);
         return { 
             success: false, 
-            message: `Error creating/updating Excel file: ${error.message}` 
+            message: `Error creating/updating Excel file: ${error.message}`, 
+            documentId: documentId // Return the original ID
         };
     }
 }
@@ -236,14 +271,9 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
 /**
  * Edits an existing Excel file with the provided updates
  */
-async function editExcelFile(db: any, storage: any, bucket: any, userId: string, documentId: string, data: any[]) {
-    console.log("Editing Excel file for user:", userId, "document:", documentId);
-    
-    if (!documentId) {
-        return { success: false, message: "Document ID required for edit" };
-    }
-    
-    // Check if Firebase services are available
+async function editExcelFile(db: admin.firestore.Firestore, storage: admin.storage.Storage, bucket: Bucket, userId: string, documentId: string, data: any[]) {
+    console.log(`[editExcelFile] Starting edit for user: ${userId}, documentId: ${documentId}`);
+
     if (!db || !storage || !bucket) {
         console.log("Firebase services not available, using dummy implementation");
         await new Promise(resolve => setTimeout(resolve, 50)); // Simulate async work
@@ -269,74 +299,172 @@ async function editExcelFile(db: any, storage: any, bucket: any, userId: string,
     }
     
     try {
-        // Get document reference from Firestore
-        const docRef = db.collection('users').doc(userId).collection('documents').doc(documentId);
-        const docSnapshot = await docRef.get();
-        
-        if (!docSnapshot.exists) {
-            return { success: false, message: "Document not found" };
-        }
-        
-        const docData = docSnapshot.data();
-        
-        // Verify user has access to this document
-        if (docData.userId !== userId) {
-            return { success: false, message: "Unauthorized access to document" };
-        }
-        
-        // Download the existing file from storage
-        const file = bucket.file(docData.storagePath);
-        const [fileBuffer] = await file.download();
-        
-        // Load the workbook
-        const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-        
-        // Process each sheet update in the data array
-        for (const sheetData of data) {
-            const { sheetName, cellUpdates = [] } = sheetData;
+        const docsRef = db.collection('users').doc(userId).collection('documents');
+        let docRef: admin.firestore.DocumentReference | null = null;
+        let existingData: DocWithId | null = null;
+
+        // --- Robust Document Lookup ---
+        console.log(`[editExcelFile] Attempting lookup for documentId: ${documentId}`);
+        const { baseName, isTimestamped } = extractBaseFilename(documentId);
+        console.log(`[editExcelFile] Extracted baseName: '${baseName}', isTimestamped: ${isTimestamped}`);
+
+        // 1. Try direct match first
+        const directDocRef = docsRef.doc(documentId);
+        const directDocSnap = await directDocRef.get();
+
+        if (directDocSnap.exists) {
+            console.log(`[editExcelFile] Found direct match with ID: ${documentId}`);
+            docRef = directDocRef;
+            existingData = { id: directDocSnap.id, ...directDocSnap.data() } as DocWithId;
+        } else {
+            console.log(`[editExcelFile] No direct match for ID: ${documentId}. Searching by baseName: '${baseName}'...`);
+            // 2. If no direct match, search by baseName
+            const querySnapshot = await docsRef.where('name', '>=', baseName)
+                                             .where('name', '<=', baseName + '\uf8ff')
+                                             .get();
             
-            // Get the worksheet, create if it doesn't exist
-            let worksheet = workbook.Sheets[sheetName];
-            if (!worksheet) {
-                worksheet = XLSX.utils.aoa_to_sheet([]);
-                XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
-            }
-            
-            // Apply cell updates
-            for (const update of cellUpdates) {
-                const { cell, value } = update;
-                XLSX.utils.sheet_add_aoa(worksheet, [[value]], { origin: cell });
+            console.log(`[editExcelFile] Found ${querySnapshot.size} potential matches for baseName: '${baseName}'`);
+
+            if (!querySnapshot.empty) {
+                // Filter results to match baseName exactly (ignoring timestamps)
+                const matchingDocs = querySnapshot.docs
+                    .map((doc: admin.firestore.QueryDocumentSnapshot) => ({ id: doc.id, ...doc.data() } as DocWithId))
+                    .filter((doc: DocWithId) => extractBaseFilename(doc.name).baseName === baseName)
+                    .sort((a: DocWithId, b: DocWithId) => (b.updatedAt?.toMillis() || 0) - (a.updatedAt?.toMillis() || 0)); // Sort descending by update time
+
+                if (matchingDocs.length > 0) {
+                    existingData = matchingDocs[0]; // Use the most recently updated
+                    docRef = docsRef.doc(existingData.id);
+                    console.log(`[editExcelFile] Found best match by baseName. Using document ID: ${existingData.id} (Name: ${existingData.name}, Updated: ${existingData.updatedAt?.toDate()})`);
+                } else {
+                     console.log(`[editExcelFile] No documents found matching the baseName '${baseName}' after filtering.`);
+                }
+            } else {
+                console.log(`[editExcelFile] No documents found with baseName starting with '${baseName}'.`);
             }
         }
-        
-        // Convert workbook to buffer
-        const updatedBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-        
-        // Upload updated file back to storage
-        await file.save(updatedBuffer, {
-            metadata: {
-                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+        // If no document found after lookup, treat as an error for editing
+        if (!docRef || !existingData) {
+            console.error(`[editExcelFile] Document not found for editing after lookup. Original ID: ${documentId}, BaseName: ${baseName}`);
+            // Potentially try to create it instead? Or return a specific error.
+            // For now, let's throw an error as edit implies existence.
+            throw new Error(`Document with base name '${baseName}' (from ID: ${documentId}) not found for editing.`);
+        }
+        // --- End Robust Document Lookup ---
+
+        // At this point, if docRef or existingData were null, an error would have been thrown.
+        // We can safely assume they are non-null here.
+        console.log(`[editExcelFile] Proceeding to update document with final ID: ${docRef.id}`);
+
+        // Define storage path using the *found* document's name/path if available, or generate new
+        const storagePath = existingData.storagePath || `users/${userId}/documents/${existingData.name}`;
+        const filename = existingData.name;
+        console.log(`[editExcelFile] Using existing storagePath: ${storagePath}`);
+
+        try {
+            // Download the existing file from storage
+            const file = bucket.file(storagePath);
+            const [fileBuffer] = await file.download();
+            
+            // Load the workbook
+            const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+            
+            // Process each sheet update in the data array
+            for (const sheetData of data) {
+                const { sheetName, cellUpdates = [] } = sheetData;
+                
+                // Get the worksheet, create if it doesn't exist
+                let worksheet = workbook.Sheets[sheetName];
+                if (!worksheet) {
+                    worksheet = XLSX.utils.aoa_to_sheet([]);
+                    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+                }
+                
+                // Apply cell updates
+                for (const update of cellUpdates) {
+                    const { cell, value } = update;
+                    XLSX.utils.sheet_add_aoa(worksheet, [[value]], { origin: cell });
+                }
             }
-        });
-        
-        // Update document metadata if needed
-        await docRef.update({
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            size: updatedBuffer.length
-        });
-        
-        return { 
-            success: true, 
-            message: "Excel file updated successfully", 
-            documentId 
-        };
-    } catch (error: any) {
-        console.error("Error editing Excel file:", error);
-        return { 
-            success: false, 
-            message: `Error editing Excel file: ${error.message}` 
-        };
+            
+            // Convert workbook to buffer
+            const updatedBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+            
+            // Upload updated file back to storage
+            await file.save(updatedBuffer, {
+                metadata: {
+                    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                }
+            });
+            
+            console.log(`[editExcelFile] Successfully uploaded updated Excel file to: ${storagePath}`);
+
+            // Update Firestore document metadata
+            const downloadURL = await file.getSignedUrl({
+                action: 'read',
+                expires: Date.now() + 60 * 60 * 1000 // 1 hour
+            });
+
+            await docRef.update({
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(), // Use server timestamp
+                storagePath: storagePath,
+                downloadURL: downloadURL,
+                size: updatedBuffer.length, // Add file size
+                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // Add content type
+            });
+
+            console.log(`[editExcelFile] Successfully updated Firestore document: ${docRef.id}`);
+
+            return { success: true, message: "Excel file edited successfully", documentId: docRef.id };
+        } catch (error: any) {
+            // Use the original documentId in the error if docRef might not be assigned
+            const idForError = docRef ? docRef.id : documentId;
+            console.error(`[editExcelFile] Error editing Excel file for document ${idForError}:`, error);
+            return { 
+                success: false, 
+                message: `Error editing Excel file: ${error.message}`, 
+                documentId: idForError // Return the ID used in the error message
+            };
+        }
+    } catch (error: any) { // Catch errors from the initial lookup phase
+        console.error(`[editExcelFile] Error during initial lookup for document ${documentId}:`, error);
+        return { success: false, message: `Error finding document: ${error.message}`, documentId: documentId };
     }
+}
+
+// Helper function to extract base filename without timestamp
+function extractBaseFilename(filename: string | undefined | null): { baseName: string; isTimestamped: boolean } {
+    if (!filename) {
+        // Handle cases where filename might be undefined or null, perhaps generate a default
+        console.warn("[extractBaseFilename] Received null or undefined filename, generating UUID as baseName.");
+        return { baseName: uuidv4(), isTimestamped: false }; 
+    }
+    const timestampPattern = /-\d{13,}(\.xlsx)?$/;
+    const isTimestamped = timestampPattern.test(filename);
+    let baseName = isTimestamped ? filename.replace(timestampPattern, '') : filename;
+    // Also remove .xlsx if present for a cleaner base name
+    baseName = baseName.replace(/\.xlsx$/i, ''); 
+    return { baseName, isTimestamped };
+}
+
+// Helper function to normalize timestamped paths and filenames
+function normalizeTimestampedPath(storagePath: string, filename: string): { storagePath: string, filename: string } {
+    const timestampPattern = /-\d{13,}(\.xlsx)?$/;
+    let finalStoragePath = storagePath;
+    let finalFilename = filename;
+
+    if (timestampPattern.test(storagePath)) {
+        const basePath = storagePath.replace(timestampPattern, '');
+        finalStoragePath = `${basePath}.xlsx`;
+        console.log("[normalizeTimestampedPath] Normalizing storage path from", storagePath, "to", finalStoragePath);
+    }
+    if (timestampPattern.test(filename)) {
+        const baseFilename = filename.replace(timestampPattern, '');
+        finalFilename = `${baseFilename}.xlsx`;
+        console.log("[normalizeTimestampedPath] Normalizing filename from", filename, "to", finalFilename);
+    }
+    return { storagePath: finalStoragePath, filename: finalFilename };
 }
 
 // --- Exported Function for Excel Operations ---
@@ -369,11 +497,25 @@ export async function processExcelOperation(
     if (operation === 'create') {
       console.log(`Processing CREATE operation for user ${userId}, potential docId based on data?`);
       // Pass the actual Firebase instances
-      result = await createExcelFile(db, storage, bucket, userId, effectiveDocumentId, data);
+      result = await createExcelFile(
+          db as admin.firestore.Firestore, 
+          storage as admin.storage.Storage, 
+          bucket as Bucket, 
+          userId, 
+          effectiveDocumentId, 
+          data
+      );
     } else if (operation === 'edit') {
       console.log(`Processing EDIT operation for user ${userId}, document ${effectiveDocumentId}`);
       // Pass the actual Firebase instances
-      result = await editExcelFile(db, storage, bucket, userId, effectiveDocumentId, data);
+      result = await editExcelFile(
+          db as admin.firestore.Firestore, 
+          storage as admin.storage.Storage, 
+          bucket as Bucket, 
+          userId, 
+          effectiveDocumentId, 
+          data
+      );
     } else {
       console.log(`--- ERROR: Invalid operation type: ${operation} ---`);
       return NextResponse.json({ success: false, message: 'Invalid operation type' }, { status: 400 });
