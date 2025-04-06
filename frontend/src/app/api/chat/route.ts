@@ -130,7 +130,12 @@ async function handleExcelOperation(authToken: string, userId: string, message: 
     
     try {
       // Call the imported function directly
-      const excelResponse: NextResponse = await processExcelOperation('edit', currentDocument.id, operationData, userId);
+      const excelResponse: NextResponse = await processExcelOperation(
+        'edit', // operation
+        currentDocument.id, // documentId
+        operationData, // data (array of row objects)
+        userId // userId
+      );
       
       console.log('processExcelOperation Response Status:', excelResponse.status);
       
@@ -775,21 +780,6 @@ User Question: ${message}`
           console.log('Normalized "excel_operation" key to "operation"');
         }
         
-        // Force operation to be 'edit' when we have a current document to prevent duplicates
-        // *** Use operationData ***
-        if (currentDocument && currentDocument.id) {
-          if (operationData.operation === 'create') {
-            console.log('Forcing operation to be "edit" instead of "create" to prevent duplicates');
-            operationData.operation = 'edit';
-          }
-          // Ensure documentId matches the current document
-          // *** Use operationData ***
-          if (operationData.documentId !== currentDocument.id) {
-            console.log(`Updating documentId from ${operationData.documentId} to ${currentDocument.id} to prevent duplicates`);
-            operationData.documentId = currentDocument.id;
-          }
-        }
-
         // Ensure essential fields are present after parsing
         // *** Use operationData ***
         if (!operationData.operation) { // Check the normalized key
@@ -807,13 +797,16 @@ User Question: ${message}`
           throw new Error('Operation data is missing "data" field');
         }
 
+        // Add enhanced logging
+        console.log(`[processExcelOperation] Received operation: '${operationData.operation}' for documentId: '${operationData.documentId || 'undefined'}'`);
+
         // *** Use operationData for the call ***
         console.log('Calling processExcelOperation with parsed/normalized data:', operationData);
         const excelResponse: NextResponse = await processExcelOperation(
-          operationData.operation,
-          operationData.documentId, 
-          operationData.data,
-          userId // Pass the authenticated userId
+            operationData.operation,
+            operationData.documentId,
+            operationData.data,
+            userId
         );
 
         const excelResult = await excelResponse.json();
