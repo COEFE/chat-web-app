@@ -359,17 +359,50 @@ async function editExcelFile(db: admin.firestore.Firestore, storage: admin.stora
 
         // Determine the CANONICAL normalized path and filename based on existing data name
         const { baseName: normalizedBaseName } = extractBaseFilename(existingData.name);
-        let canonicalStoragePath = `users/${userId}/documents/${normalizedBaseName}.xlsx`;
+        
+        // Generate several potential paths where the file might be stored
+        const potentialPaths = [
+            existingData.storagePath, // Try the path stored in Firestore first
+            `users/${userId}/${normalizedBaseName}.xlsx`, // Direct in user's folder (most common)
+            `users/${userId}/documents/${normalizedBaseName}.xlsx`, // In documents subfolder
+            `users/${userId}/${existingData.name}` // Original filename in user's folder
+        ].filter(Boolean); // Remove any undefined/null paths
+        
         let canonicalFilename = `${normalizedBaseName}.xlsx`;
 
         // Log the canonical path we INTEND to use
-        console.log(`[editExcelFile] Determined canonical storagePath: ${canonicalStoragePath}, filename: ${canonicalFilename}`);
+        console.log(`[editExcelFile] Will try these potential paths:`, potentialPaths);
+        console.log(`[editExcelFile] Using canonical filename: ${canonicalFilename}`);
+
+        // Variable to store the successful path
+        let successfulPath: string | null = null;
+        let fileBuffer: Buffer | null = null;
 
         try {
-            // Attempt to download the existing file from the CANONICAL storage path
-            console.log(`[editExcelFile] Attempting download from canonical path: ${canonicalStoragePath}`);
-            const file = bucket.file(canonicalStoragePath);
-            const [fileBuffer] = await file.download();
+            // Try each potential path until we find one that works
+            for (const path of potentialPaths) {
+                if (!path) continue;
+                
+                console.log(`[editExcelFile] Attempting download from path: ${path}`);
+                try {
+                    const file = bucket.file(path);
+                    const [buffer] = await file.download();
+                    
+                    // If we get here, the download succeeded
+                    console.log(`[editExcelFile] Successfully downloaded from: ${path}`);
+                    successfulPath = path;
+                    fileBuffer = buffer;
+                    break;
+                } catch (err) {
+                    console.log(`[editExcelFile] Failed to download from ${path}:`, err);
+                    // Continue to the next path
+                }
+            }
+            
+            // If all paths failed, throw an error
+            if (!successfulPath || !fileBuffer) {
+                throw new Error(`Could not find Excel file at any of the potential paths: ${potentialPaths.join(', ')}`);
+            }
             
             // Load the workbook
             const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
@@ -395,8 +428,12 @@ async function editExcelFile(db: admin.firestore.Firestore, storage: admin.stora
             // Convert workbook to buffer
             const updatedBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
             
+            // Use the canonical path for upload (in user's root folder)
+            const canonicalStoragePath = `users/${userId}/${normalizedBaseName}.xlsx`;
+            console.log(`[editExcelFile] Using canonical path for upload: ${canonicalStoragePath}`);
+            
             // Upload updated file back to the CANONICAL storage path
-            console.log(`[editExcelFile] Uploading updated file to canonical path: ${canonicalStoragePath}`);
+            const file = bucket.file(canonicalStoragePath);
             await file.save(updatedBuffer, {
                 metadata: {
                     contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
