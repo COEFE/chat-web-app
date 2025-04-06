@@ -294,22 +294,40 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Document metadata incomplete (missing storage path)' }, { status: 500 });
       }
 
+      // --- Clean and validate the storage path ---
+      const cleanedPath = cleanStoragePath(storagePath);
+      if (!cleanedPath) {
+        console.error(`Invalid storage path for document ID: ${documentId}, path: ${storagePath}`);
+        return NextResponse.json({ error: 'Invalid document storage path' }, { status: 500 });
+      }
+      
+      // Update the storagePath with the cleaned version for consistent logging
+      storagePath = cleanedPath;
+      console.log(`Using cleaned storage path: ${storagePath}`);
+
       // --- Download Content from Storage ---
       // Get bucket name from env vars with fallback, ensure NO domain suffix
       const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0';
+      console.log(`Using storage bucket name: ${bucketName}`);
       
-      // Removed the check for !bucketName as we now have a fallback
-      // if (!bucketName) {
-      //   throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET environment variable not set!");
-      // }
-      
-      const adminStorage = getAdminStorage();
-      
-      // Use only the bucket name without any protocol prefix
+      // Get the bucket and file reference
       const bucket = adminStorage.bucket(bucketName);
-      const file: GoogleCloudFile = bucket.file(storagePath);
-
       console.log(`Attempting to download from storage bucket: [${bucketName}], path: [${storagePath}]`);
+      
+      // Get the file reference
+      const file = bucket.file(storagePath);
+      
+      // Check if file exists before attempting to download
+      const [exists] = await file.exists();
+      if (!exists) {
+        console.error(`File does not exist in storage: ${storagePath}`);
+        return NextResponse.json({ 
+          error: 'Document file not found in storage',
+          details: `The file referenced by this document (${storagePath}) could not be found in storage.`
+        }, { status: 404 });
+      }
+      
+      // Download the file
       const [contentBuffer] = await file.download();
       console.log(`Successfully downloaded ${contentBuffer.byteLength} bytes from storage.`);
 
@@ -336,7 +354,7 @@ export async function POST(req: NextRequest) {
           console.log(`Successfully parsed PDF content with unpdf, length: ${documentContent.length}`);
         } catch (extractError) {
           console.error('Error extracting PDF text:', extractError);
-          documentContent = `[Error extracting PDF text: ${ (extractError instanceof Error) ? extractError.message : 'Unknown error'}]`;
+          documentContent = `[Error extracting PDF text: ${(extractError instanceof Error) ? extractError.message : 'Unknown error'}]`;
         }
       } else if (
         contentType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || // .xlsx
@@ -436,7 +454,6 @@ export async function POST(req: NextRequest) {
         documentContent = `[Content of type ${contentType}, length ${contentBuffer.byteLength} bytes - needs specific parsing]`; 
       }
       // --- End Content Parsing ---
-
     } catch (error) {
       console.error('Error fetching document info or content:', error);
       
@@ -463,8 +480,8 @@ export async function POST(req: NextRequest) {
       // Return a more descriptive error message
       const errorMessage = error instanceof Error ? `Failed to fetch document data: ${error.message}` : 'Failed to fetch document data';
       return NextResponse.json({ error: errorMessage }, { status: 500 });
-    }
-    // --- End Document Fetching ---
+      }
+      // --- End Document Fetching ---
 
     // --- Call AI API ---
     let aiResponseContent = 'Sorry, I could not get a response from the AI.'; // Default error message
@@ -872,4 +889,38 @@ async function authenticateUser(req: NextRequest): Promise<{ userId: string; tok
   }
   
   return { userId, token: idToken };
+}
+
+// Helper function to validate and clean storage paths
+function cleanStoragePath(path: string | undefined): string | null {
+  if (!path) return null;
+  
+  // Remove any leading slashes
+  let cleanPath = path.startsWith('/') ? path.substring(1) : path;
+  
+  // Remove any protocol prefixes (gs://, etc.)
+  if (cleanPath.includes('://')) {
+    cleanPath = cleanPath.split('://')[1];
+  }
+  
+  // Remove any bucket name prefixes if they exist in the path
+  const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0';
+  if (cleanPath.startsWith(bucketName + '/')) {
+    cleanPath = cleanPath.substring(bucketName.length + 1);
+  }
+  
+  return cleanPath;
+}
+
+// Helper function to check if a file exists in Firebase Storage
+async function checkFileExists(storage: any, bucketName: string, filePath: string): Promise<boolean> {
+  try {
+    const bucket = storage.bucket(bucketName);
+    const file = bucket.file(filePath);
+    const [exists] = await file.exists();
+    return exists;
+  } catch (error) {
+    console.error(`Error checking if file exists: ${error}`);
+    return false;
+  }
 }
