@@ -48,16 +48,60 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
         // Check if document already exists (for documentId provided by Claude)
         let existingDoc = null;
         let existingDocRef = null;
+        let documentFound = false;
         
         if (documentId) {
             console.log("Checking if document already exists with ID:", documentId);
+            
+            // First try direct lookup with the provided ID
             existingDocRef = db.collection('users').doc(userId).collection('documents').doc(documentId);
             existingDoc = await existingDocRef.get();
             
             if (existingDoc.exists) {
-                console.log("Document already exists, will update instead of creating new");
+                console.log("Document exists with exact ID match, will update instead of creating new");
+                documentFound = true;
             } else {
-                console.log("Document ID provided but document not found, will create new");
+                // If not found, try to find by base name (similar to file-proxy lookup)
+                console.log("Document ID provided but exact match not found, searching for similar documents");
+                
+                // Extract base name if documentId contains a timestamp pattern
+                const timestampPattern = /-\d{13,}(\.xlsx)?$/;
+                let baseName = documentId;
+                
+                if (timestampPattern.test(documentId)) {
+                    baseName = documentId.replace(timestampPattern, '');
+                    console.log("Extracted base name for search:", baseName);
+                }
+                
+                // Query for documents with similar names
+                const docsRef = db.collection('users').doc(userId).collection('documents');
+                const snapshot = await docsRef.where('name', '>=', baseName)
+                                             .where('name', '<=', baseName + '\uf8ff')
+                                             .get();
+                
+                if (!snapshot.empty) {
+                    // Use the most recent document if multiple matches found
+                    let mostRecent: { id: string; updatedAt?: admin.firestore.Timestamp; [key: string]: any } | null = null;
+                    
+                    snapshot.forEach((docSnapshot: admin.firestore.QueryDocumentSnapshot) => {
+                        const docData = docSnapshot.data();
+                        if (!mostRecent || (docData.updatedAt && mostRecent.updatedAt && 
+                            docData.updatedAt.toDate() > mostRecent.updatedAt.toDate())) {
+                            mostRecent = { id: docSnapshot.id, ...docData };
+                        }
+                    });
+                    
+                    if (mostRecent && mostRecent.id) {
+                        console.log("Found similar document with ID:", mostRecent.id);
+                        existingDocRef = db.collection('users').doc(userId).collection('documents').doc(mostRecent.id);
+                        existingDoc = await existingDocRef.get();
+                        documentFound = true;
+                    }
+                }
+                
+                if (!documentFound) {
+                    console.log("No similar documents found, will create new");
+                }
             }
         }
         
@@ -87,8 +131,24 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
             storagePath = existingData.storagePath;
             filename = existingData.name;
             console.log("Using existing storage path:", storagePath);
+            
+            // If the existing path contains a timestamp, normalize it
+            const timestampPattern = /-\d{13,}(\.xlsx)?$/;
+            if (timestampPattern.test(storagePath)) {
+                const basePath = storagePath.replace(timestampPattern, '');
+                const newPath = `${basePath}.xlsx`;
+                console.log("Normalizing storage path from", storagePath, "to", newPath);
+                storagePath = newPath;
+                
+                // Also normalize the filename
+                if (timestampPattern.test(filename)) {
+                    const baseFilename = filename.replace(timestampPattern, '');
+                    filename = `${baseFilename}.xlsx`;
+                    console.log("Normalizing filename from", existingData.name, "to", filename);
+                }
+            }
         } else {
-            // Generate a filename without timestamp to avoid duplicates
+            // Generate a consistent filename without timestamp to avoid duplicates
             // Check if documentId contains a timestamp pattern (e.g., "filename-1234567890123")
             const timestampPattern = /-\d{13,}(\.xlsx)?$/;
             let baseFilename;
@@ -100,6 +160,9 @@ async function createExcelFile(db: any, storage: any, bucket: any, userId: strin
             } else {
                 baseFilename = documentId || uuidv4();
             }
+            
+            // Remove any existing .xlsx extension
+            baseFilename = baseFilename.replace(/\.xlsx$/i, '');
             
             // Use the base filename without appending a timestamp
             filename = `${baseFilename}.xlsx`;
