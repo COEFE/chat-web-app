@@ -547,6 +547,7 @@ If the user asks you to edit this Excel file, you should automatically use this 
       const aiMsg = await anthropic.messages.create({
         model: 'claude-3-7-sonnet-20250219',
         max_tokens: 1024,
+        stop_sequences: ['\n\nUser:'], // Add stop sequence here
         messages: [
           {
             role: 'user',
