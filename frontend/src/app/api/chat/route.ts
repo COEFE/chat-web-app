@@ -65,7 +65,7 @@ function extractSheetName(message: string): string | null {
 
 // Helper function to handle Excel operations directly
 // Return type specifies the expected structure
-async function handleExcelOperation(authToken: string, userId: string, message: string, currentDocument: any): Promise<{ success: boolean; response?: object }> {
+async function handleExcelOperation(authToken: string, userId: string, message: string, currentDocument: any): Promise<{ success: boolean; response?: object; message?: string }> {
   console.log('Handling Excel operation directly for document:', currentDocument?.id);
 
   // --- Regex and sheet name extraction logic --- 
@@ -112,9 +112,28 @@ async function handleExcelOperation(authToken: string, userId: string, message: 
     console.log(`Detected cell ${cellRef} and value ${cellValue} for document ${currentDocument.id}`);
     
     // Create the Excel operation JSON structure needed by processExcelOperation
+    // Try to extract operation parameters via regex or some heuristics
+    const sheetName = extractSheetName(message);
+    if (sheetName) {
+      console.log(`Extracted sheet name from message: ${sheetName}`);
+    }
+
+    // Default operation: Use current document and create a simple edit
+    // CRITICAL: Always use the current document's ID for editing to prevent duplicates
+    const documentId = currentDocument ? currentDocument.id : null;
+    console.log(`[handleExcelOperation] Using document ID: '${documentId}'`);
+    
+    if (!documentId) {
+      return { 
+        success: false, 
+        message: 'No document ID provided for Excel operation.' 
+      };
+    }
+    
+    // Create the Excel operation JSON structure needed by processExcelOperation
     const operationData = [
       {
-        sheetName: extractSheetName(message) || "Sheet1", // Use the global extractSheetName function
+        sheetName: sheetName || "Sheet1", // Use the global extractSheetName function
         cellUpdates: [
           { cell: cellRef, value: cellValue } // Explicit property assignment
         ]
@@ -123,7 +142,7 @@ async function handleExcelOperation(authToken: string, userId: string, message: 
     
     console.log('Calling processExcelOperation directly:', { 
       operation: 'edit', 
-      documentId: currentDocument.id, 
+      documentId: documentId, 
       data: operationData, 
       userId: userId 
     });
@@ -800,7 +819,16 @@ User Question: ${message}`
         // Add enhanced logging
         console.log(`[processExcelOperation] Received operation: '${operationData.operation}' for documentId: '${operationData.documentId || 'undefined'}'`);
 
-        // *** Use operationData for the call ***
+        // CRITICAL FIX: For edit operations, always use the current document's ID
+        // This prevents creating duplicate documents when editing
+        if (operationData.operation === 'edit' && currentDocument && currentDocument.id) {
+          console.log(`[processExcelOperation] EDIT OPERATION - Original documentId: '${operationData.documentId}'`);
+          console.log(`[processExcelOperation] EDIT OPERATION - Using current document ID: '${currentDocument.id}'`);
+          
+          // Override the document ID to ensure we update the existing document
+          operationData.documentId = currentDocument.id;
+        }
+
         console.log('Calling processExcelOperation with parsed/normalized data:', operationData);
         const excelResponse: NextResponse = await processExcelOperation(
             operationData.operation,
