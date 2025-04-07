@@ -120,32 +120,31 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
             expires: '03-01-2500' // Far future date
         });
         
-        // Update existing document or create a new one
+        // Create document data object
+        const docData: any = {
+            userId: userId,
+            name: canonicalFilename,
+            storagePath: canonicalStoragePath,
+            downloadURL: downloadURL,
+            contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            size: excelBuffer.length,
+            status: 'processed',
+            uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+        
+        // Add appropriate timestamp based on whether this is a new document or an update
         if (isUpdate) {
-            // Update existing document
-            console.log(`[createExcelFile] Updating existing Firestore document: ${docRef.id}`);
-            await docRef.update({
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                storagePath: canonicalStoragePath, // ALWAYS use the canonical path
-                downloadURL: downloadURL,
-                size: excelBuffer.length,
-                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                name: canonicalFilename // ALWAYS use the canonical filename
-            });
+            console.log(`[createExcelFile] Updating existing document with ID: ${finalDocumentId}`);
+            docData.updatedAt = admin.firestore.FieldValue.serverTimestamp();
         } else {
-            // Create new document
-            console.log(`[createExcelFile] Creating new Firestore document: ${docRef.id}`);
-            await docRef.set({
-                userId: userId,
-                name: canonicalFilename, // ALWAYS use the canonical filename
-                createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                storagePath: canonicalStoragePath, // ALWAYS use the canonical path
-                downloadURL: downloadURL,
-                size: excelBuffer.length,
-                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            });
+            console.log(`[createExcelFile] Creating new document with ID: ${finalDocumentId}`);
+            docData.createdAt = admin.firestore.FieldValue.serverTimestamp();
         }
+        
+        // CRITICAL: Use set with merge:true to ensure we're updating the existing document
+        // rather than creating a new one if it exists
+        await docRef.set(docData, { merge: true });
+        
 
         console.log(`[createExcelFile] Successfully processed Firestore document: ${docRef.id}`);
         
