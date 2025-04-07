@@ -14,6 +14,7 @@ import * as admin from "firebase-admin";
 import {initializeApp} from "firebase-admin/app";
 import {getStorage} from "firebase-admin/storage";
 import * as logger from "firebase-functions/logger"; // Import logger
+import * as path from "path"; // Import path module
 
 // Start writing functions
 // https://firebase.google.com/docs/functions
@@ -34,7 +35,8 @@ const firestore = getFirestore();
 // It creates a corresponding entry in Firestore.
 export const processDocumentUpload = onObjectFinalized(
   {cpu: "gcf_gen1"},
-  async (event) => { // Use gen1 CPU
+  async (event) => {
+    // Use gen1 CPU
     const fileBucket = event.data.bucket; // Storage bucket containing the file.
     const filePath = event.data.name; // File path in the bucket.
     const contentType = event.data.contentType; // File content type.
@@ -49,10 +51,7 @@ export const processDocumentUpload = onObjectFinalized(
     // --- Validate File ---
     // Make sure it's not a directory placeholder created by Storage
     if (!contentType || filePath.endsWith("/")) {
-      logger.log(
-        "Ignoring non-file or directory placeholder:",
-        filePath,
-      );
+      logger.log("Ignoring non-file or directory placeholder:", filePath);
       return;
     }
 
@@ -84,9 +83,11 @@ export const processDocumentUpload = onObjectFinalized(
     // Get original name from metadata or fallback to filename
     let originalName = "";
     if (customMetadata && typeof customMetadata === "object") {
-      originalName = "originalName" in customMetadata ?
-        String(customMetadata.originalName) :
-        filePath.split("/").pop() || "unknown";
+      originalName = (
+        "originalName" in customMetadata ?
+          String(customMetadata.originalName) :
+          filePath.split("/").pop() || "unknown"
+      );
     } else {
       originalName = filePath.split("/").pop() || "unknown";
     }
@@ -96,7 +97,7 @@ export const processDocumentUpload = onObjectFinalized(
       // Log error and exit if userId is missing
       logger.error(
         "Missing 'userId' in metadata and couldn't extract from path: " +
-        `${filePath}`
+          `${filePath}`
       );
       return;
     }
@@ -104,7 +105,7 @@ export const processDocumentUpload = onObjectFinalized(
     // Log successful metadata extraction
     logger.info(
       `Successfully extracted metadata - userId: ${userId}, ` +
-      `originalName: ${originalName}`
+        `originalName: ${originalName}`
     );
     logger.info(
       `File path: ${filePath}, size: ${size}, contentType: ${contentType}`
@@ -116,15 +117,49 @@ export const processDocumentUpload = onObjectFinalized(
 
     // --- Create Firestore Entry ---
     try {
-      // Construct the path: /users/{userId}/documents/{newDocId}
       // Log the Firestore path we're writing to
       const firestorePath = `users/${userId}/documents`;
       logger.info(`Writing to Firestore path: ${firestorePath}`);
 
-      const docRef = firestore.collection("users").doc(userId)
-        .collection("documents").doc(); // Auto-generate ID
+      // 1. Generate Firestore Document ID first
+      const docRef = firestore
+        .collection("users")
+        .doc(userId)
+        .collection("documents")
+        .doc(); // Auto-generate ID
+      const newDocId = docRef.id;
+      logger.info(`Generated Firestore Document ID: ${newDocId}`);
 
-      logger.info(`Document ID: ${docRef.id}`);
+      // 2. Construct Canonical Storage Path
+      const fileExtension = path.extname(filePath); // Get extension (e.g., '.xlsx')
+      const canonicalFileName = `${newDocId}${fileExtension}`;
+      const canonicalPath = `users/${userId}/${canonicalFileName}`;
+      logger.info(`Constructed canonical storage path: ${canonicalPath}`);
+
+      // 3. Move/Rename the file in Storage
+      const storage = getStorage();
+      const bucket = storage.bucket(fileBucket);
+      const originalFileRef = bucket.file(filePath);
+      const canonicalFileRef = bucket.file(canonicalPath);
+
+      try {
+        logger.info(
+          `Attempting to move file from '${filePath}' to '${canonicalPath}'`
+        );
+        await originalFileRef.move(canonicalPath);
+        logger.info("Successfully moved file in Storage to canonical path.");
+      } catch (moveError) {
+        logger.error(
+          `Failed to move file from '${filePath}' to '${canonicalPath}':`,
+          moveError
+        );
+        // Decide how to handle failed move: exit, log, retry?
+        // For now, we'll log the error and potentially continue with the old path,
+        // but this indicates a problem.
+        // Consider returning here or throwing the error if move is critical.
+        // Let's throw for now to prevent inconsistent state
+        throw new Error(`Storage move failed: ${moveError}`);
+      }
 
       // Prepare data, handling potential undefined values
       let fileSize = 0;
@@ -145,27 +180,29 @@ export const processDocumentUpload = onObjectFinalized(
         }
       }
 
-      // Get the download URL for the file - now with proper permissions
-      const storage = getStorage();
-      const fileRef = storage.bucket(fileBucket).file(filePath);
+      // 4. Get Download URL for the CANONICAL path
+      const fileRef = canonicalFileRef; // Use the reference to the moved file
 
       // Use a longer expiration time (7 days) for better user experience
       const expirationDate = new Date();
       expirationDate.setDate(expirationDate.getDate() + 7); // 7 days instead of 1
 
-      logger.info(`Setting signed URL expiration to: ${expirationDate.toISOString()}`);
-      
+      logger.info(
+        `Setting signed URL expiration to: ${expirationDate.toISOString()}`
+      );
       const [downloadURL] = await fileRef.getSignedUrl({
         action: "read",
         expires: expirationDate.toISOString(),
       });
 
-      logger.info(`Generated signed URL with 24-hour expiration: ${downloadURL}`);
+      logger.info(
+        `Generated signed URL with 24-hour expiration: ${downloadURL}`
+      );
 
       await docRef.set({
         userId,
         name: originalName, // Use the original filename from metadata
-        storagePath: filePath,
+        storagePath: canonicalPath, // Use the canonical path
         fileBucket,
         contentType,
         size: fileSize,
@@ -179,11 +216,10 @@ export const processDocumentUpload = onObjectFinalized(
       logger.info("Created document with server timestamp");
 
       // Log success with file path
-      logger.info("Successfully created Firestore entry for: " +
-        filePath);
+      logger.info("Successfully created Firestore entry for: " + filePath);
     } catch (error) {
       logger.error("Error creating Firestore entry: " + error);
       // Consider adding retry logic or moving file to error folder
     }
-  },
+  }
 );
