@@ -39,7 +39,7 @@ try {
  * Creates a new Excel file based on the provided data. 
  * Uses document ID as the source of truth for file naming.
  */
-async function createExcelFile(db: admin.firestore.Firestore, storage: admin.storage.Storage, bucket: Bucket, userId: string, documentId: string, data: any[]) {
+export async function createExcelFile(db: admin.firestore.Firestore, storage: admin.storage.Storage, bucket: Bucket, userId: string, documentId: string, data: any[]) {
     console.log(`[createExcelFile] Starting create/update for user: ${userId}, initial documentId: ${documentId}`);
     
     if (!db || !storage || !bucket) {
@@ -168,7 +168,7 @@ async function createExcelFile(db: admin.firestore.Firestore, storage: admin.sto
 /**
  * Edits an existing Excel file with the provided updates
  */
-async function editExcelFile(db: admin.firestore.Firestore, storage: admin.storage.Storage, bucket: Bucket, userId: string, documentId: string, data: any[]) {
+export async function editExcelFile(db: admin.firestore.Firestore, storage: admin.storage.Storage, bucket: Bucket, userId: string, documentId: string, data: any[]) {
     console.log(`[editExcelFile] Starting edit for user: ${userId}, documentId: ${documentId}`);
 
     if (!db || !storage || !bucket) {
@@ -313,14 +313,18 @@ async function editExcelFile(db: admin.firestore.Firestore, storage: admin.stora
                 expires: '03-01-2500' // Far future date
             });
             
-            await docRef.update({
+            // CRITICAL: Use set with merge:true to ensure we're updating the existing document
+            // rather than creating a new one. This preserves the original createdAt timestamp.
+            await docRef.set({
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
                 storagePath: canonicalStoragePath, // ALWAYS use the canonical path
                 downloadURL: downloadURL,
                 size: updatedBuffer.length,
                 contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                name: canonicalFilename // ALWAYS use the canonical filename
-            });
+                name: canonicalFilename, // ALWAYS use the canonical filename
+                // Keep the original userId to maintain ownership
+                userId: userId
+            }, { merge: true }); // Using merge:true preserves fields we don't explicitly set
             
             console.log(`[editExcelFile] Successfully updated Firestore document: ${docRef.id}`);
             
