@@ -10,7 +10,7 @@ getFirebaseAdmin();
 // GET request handler to fetch a single document's latest data
 export async function GET(
   request: NextRequest,
-  { params }: { params: { docId: string } }
+  { params }: { params: { docId: string } } // Correct type for route params
 ) {
   const { docId } = params;
   if (!docId) {
