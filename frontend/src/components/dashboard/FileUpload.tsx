@@ -73,11 +73,7 @@ export function FileUpload({
           continue; 
       }
 
-      const timestamp = Date.now();
-      const uniqueFileName = `${file.name}-${timestamp}`;
-      console.log(`Creating unique filename: ${uniqueFileName}`);
-
-      const storagePath = `users/${user.uid}/${uniqueFileName}`;
+      const storagePath = `users/${user.uid}/${file.name}`;
       console.log(`Using standard storage path: ${storagePath}`);
       const storageRef = ref(getStorage(), storagePath);
       
