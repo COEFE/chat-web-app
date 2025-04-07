@@ -36,7 +36,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [textContent, setTextContent] = useState<string | null>(null);
   // State for workbook data and active sheet
   const [workbookData, setWorkbookData] = useState<{ sheetName: string; data: any[][] }[] | null>(null);
-  const [activeSheetName, setActiveSheetName] = useState<string>('');
+  const [activeSheetName, setActiveSheetName] = useState<string | null>(null);
   // State for DOCX HTML content
   const [docxHtml, setDocxHtml] = useState<string | null>(null);
   // State for image viewing
@@ -131,7 +131,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             setWorkbookData(sheets);
             
             // Try to load the previously active sheet from localStorage
-            let activeSheetToSet = ''; // Default to empty string
+            let activeSheetToSet: string | null = null; // Default to null
             if (docToLoad?.id) {
               const savedSheet = localStorage.getItem(`activeSheet-${docToLoad.id}`);
               console.log(`[Excel Loading] Checking for saved active sheet for document ${docToLoad.id}: ${savedSheet || 'none found'}`);
@@ -144,7 +144,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             }
             
             // If no valid saved sheet was found, use the first sheet if available
-            if (!activeSheetToSet && sheets.length > 0) {
+            if (activeSheetToSet === null && sheets.length > 0) {
               activeSheetToSet = sheets[0].sheetName;
               console.log(`[Excel Loading] No valid saved sheet found, using first sheet: ${activeSheetToSet}`);
               // Also save this to localStorage for consistency
@@ -285,7 +285,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   // Effect to set active sheet when workbookData changes
   useEffect(() => {
     console.log('[DocumentViewer] Effect triggered to set active sheet.');
-    if (workbookData && workbookData.length > 0 && !activeSheetName) {
+    if (workbookData && workbookData.length > 0 && activeSheetName === null) {
       console.log('[DocumentViewer] Setting active sheet to first sheet:', workbookData[0].sheetName);
       setActiveSheetName(workbookData[0].sheetName);
     }
@@ -425,7 +425,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       {/* Excel Viewer */}
       {!isLoading && !error && isSheet && workbookData && (
         <div className="flex-1 overflow-auto">
-          <Tabs defaultValue={activeSheetName || (workbookData[0]?.sheetName || '')}>
+          <Tabs defaultValue={activeSheetName || workbookData[0]?.sheetName || ''}>
             <TabsList className="mb-2">
               {workbookData.map((sheet) => (
                 <TabsTrigger 
