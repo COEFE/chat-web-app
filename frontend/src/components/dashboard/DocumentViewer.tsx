@@ -131,25 +131,32 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             setWorkbookData(sheets);
             
             // Try to load the previously active sheet from localStorage
-            let savedSheet = null;
+            let activeSheetToSet = ''; // Default to empty string
             if (docToLoad?.id) {
-              savedSheet = localStorage.getItem(`activeSheet-${docToLoad.id}`);
+              const savedSheet = localStorage.getItem(`activeSheet-${docToLoad.id}`);
               console.log(`[Excel Loading] Checking for saved active sheet for document ${docToLoad.id}: ${savedSheet || 'none found'}`);
-            }
-            
-            // Set active sheet - use saved sheet if it exists and is valid, otherwise use first sheet
-            if (savedSheet && sheets.some(sheet => sheet.sheetName === savedSheet)) {
-              console.log('[fetchAndProcessContent] Setting active sheet to saved sheet:', savedSheet);
-              setActiveSheetName(savedSheet);
-              console.log(`[Excel Loading] Restored active sheet: ${savedSheet}`);
-            } else if (sheets.length > 0) {
-              console.log('[fetchAndProcessContent] Setting active sheet to first sheet:', sheets[0].sheetName);
-              setActiveSheetName(sheets[0].sheetName);
-              // Also save this to localStorage for consistency
-              if (docToLoad?.id) {
-                localStorage.setItem(`activeSheet-${docToLoad.id}`, sheets[0].sheetName);
+              
+              // Use saved sheet only if it's a valid string and exists in the current workbook
+              if (savedSheet && sheets.some(sheet => sheet.sheetName === savedSheet)) {
+                activeSheetToSet = savedSheet;
+                console.log(`[Excel Loading] Restored active sheet: ${savedSheet}`);
               }
             }
+            
+            // If no valid saved sheet was found, use the first sheet if available
+            if (!activeSheetToSet && sheets.length > 0) {
+              activeSheetToSet = sheets[0].sheetName;
+              console.log(`[Excel Loading] No valid saved sheet found, using first sheet: ${activeSheetToSet}`);
+              // Also save this to localStorage for consistency
+              if (docToLoad?.id) {
+                localStorage.setItem(`activeSheet-${docToLoad.id}`, activeSheetToSet);
+              }
+            }
+            
+            // Set the active sheet state
+            console.log('[fetchAndProcessContent] Setting active sheet state to:', activeSheetToSet);
+            setActiveSheetName(activeSheetToSet);
+
           } catch (error) {
             console.error('Error parsing Excel file:', error);
             throw new Error('Error parsing Excel file. The file may be corrupted or in an unsupported format.');
