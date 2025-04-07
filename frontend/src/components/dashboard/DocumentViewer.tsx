@@ -136,8 +136,8 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               const savedSheet = localStorage.getItem(`activeSheet-${docToLoad.id}`);
               console.log(`[Excel Loading] Checking for saved active sheet for document ${docToLoad.id}: ${savedSheet || 'none found'}`);
               
-              // Use saved sheet only if it's a valid string and exists in the current workbook
-              if (savedSheet && sheets.some(sheet => sheet.sheetName === savedSheet)) {
+              // Use saved sheet only if it's a valid non-empty string and exists in the current workbook
+              if (typeof savedSheet === 'string' && savedSheet.length > 0 && sheets.some(sheet => sheet.sheetName === savedSheet)) {
                 activeSheetToSet = savedSheet;
                 console.log(`[Excel Loading] Restored active sheet: ${savedSheet}`);
               }
