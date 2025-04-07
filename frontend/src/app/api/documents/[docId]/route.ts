@@ -10,9 +10,9 @@ getFirebaseAdmin();
 // GET request handler to fetch a single document's latest data
 export async function GET(
   request: NextRequest,
-  { params }: { params: { docId: string } } // Correct type for route params
+  context: { params: { docId: string } } // Type the context object directly
 ) {
-  const { docId } = params;
+  const { docId } = context.params; // Destructure params here
   if (!docId) {
     return NextResponse.json({ error: 'Document ID is required' }, { status: 400 });
   }
