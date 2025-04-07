@@ -133,20 +133,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
             };
             setMessages((prev) => [...prev, aiResponse]);
             
-            // If there was an Excel operation or the special marker is found, trigger a document refresh
-            // This will ensure the document viewer is updated with the latest data
+            let refreshTriggered = false;
+            // If there was an Excel operation and it was successful, trigger a document refresh ONCE
             if (aiResponse.excelOperation && aiResponse.excelOperation.success) {
-              console.log('Excel operation successful, triggering document refresh');
+              console.log('[ChatInterface] Excel operation successful, triggering document refresh');
               window.dispatchEvent(new Event('excel-document-updated'));
+              refreshTriggered = true; // Mark that we triggered the refresh
             }
             
-            // Check for the special marker in the response content
+            // Always check for the special marker in the response content and remove it if present
+            // We no longer trigger a refresh based on the marker itself to avoid duplicates
             if (aiResponse.content.includes('[EXCEL_DOCUMENT_UPDATED]')) {
-              console.log('Detected Excel document update marker, triggering refresh');
-              window.dispatchEvent(new Event('excel-document-updated'));
-              
+              if (!refreshTriggered) {
+                // Log if the marker was present but didn't trigger a refresh (should not happen often if backend is consistent)
+                console.log('[ChatInterface] Detected Excel update marker, but refresh already triggered by operation status.');
+              }
               // Remove the marker from the displayed message
-              aiResponse.content = aiResponse.content.replace('[EXCEL_DOCUMENT_UPDATED]', '');
+              aiResponse.content = aiResponse.content.replace('[EXCEL_DOCUMENT_UPDATED]', '').trim();
             }
           } else if (aiData && typeof aiData === 'object') {
             // Try to extract content from different possible structures
