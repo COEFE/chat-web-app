@@ -207,7 +207,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   }, [document, fetchAndProcessContent]); // Re-run when the document prop changes or fetch function updates
 
   // --- Refresh Handler ---
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     if (!document?.id || isRefreshing || isLoading) return; // Prevent refresh if no doc, or already loading/refreshing
     if (!user) {
       setError("Authentication required to refresh.");
@@ -252,7 +252,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     } finally {
       setIsRefreshing(false);
     }
-  };
+  }, [document?.id, user, isRefreshing, isLoading, fetchAndProcessContent, setError, setIsRefreshing, clientDb]); // Dependencies for handleRefresh
 
   // Effect to set active sheet when workbookData changes
   useEffect(() => {
