@@ -36,7 +36,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
 
   // Function to handle sending a message
   const handleSend = async () => {
-    if (!input.trim()) return; 
+    if (!input.trim() || isLoading) return; 
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(), 
