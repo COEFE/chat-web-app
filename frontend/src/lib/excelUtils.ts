@@ -482,7 +482,6 @@ export async function processExcelOperation(
         const userDocsRef = db.collection('users').doc(userId).collection('documents');
         const snapshot = await userDocsRef.get();
         
-        // Find any documents that contain this base ID
         let existingDocId = null;
         let mostRecentDoc = null;
         let mostRecentTimestamp = 0;
@@ -532,6 +531,73 @@ export async function processExcelOperation(
       } catch (err) {
         console.error(`[processExcelOperation] Error checking for existing documents:`, err);
         // Continue with the current ID if there's an error
+      }
+    }
+
+    if (effectiveDocumentId === null || effectiveDocumentId === undefined) {
+      console.error("Effective document ID is null or invalid.");
+      return NextResponse.json({ success: false, message: 'Invalid document ID' }, { status: 400 });
+    }
+
+    // CRITICAL FIX: For edit operations, check if there's an existing document with the same name/path
+    // This is necessary because the document ID passed from Claude might be different each time
+    if (db && (operation === 'edit' || isEditOperation)) {
+      console.log(`[processExcelOperation] This is an EDIT operation (ID: ${effectiveDocumentId}), checking for existing documents...`);
+      
+      try {
+        const userDocsRef = db.collection('users').doc(userId).collection('documents');
+        
+        // 1. Check if the document with the effectiveDocumentId actually exists
+        const docRef = userDocsRef.doc(effectiveDocumentId);
+        const docSnapshot = await docRef.get();
+        
+        if (docSnapshot.exists) {
+          console.log(`[processExcelOperation] Found exact match for document ID: ${effectiveDocumentId}`);
+          // No change needed, the ID is correct
+        } else {
+          console.log(`[processExcelOperation] No exact match found for document ID: ${effectiveDocumentId}`);
+          console.log(`[processExcelOperation] Searching for documents with the same filename/path...`);
+          
+          // 2. If no exact match, look for documents with the same filename pattern or storage path
+          // This is critical for finding documents created with different IDs but pointing to the same file
+          const expectedFilename = `${effectiveDocumentId}.xlsx`;
+          const expectedStoragePathSuffix = `${userId}/${expectedFilename}`;
+          
+          const snapshot = await userDocsRef.get(); // Query all user documents
+          let foundMatch = false;
+
+          for (const doc of snapshot.docs) {
+            const data = doc.data() as DocWithId; // Use the defined interface
+            let potentialMatch = false;
+            
+            // Check storage path first (most reliable)
+            if (data.storagePath && data.storagePath.endsWith(expectedStoragePathSuffix)) {
+                console.log(`[processExcelOperation] Found matching storage path in document ${doc.id}: ${data.storagePath}`);
+                potentialMatch = true;
+            }
+            // Fallback to checking the 'name' field
+            else if (data.name && (data.name === expectedFilename || data.name.includes(effectiveDocumentId))) {
+                console.log(`[processExcelOperation] Found matching name in document ${doc.id}: ${data.name}`);
+                potentialMatch = true;
+            }
+
+            if (potentialMatch) {
+              console.log(`[processExcelOperation] Using existing document ID: ${doc.id} instead of ${effectiveDocumentId}`);
+              effectiveDocumentId = doc.id; // CRITICAL: Update the ID to the existing one
+              foundMatch = true;
+              break; // Found the best match, stop searching
+            }
+          }
+          
+          if (!foundMatch) {
+            console.log(`[processExcelOperation] No existing document found with the same filename/path, will proceed with ID: ${effectiveDocumentId}`);
+            // If it's an edit operation but no document found, this might be an error state or 
+            // Claude is trying to edit a non-existent document. We'll let editExcelFile handle the error.
+          }
+        }
+      } catch (err) {
+        console.error(`[processExcelOperation] Error checking for existing documents:`, err);
+        // Continue with the current ID if there's an error, but log it.
       }
     }
 
