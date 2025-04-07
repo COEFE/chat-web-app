@@ -422,6 +422,10 @@ export async function processExcelOperation(
       }
     }
 
+    let docToUpdateRef = db.collection('users').doc(userId).collection('documents').doc(effectiveDocumentId);
+    let finalDocumentId = effectiveDocumentId;
+    let finalStoragePath = `users/${userId}/${finalDocumentId}.xlsx`;
+
     if (operation === 'create') {
       console.log(`Processing CREATE operation for user ${userId}, potential docId based on data?`);
       // Pass the actual Firebase instances
@@ -430,7 +434,7 @@ export async function processExcelOperation(
           storage as admin.storage.Storage, 
           bucket as Bucket, 
           userId, 
-          effectiveDocumentId, 
+          finalDocumentId, 
           data
       );
     } else if (operation === 'edit') {
