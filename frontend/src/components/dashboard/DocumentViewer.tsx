@@ -9,6 +9,8 @@ import * as XLSX from 'xlsx'; // Import xlsx library
 import mammoth from 'mammoth'; // Import mammoth for DOCX handling
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"; // Import Shadcn Tabs
 import { useAuth } from '@/context/AuthContext'; // Import useAuth
+import { doc, getDoc } from 'firebase/firestore'; // Import Firestore functions
+import { db as clientDb } from '@/lib/firebaseConfig'; // Import client Firestore instance
 
 // Import CSS for PDF rendering
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
@@ -207,22 +209,27 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     setError(null);
 
     try {
-      // 1. Get ID token
-      const token = await user.getIdToken();
-
-      // 2. Fetch latest document metadata
-      const metaResponse = await fetch(`/api/documents/${document.id}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (!metaResponse.ok) {
-        const errorData = await metaResponse.json();
-        throw new Error(`Failed to fetch metadata: ${errorData.error || metaResponse.statusText}`);
+      // 1. Fetch latest document metadata directly from Firestore
+      console.log(`[handleRefresh] Fetching latest metadata for document: ${document.id}`);
+      
+      // Get document reference
+      const userId = user.uid;
+      const docRef = doc(clientDb, 'users', userId, 'documents', document.id);
+      
+      // Fetch the document
+      const docSnap = await getDoc(docRef);
+      
+      if (!docSnap.exists()) {
+        throw new Error('Document not found in database');
       }
-
-      const { document: latestDocumentData } = await metaResponse.json();
+      
+      // Convert to our document data format with ID
+      const latestDocumentData = {
+        id: docSnap.id,
+        ...docSnap.data(),
+      } as MyDocumentData;
+      
+      console.log('[handleRefresh] Latest document data:', latestDocumentData);
 
       // 3. Re-fetch content using the latest metadata (potentially updated storagePath)
       await fetchAndProcessContent(latestDocumentData as MyDocumentData); // Use the reusable fetch/process logic
