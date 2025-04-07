@@ -51,6 +51,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false); // State for refresh button loading
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0); // Key to force re-renders
   const { user } = useAuth(); // Get user from auth context
 
   // Main function to fetch and process document content
@@ -260,6 +261,9 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       // 3. Re-fetch content using the latest metadata (potentially updated storagePath)
       await fetchAndProcessContent(latestDocumentData as MyDocumentData); // Use the reusable fetch/process logic
 
+      // Increment refresh key to force re-render
+      setRefreshKey(prevKey => prevKey + 1);
+      
       // Optionally: Notify parent or show success toast
       console.log("Document refreshed successfully");
 
@@ -278,6 +282,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     fetchAndProcessContent, 
     setError, 
     setIsRefreshing,
+    setRefreshKey,
     clientDb,
     workbookData // Add workbookData as dependency to log its current state
   ]);
@@ -294,24 +299,30 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   // Effect to listen for excel-document-updated events
   useEffect(() => {
     console.log('[DocumentViewer] Effect triggered to listen for excel-document-updated events.');
-    // Only set up the listener if we have a valid document
-    if (!document?.id) return;
     
-    console.log(`[DocumentViewer] Setting up excel-document-updated event listener for document ${document.id}`);
-    
-    const handleExcelDocumentUpdated = () => {
-      console.log(`[DocumentViewer] Received excel-document-updated event, triggering refresh for document ${document.id}`);
-      handleRefresh();
-    };
-    
-    // Add event listener
-    window.addEventListener('excel-document-updated', handleExcelDocumentUpdated);
-    
-    // Clean up
-    return () => {
-      window.removeEventListener('excel-document-updated', handleExcelDocumentUpdated);
-    };
-  }, [document?.id, handleRefresh]);
+    if (document?.id) {
+      console.log(`[DocumentViewer] Setting up excel-document-updated event listener for document ${document.id}`);
+      
+      const handleExcelDocumentUpdated = () => {
+        // Force a refresh key increment immediately to ensure UI update
+        setRefreshKey(prevKey => {
+          console.log(`[DocumentViewer] Incrementing refreshKey from ${prevKey} to ${prevKey + 1} due to excel-document-updated event`);
+          return prevKey + 1;
+        });
+        
+        // Also trigger the full refresh to get latest data
+        handleRefresh();
+      };
+      
+      // Add event listener
+      window.addEventListener('excel-document-updated', handleExcelDocumentUpdated);
+      
+      // Remove event listener on cleanup
+      return () => {
+        window.removeEventListener('excel-document-updated', handleExcelDocumentUpdated);
+      };
+    }
+  }, [document?.id, handleRefresh, setRefreshKey]);
 
   // --- Derived Constants for Content Type ---
   const isPdf = document?.contentType?.includes('pdf');
@@ -424,8 +435,10 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
 
       {/* Excel Viewer */}
       {!isLoading && !error && isSheet && workbookData && (
-        <div className="flex-1 overflow-auto">
-          <Tabs defaultValue={activeSheetName || workbookData[0]?.sheetName || ''}>
+        // Log refresh key for debugging
+        console.log(`[DocumentViewer] Rendering Excel viewer with refreshKey: ${refreshKey}`),
+        <div className="flex-1 overflow-auto" key={`excel-viewer-${refreshKey}`}>
+          <Tabs key={`tabs-${refreshKey}`} defaultValue={activeSheetName || workbookData[0]?.sheetName || ''}>
             <TabsList className="mb-2">
               {workbookData.map((sheet) => (
                 <TabsTrigger 
