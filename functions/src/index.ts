@@ -49,6 +49,15 @@ export const processDocumentUpload = onObjectFinalized(
     logger.info("Processing new file:", {filePath, contentType, size});
 
     // --- Validate File ---
+    // NEW: Check if the filename is already a Firestore ID (prevent recursive trigger from move)
+    const currentFileName = path.basename(filePath, path.extname(filePath));
+    // Basic check: Firestore IDs are typically 20 chars, alphanumeric.
+    // This isn't foolproof but should catch most cases of our canonical naming.
+    if (currentFileName.length === 20 && /^[a-zA-Z0-9]+$/.test(currentFileName)) {
+      logger.info(`Skipping processing for potential canonical file path: ${filePath}`);
+      return; // Exit early to prevent loop
+    }
+
     // Make sure it's not a directory placeholder created by Storage
     if (!contentType || filePath.endsWith("/")) {
       logger.log("Ignoring non-file or directory placeholder:", filePath);
