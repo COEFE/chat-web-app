@@ -842,7 +842,10 @@ User Question: ${message}`
           operationData.isEditOperation = true;
         }
 
-        console.log('Calling processExcelOperation with parsed/normalized data:', operationData);
+        console.log('[POST /api/chat] Initial currentDocument:', JSON.stringify(currentDocument, null, 2));
+        console.log('[POST /api/chat] Parsed operationData:', JSON.stringify(operationData, null, 2));
+        console.log('[POST /api/chat] PRE-CALL to processExcelOperation - Operation: \'' + operationData.operation + '\', DocumentID: \'' + operationData.documentId + '\', IsEditFlag: ' + operationData.isEditOperation);
+        
         const excelResponse: NextResponse = await processExcelOperation(
             operationData.operation,
             operationData.documentId,
@@ -900,6 +903,8 @@ User Question: ${message}`
       Object.assign(finalResponse, { excelOperation: excelOperationResult });
     }
     
+    console.log("[POST /api/chat] Sending final non-streaming response:", JSON.stringify(finalResponse, null, 2));
+
     return NextResponse.json({
       response: finalResponse
     }, { status: 200 });
