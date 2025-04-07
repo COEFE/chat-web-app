@@ -821,12 +821,25 @@ User Question: ${message}`
 
         // CRITICAL FIX: For edit operations, always use the current document's ID
         // This prevents creating duplicate documents when editing
-        if (operationData.operation === 'edit' && currentDocument && currentDocument.id) {
+        if (operationData.operation === 'edit') {
+          // Always log the original document ID for debugging
           console.log(`[processExcelOperation] EDIT OPERATION - Original documentId: '${operationData.documentId}'`);
-          console.log(`[processExcelOperation] EDIT OPERATION - Using current document ID: '${currentDocument.id}'`);
           
-          // Override the document ID to ensure we update the existing document
-          operationData.documentId = currentDocument.id;
+          if (currentDocument && currentDocument.id) {
+            console.log(`[processExcelOperation] EDIT OPERATION - Using current document ID: '${currentDocument.id}'`);
+            
+            // Override the document ID to ensure we update the existing document
+            operationData.documentId = currentDocument.id;
+          } else {
+            console.log(`[processExcelOperation] WARNING: No currentDocument.id available for edit operation`);
+            
+            // If we don't have a current document ID, we need to search for existing documents
+            // This will be handled in the processExcelOperation function
+          }
+          
+          // Add a special flag to indicate this is an edit operation
+          // This will be used in processExcelOperation to ensure we don't create duplicates
+          operationData.isEditOperation = true;
         }
 
         console.log('Calling processExcelOperation with parsed/normalized data:', operationData);
@@ -834,7 +847,8 @@ User Question: ${message}`
             operationData.operation,
             operationData.documentId,
             operationData.data,
-            userId
+            userId,
+            operationData.isEditOperation // Pass the edit operation flag
         );
 
         const excelResult = await excelResponse.json();

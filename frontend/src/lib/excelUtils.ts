@@ -423,10 +423,17 @@ export async function processExcelOperation(
   operation: string,
   documentId: string | null, // Allow null for create
   data: any[],
-  userId: string
+  userId: string,
+  isEditOperation?: boolean // New flag to indicate this is an edit operation
 ): Promise<NextResponse> { // Return NextResponse for consistency
   console.log('--- ENTERING processExcelOperation ---');
-  console.log('Arguments:', { operation, documentId, data: data ? 'Present' : 'Absent', userId });
+  console.log('Arguments:', { 
+    operation, 
+    documentId, 
+    data: data ? 'Present' : 'Absent', 
+    userId,
+    isEditOperation: isEditOperation ? 'true' : 'false'
+  });
 
   // Firebase instances are initialized at the top of the file, but might be null if initialization failed
   if (!db || !storage || !bucket) {
