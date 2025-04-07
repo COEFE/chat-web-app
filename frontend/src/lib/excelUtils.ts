@@ -425,6 +425,75 @@ export async function processExcelOperation(
       }
     }
 
+    // CRITICAL: Check if a document with this ID or a similar ID already exists
+    // This ensures we don't create duplicates even if the ID format varies slightly
+    if (db && operation === 'edit') {
+      try {
+        console.log(`[processExcelOperation] Checking for existing documents with similar ID to: ${effectiveDocumentId}`);
+        
+        // Extract the base ID without any prefixes or timestamps
+        const baseIdMatch = effectiveDocumentId.match(/^(?:doc-|temp-)?([a-zA-Z0-9]+)(?:-\d+)?$/);
+        const baseId = baseIdMatch ? baseIdMatch[1] : effectiveDocumentId;
+        
+        console.log(`[processExcelOperation] Extracted base ID: ${baseId} from ${effectiveDocumentId}`);
+        
+        // Look for existing documents with the same base ID
+        const userDocsRef = db.collection('users').doc(userId).collection('documents');
+        const snapshot = await userDocsRef.get();
+        
+        // Find any documents that contain this base ID
+        let existingDocId = null;
+        let mostRecentDoc = null;
+        let mostRecentTimestamp = 0;
+        
+        snapshot.forEach(doc => {
+          const docId = doc.id;
+          const docData = doc.data();
+          
+          // Check if this document ID matches our target or contains the base ID
+          if (docId === effectiveDocumentId || 
+              (baseId.length > 3 && docId.includes(baseId))) {
+            
+            console.log(`[processExcelOperation] Found potential match: ${docId}`);
+            
+            // If we have an exact match, use it immediately
+            if (docId === effectiveDocumentId) {
+              existingDocId = docId;
+              console.log(`[processExcelOperation] Found exact match: ${docId}`);
+              return; // Exit the forEach early
+            }
+            
+            // Otherwise track the most recent document with this base ID
+            if (docData.updatedAt || docData.createdAt) {
+              const timestamp = docData.updatedAt || docData.createdAt;
+              const docTimestamp = timestamp.seconds * 1000 + timestamp.nanoseconds / 1000000;
+              
+              if (docTimestamp > mostRecentTimestamp) {
+                mostRecentTimestamp = docTimestamp;
+                mostRecentDoc = docId;
+              }
+            }
+          }
+        });
+        
+        // If we found an exact match, that's already set
+        // Otherwise use the most recent document with a similar ID
+        if (!existingDocId && mostRecentDoc) {
+          existingDocId = mostRecentDoc;
+          console.log(`[processExcelOperation] Using most recent similar document: ${existingDocId}`);
+        }
+        
+        // If we found an existing document with a similar ID, use that instead
+        if (existingDocId) {
+          console.log(`[processExcelOperation] Using existing document ID for edit: ${existingDocId}`);
+          effectiveDocumentId = existingDocId;
+        }
+      } catch (err) {
+        console.error(`[processExcelOperation] Error checking for existing documents:`, err);
+        // Continue with the current ID if there's an error
+      }
+    }
+
     let docToUpdateRef;
     let finalDocumentId;
     let finalStoragePath;
