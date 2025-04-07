@@ -329,37 +329,45 @@ export async function editExcelFile(db: admin.firestore.Firestore, storage: admi
             // Convert workbook to buffer
             const updatedBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
             
-            // ALWAYS upload to the canonical path based on document ID
-            console.log(`[editExcelFile] Uploading updated file to canonical path: ${canonicalStoragePath}`);
-            const file = bucket.file(canonicalStoragePath);
+            // Get original metadata *before* making changes
+            const originalDocData = (await docRef.get()).data() as DocWithId;
+            const originalStoragePath = originalDocData?.storagePath;
+            const originalName = originalDocData?.name;
+            
+            console.log(`[editExcelFile] Original storagePath: ${originalStoragePath}`);
+            console.log(`[editExcelFile] Original name: ${originalName}`);
+
+            // ALWAYS upload to the *original* storage path to avoid changing the file location
+            const targetStoragePath = originalStoragePath || canonicalStoragePath; // Prefer original path
+            console.log(`[editExcelFile] Uploading updated file to target path: ${targetStoragePath}`);
+            const file = bucket.file(targetStoragePath);
             await file.save(updatedBuffer, {
                 metadata: {
                     contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
                 }
             });
             
-            console.log(`[editExcelFile] Successfully uploaded updated Excel file to: ${canonicalStoragePath}`);
+            console.log(`[editExcelFile] Successfully uploaded updated Excel file to: ${targetStoragePath}`);
             
-            // Update Firestore document metadata with the canonical path and name
+            // Update Firestore document metadata, preserving original path/name if they exist
             const [downloadURL] = await file.getSignedUrl({
                 action: 'read',
                 expires: '03-01-2500' // Far future date
             });
             
-            // CRITICAL: Use set with merge:true to ensure we're updating the existing document
-            // rather than creating a new one. This preserves the original createdAt timestamp.
             await docRef.set({
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                storagePath: canonicalStoragePath, // ALWAYS use the canonical path
+                // Keep original path and name if they exist, otherwise use canonical
+                storagePath: originalStoragePath || canonicalStoragePath, 
+                name: originalName || canonicalFilename, 
                 downloadURL: downloadURL,
                 size: updatedBuffer.length,
                 contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                name: canonicalFilename, // ALWAYS use the canonical filename
                 // Keep the original userId to maintain ownership
                 userId: userId
             }, { merge: true }); // Using merge:true preserves fields we don't explicitly set
             
-            console.log(`[editExcelFile] Successfully updated Firestore document: ${docRef.id}`);
+            console.log(`[editExcelFile] Successfully updated Firestore document: ${docRef.id}, preserving original path/name.`);
             
             return { success: true, message: "Excel file edited successfully", documentId: docRef.id };
         } catch (error: any) {
