@@ -423,6 +423,21 @@ export default function DashboardPage() {
     }
   }, [user, authLoading, fetchDocuments]);
 
+  // Add effect to listen for custom event indicating document update
+  useEffect(() => {
+    const handleDocumentUpdate = () => {
+      console.log('Received excel-document-updated event, fetching documents...');
+      fetchDocuments();
+    };
+
+    window.addEventListener('excel-document-updated', handleDocumentUpdate);
+
+    // Cleanup listener on component unmount
+    return () => {
+      window.removeEventListener('excel-document-updated', handleDocumentUpdate);
+    };
+  }, [fetchDocuments]); // Depend on fetchDocuments to ensure the latest version is used
+
   // Handler for the existing DocumentList component (if used)
   const handleSelectDocument = (doc: MyDocumentData | null) => {
     console.log("Selected Document from List:", doc);
