@@ -422,19 +422,25 @@ export async function processExcelOperation(
       }
     }
 
-    let docToUpdateRef = db.collection('users').doc(userId).collection('documents').doc(effectiveDocumentId);
-    let finalDocumentId = effectiveDocumentId;
-    let finalStoragePath = `users/${userId}/${finalDocumentId}.xlsx`;
+    let docToUpdateRef;
+    let finalDocumentId;
+    let finalStoragePath;
+
+    if (db) {
+      docToUpdateRef = db.collection('users').doc(userId).collection('documents').doc(effectiveDocumentId);
+      finalDocumentId = effectiveDocumentId;
+      finalStoragePath = `users/${userId}/${finalDocumentId}.xlsx`;
+    }
 
     if (operation === 'create') {
-      console.log(`Processing CREATE operation for user ${userId}, potential docId based on data?`);
+      console.log(`Processing CREATE operation for user ${userId}`);
       // Pass the actual Firebase instances
       result = await createExcelFile(
           db as admin.firestore.Firestore, 
           storage as admin.storage.Storage, 
           bucket as Bucket, 
           userId, 
-          finalDocumentId, 
+          effectiveDocumentId, // Pass the initially determined ID
           data
       );
     } else if (operation === 'edit') {
@@ -445,7 +451,7 @@ export async function processExcelOperation(
           storage as admin.storage.Storage, 
           bucket as Bucket, 
           userId, 
-          effectiveDocumentId, 
+          effectiveDocumentId, // Use the mandatory ID for edit
           data
       );
     } else {
