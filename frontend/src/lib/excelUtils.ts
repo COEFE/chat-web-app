@@ -195,36 +195,69 @@ export async function editExcelFile(db: admin.firestore.Firestore, storage: admi
     }
     
     let docRef: admin.firestore.DocumentReference;
+    let actualDocumentId = documentId;
     
     try {
-        // Get a reference to the document
-        // Use the same collection path as in createExcelFile
-        docRef = db.collection('users').doc(userId).collection('documents').doc(documentId);
+        // CRITICAL FIX: First check if there's another document with the same storage path
+        // This is the key to preventing duplicates - we need to find documents that point to the same file
+        console.log(`[editExcelFile] Checking for documents with storage path containing: ${documentId}.xlsx`);
+        
+        const userDocsRef = db.collection('users').doc(userId).collection('documents');
+        const snapshot = await userDocsRef.get();
+        
+        let existingDocWithSamePath: admin.firestore.DocumentData | null = null;
+        let existingDocId: string | null = null;
+        
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            // Check if this document points to the same Excel file
+            if (data.storagePath && 
+                data.storagePath.includes(`${userId}/${documentId}.xlsx`)) {
+                console.log(`[editExcelFile] Found document with matching storage path: ${doc.id}`);
+                existingDocWithSamePath = data;
+                existingDocId = doc.id;
+            }
+        });
+        
+        // If we found an existing document with the same storage path, use that instead
+        if (existingDocId && existingDocId !== documentId) {
+            console.log(`[editExcelFile] Using existing document ID: ${existingDocId} instead of ${documentId}`);
+            actualDocumentId = existingDocId;
+        }
+        
+        // Get a reference to the document (either the original or the one we found)
+        docRef = db.collection('users').doc(userId).collection('documents').doc(actualDocumentId);
         console.log(`[editExcelFile] Looking up document with ID: ${docRef.id}`);
         
         // Get the document data
         const doc = await docRef.get();
         
-        // Check if the document exists
-        if (!doc.exists) {
-            console.error(`[editExcelFile] Document not found for editing: ${documentId}`);
-            throw new Error(`Document not found for editing: ${documentId}`);
-        }
+        // Define docData at a higher scope so it's accessible throughout the function
+        let docData: DocWithId | undefined;
         
-        // Get the existing data
-        const existingData = doc.data() as DocWithId;
-        if (!existingData) {
-            console.error("Document exists but has no data");
-            throw new Error("Document exists but has no data");
+        // If the document doesn't exist but we're using the original ID, try to create it
+        if (!doc.exists && actualDocumentId === documentId) {
+            console.log(`[editExcelFile] Document not found, will create a new one: ${documentId}`);
+            // This will be handled below by the set() with merge: true
+        } else if (!doc.exists) {
+            console.error(`[editExcelFile] Document not found for editing: ${actualDocumentId}`);
+            throw new Error(`Document not found for editing: ${actualDocumentId}`);
+        } else {
+            // Get the existing data
+            docData = doc.data() as DocWithId | undefined;
+            if (!docData) {
+                console.error("Document exists but has no data");
+                throw new Error("Document exists but has no data");
+            }
+            
+            // Check if this document belongs to the user
+            if (docData.userId !== userId) {
+                console.error("User does not have permission to edit this document");
+                throw new Error("User does not have permission to edit this document");
+            }
+            
+            console.log(`[editExcelFile] Document found with ID: ${docRef.id}`);
         }
-        
-        // Check if this document belongs to the user
-        if (existingData.userId !== userId) {
-            console.error("User does not have permission to edit this document");
-            throw new Error("User does not have permission to edit this document");
-        }
-        
-        console.log(`[editExcelFile] Document found with ID: ${docRef.id}`);
         
         // IMPORTANT: Use document ID as the canonical filename
         // This ensures we always use the same filename for the same document
@@ -240,13 +273,14 @@ export async function editExcelFile(db: admin.firestore.Firestore, storage: admi
             let downloadSuccessful = false;
             
             // Try to download from the existing storage path first
-            if (existingData.storagePath) {
-                console.log(`[editExcelFile] Attempting to download from existing path: ${existingData.storagePath}`);
+            const storagePath = docData?.storagePath;
+            if (storagePath) {
+                console.log(`[editExcelFile] Attempting to download from existing path: ${storagePath}`);
                 try {
-                    const existingFile = bucket.file(existingData.storagePath);
+                    const existingFile = bucket.file(storagePath);
                     [fileBuffer] = await existingFile.download();
                     downloadSuccessful = true;
-                    console.log(`[editExcelFile] Successfully downloaded from existing path: ${existingData.storagePath}`);
+                    console.log(`[editExcelFile] Successfully downloaded from existing path: ${storagePath}`);
                 } catch (err) {
                     console.log(`[editExcelFile] Failed to download from existing path: ${err}`);
                 }
@@ -267,7 +301,7 @@ export async function editExcelFile(db: admin.firestore.Firestore, storage: admi
             
             // If both attempts failed, throw an error
             if (!downloadSuccessful || !fileBuffer) {
-                throw new Error(`Could not find Excel file at either the existing path (${existingData.storagePath}) or the canonical path (${canonicalStoragePath})`);
+                throw new Error(`Could not find Excel file at either the existing path (${storagePath || 'unknown'}) or the canonical path (${canonicalStoragePath})`);
             }
             
             // Load the workbook
