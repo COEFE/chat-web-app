@@ -206,13 +206,6 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     initialLoad();
   }, [document, fetchAndProcessContent]); // Re-run when the document prop changes or fetch function updates
 
-  // Effect to set active sheet when workbookData changes
-  useEffect(() => {
-    if (workbookData && workbookData.length > 0 && !activeSheetName) {
-      setActiveSheetName(workbookData[0].sheetName);
-    }
-  }, [workbookData, activeSheetName]);
-
   // --- Refresh Handler ---
   const handleRefresh = async () => {
     if (!document?.id || isRefreshing || isLoading) return; // Prevent refresh if no doc, or already loading/refreshing
@@ -260,6 +253,34 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       setIsRefreshing(false);
     }
   };
+
+  // Effect to set active sheet when workbookData changes
+  useEffect(() => {
+    if (workbookData && workbookData.length > 0 && !activeSheetName) {
+      setActiveSheetName(workbookData[0].sheetName);
+    }
+  }, [workbookData, activeSheetName]);
+
+  // Effect to listen for excel-document-updated events
+  useEffect(() => {
+    // Only set up the listener if we have a valid document
+    if (!document?.id) return;
+    
+    console.log(`[DocumentViewer] Setting up excel-document-updated event listener for document ${document.id}`);
+    
+    const handleExcelDocumentUpdated = () => {
+      console.log(`[DocumentViewer] Received excel-document-updated event, triggering refresh for document ${document.id}`);
+      handleRefresh();
+    };
+    
+    // Add event listener
+    window.addEventListener('excel-document-updated', handleExcelDocumentUpdated);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener('excel-document-updated', handleExcelDocumentUpdated);
+    };
+  }, [document?.id, handleRefresh]);
 
   // --- Derived Constants for Content Type ---
   const isPdf = document?.contentType?.includes('pdf');

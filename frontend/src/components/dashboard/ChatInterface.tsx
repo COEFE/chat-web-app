@@ -134,6 +134,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
             setMessages((prev) => [...prev, aiResponse]);
             
             // If there was an Excel operation or the special marker is found, trigger a document refresh
+            // This will ensure the document viewer is updated with the latest data
             if (aiResponse.excelOperation && aiResponse.excelOperation.success) {
               console.log('Excel operation successful, triggering document refresh');
               window.dispatchEvent(new Event('excel-document-updated'));
