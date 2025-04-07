@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, MouseEvent, WheelEvent } from 'react';
+import React, { useState, useEffect, useRef, MouseEvent, WheelEvent, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { Timestamp } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Loader2, ZoomIn, ZoomOut, RotateCw, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx'; // Import xlsx library
 import mammoth from 'mammoth'; // Import mammoth for DOCX handling
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"; // Import Shadcn Tabs
+import { useAuth } from '@/context/AuthContext'; // Import useAuth
 
 // Import CSS for PDF rendering
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
@@ -46,17 +47,126 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const startPos = useRef({ x: 0, y: 0 });
 
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false); // State for refresh button loading
   const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth(); // Get user from auth context
 
-  // Fetch content based on document type
+  // Main function to fetch and process document content
+  const fetchAndProcessContent = useCallback(async (docToLoad: MyDocumentData) => {
+    try {
+      // Use the storage path directly from the document data
+      const storagePath = docToLoad.storagePath;
+      if (!storagePath) {
+        throw new Error('Storage path is missing from document data.');
+      }
+
+      // Use our proxy API instead of direct Firebase Storage URL
+      // Include userId to help with file lookup if needed
+      const userId = docToLoad.userId || '';
+      const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(storagePath)}&userId=${encodeURIComponent(userId)}`;
+      console.log('[fetchAndProcessContent] Using proxy URL:', proxyUrl);
+      console.log('[fetchAndProcessContent] Document metadata:', { 
+        name: docToLoad.name, 
+        storagePath: docToLoad.storagePath,
+        userId: docToLoad.userId,
+        contentType: docToLoad.contentType
+      });
+      
+      const response = await fetch(proxyUrl);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      // PDF is handled by the dynamic PDFViewer component, no direct fetch/state update needed here
+      // unless we want to explicitly track PDF state for some reason.
+
+      // Handle different content types
+      if (docToLoad.contentType === 'text/plain') {
+        const text = await response.text();
+        setTextContent(text);
+      } else if ([
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+          'application/vnd.ms-excel', // .xls
+          'text/csv' // .csv
+        ].includes(docToLoad.contentType || '')) 
+      {
+        const data = await response.arrayBuffer();
+        if (data) {
+          try {
+            // Read the workbook with sheetStubs option to include empty cells
+            const workbook = XLSX.read(new Uint8Array(data), { type: 'array', sheetStubs: true });
+            
+            const sheets = workbook.SheetNames.map(sheetName => {
+              const worksheet = workbook.Sheets[sheetName];
+              
+              // Get the range of the worksheet
+              const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+              
+              // Fill in any missing cells in the worksheet
+              for (let r = range.s.r; r <= range.e.r; ++r) {
+                for (let c = range.s.c; c <= range.e.c; ++c) {
+                  const cellAddress = XLSX.utils.encode_cell({ r, c });
+                  if (!worksheet[cellAddress]) {
+                    // Add empty cell
+                    worksheet[cellAddress] = { t: 's', v: '' };
+                  }
+                }
+              }
+              
+              // Convert to JSON with defval option to handle empty cells
+              const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+                header: 1,
+                defval: '' // Use empty string for blank cells
+              }) as any[][];
+              
+              return { sheetName, data: jsonData };
+            });
+            
+            setWorkbookData(sheets);
+            if (sheets.length > 0) {
+              setActiveSheetName(sheets[0].sheetName);
+            }
+          } catch (error) {
+            console.error('Error parsing Excel file:', error);
+            throw new Error('Error parsing Excel file. The file may be corrupted or in an unsupported format.');
+          }
+        }
+      } else if (docToLoad.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        // Handle DOCX files using Mammoth.js
+        const arrayBuffer = await response.arrayBuffer();
+        try {
+          const result = await mammoth.convertToHtml({ arrayBuffer });
+          setDocxHtml(result.value);
+        } catch (mammothError) {
+          console.error('Error converting DOCX:', mammothError);
+          throw new Error(`Failed to convert DOCX file: ${mammothError instanceof Error ? mammothError.message : String(mammothError)}`);
+        }
+      } else if (docToLoad.contentType?.startsWith('image/')) {
+        // Handle image files
+        setImageUrl(proxyUrl);
+      }
+      // PDF is handled by the dynamic PDFViewer component, no fetch needed here
+
+    } catch (err) {
+      console.error('[fetchAndProcessContent] Error:', err);
+      setError(`Failed to load document content: ${err instanceof Error ? err.message : String(err)}`);
+      // Rethrow the error so the caller knows it failed
+      throw err; 
+    } finally {
+      // The main loading state is handled by the caller now
+      // setIsLoading(false);
+    }
+  }, []); // No dependencies, it relies on the passed docToLoad
+
+  // Fetch content based on document type when document prop changes
   useEffect(() => {
-    const fetchDocumentContent = async () => {
+    const initialLoad = async () => {
       if (!document || !document.storagePath) {
         setError('Document data or storage path is missing.');
         setIsLoading(false);
         return;
       }
-
       setIsLoading(true);
       setError(null);
       setTextContent(null); // Reset other content types
@@ -69,110 +179,14 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       setPosition({ x: 0, y: 0 }); // Reset position
 
       try {
-        // Use the storage path directly from the document data
-        const storagePath = document.storagePath; 
-        if (!storagePath) { 
-          throw new Error('Storage path is missing from document data.');
-        }
-
-        // Use our proxy API instead of direct Firebase Storage URL
-        // Include userId to help with file lookup if needed
-        const userId = document.userId || '';
-        const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(storagePath)}&userId=${encodeURIComponent(userId)}`;
-        console.log('Using proxy URL:', proxyUrl);
-        console.log('Document metadata:', { 
-          name: document.name, 
-          storagePath: document.storagePath,
-          userId: document.userId,
-          contentType: document.contentType
-        });
-        
-        const response = await fetch(proxyUrl);
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-        }
-
-        // PDF is handled by the dynamic PDFViewer component, no direct fetch/state update needed here
-        // unless we want to explicitly track PDF state for some reason.
-
-        // Handle different content types
-        if (document.contentType === 'text/plain') {
-          const text = await response.text();
-          setTextContent(text);
-        } else if ([
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
-            'application/vnd.ms-excel', // .xls
-            'text/csv' // .csv
-          ].includes(document.contentType)) 
-        {
-          const data = await response.arrayBuffer();
-          if (data) {
-            try {
-              // Read the workbook with sheetStubs option to include empty cells
-              const workbook = XLSX.read(new Uint8Array(data), { type: 'array', sheetStubs: true });
-              
-              const sheets = workbook.SheetNames.map(sheetName => {
-                const worksheet = workbook.Sheets[sheetName];
-                
-                // Get the range of the worksheet
-                const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-                
-                // Fill in any missing cells in the worksheet
-                for (let r = range.s.r; r <= range.e.r; ++r) {
-                  for (let c = range.s.c; c <= range.e.c; ++c) {
-                    const cellAddress = XLSX.utils.encode_cell({ r, c });
-                    if (!worksheet[cellAddress]) {
-                      // Add empty cell
-                      worksheet[cellAddress] = { t: 's', v: '' };
-                    }
-                  }
-                }
-                
-                // Convert to JSON with defval option to handle empty cells
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
-                  header: 1,
-                  defval: '' // Use empty string for blank cells
-                }) as any[][];
-                
-                return { sheetName, data: jsonData };
-              });
-              
-              setWorkbookData(sheets);
-              if (sheets.length > 0) {
-                setActiveSheetName(sheets[0].sheetName);
-              }
-            } catch (error) {
-              console.error('Error parsing Excel file:', error);
-              setError('Error parsing Excel file. The file may be corrupted or in an unsupported format.');
-            }
-          }
-        } else if (document.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-          // Handle DOCX files using Mammoth.js
-          const arrayBuffer = await response.arrayBuffer();
-          try {
-            const result = await mammoth.convertToHtml({ arrayBuffer });
-            setDocxHtml(result.value);
-          } catch (mammothError) {
-            console.error('Error converting DOCX:', mammothError);
-            setError(`Failed to convert DOCX file: ${mammothError instanceof Error ? mammothError.message : String(mammothError)}`);
-          }
-        } else if (['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'].includes(document.contentType)) {
-          // Handle image files
-          setImageUrl(proxyUrl);
-        }
-        // PDF is handled by the dynamic PDFViewer component, no fetch needed here
-
-      } catch (err) {
-        console.error('Error fetching document content:', err);
-        setError(`Failed to load document content: ${err instanceof Error ? err.message : String(err)}`);
+        await fetchAndProcessContent(document);
       } finally {
         setIsLoading(false);
       }
     };
 
-    fetchDocumentContent();
-  }, [document]); // Re-run when the document prop changes
+    initialLoad();
+  }, [document, fetchAndProcessContent]); // Re-run when the document prop changes or fetch function updates
 
   // Effect to set active sheet when workbookData changes
   useEffect(() => {
@@ -180,6 +194,49 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       setActiveSheetName(workbookData[0].sheetName);
     }
   }, [workbookData, activeSheetName]);
+
+  // --- Refresh Handler ---
+  const handleRefresh = async () => {
+    if (!document?.id || isRefreshing || isLoading) return; // Prevent refresh if no doc, or already loading/refreshing
+    if (!user) {
+      setError("Authentication required to refresh.");
+      return;
+    }
+
+    setIsRefreshing(true);
+    setError(null);
+
+    try {
+      // 1. Get ID token
+      const token = await user.getIdToken();
+
+      // 2. Fetch latest document metadata
+      const metaResponse = await fetch(`/api/documents/${document.id}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!metaResponse.ok) {
+        const errorData = await metaResponse.json();
+        throw new Error(`Failed to fetch metadata: ${errorData.error || metaResponse.statusText}`);
+      }
+
+      const { document: latestDocumentData } = await metaResponse.json();
+
+      // 3. Re-fetch content using the latest metadata (potentially updated storagePath)
+      await fetchAndProcessContent(latestDocumentData as MyDocumentData); // Use the reusable fetch/process logic
+
+      // Optionally: Notify parent or show success toast
+      console.log("Document refreshed successfully");
+
+    } catch (err) {
+      console.error('Error refreshing document:', err);
+      setError(`Failed to refresh document: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // --- Derived Constants for Content Type ---
   const isPdf = document?.contentType?.includes('pdf');
@@ -225,13 +282,16 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             <Button 
               variant="outline" 
               size="sm" 
-              onClick={() => {
-                // Removed refreshDocument function
-              }}
+              onClick={handleRefresh}
               className="h-7 px-2 text-xs"
+              disabled={isRefreshing || isLoading} // Disable while loading/refreshing
             >
-              <RefreshCw className="h-3 w-3 mr-1" />
-              Refresh Document
+              {isRefreshing ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3 mr-1" />
+              )}
+              {isRefreshing ? 'Refreshing...' : 'Refresh Document'}
             </Button>
             {document.storagePath && (
               <Button
