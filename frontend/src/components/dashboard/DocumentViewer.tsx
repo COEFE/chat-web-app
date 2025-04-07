@@ -36,7 +36,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const [textContent, setTextContent] = useState<string | null>(null);
   // State for workbook data and active sheet
   const [workbookData, setWorkbookData] = useState<{ sheetName: string; data: any[][] }[] | null>(null);
-  const [activeSheetName, setActiveSheetName] = useState<string | null>(null);
+  const [activeSheetName, setActiveSheetName] = useState<string>('');
   // State for DOCX HTML content
   const [docxHtml, setDocxHtml] = useState<string | null>(null);
   // State for image viewing
@@ -55,6 +55,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
 
   // Main function to fetch and process document content
   const fetchAndProcessContent = useCallback(async (docToLoad: MyDocumentData) => {
+    console.log('[fetchAndProcessContent] Starting to fetch and process content for document:', docToLoad);
     try {
       // Use the storage path directly from the document data
       const storagePath = docToLoad.storagePath;
@@ -86,6 +87,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       // Handle different content types
       if (docToLoad.contentType === 'text/plain') {
         const text = await response.text();
+        console.log('[fetchAndProcessContent] Setting text content:', text);
         setTextContent(text);
       } else if ([
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
@@ -125,6 +127,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               return { sheetName, data: jsonData };
             });
             
+            console.log('[fetchAndProcessContent] Setting workbook data:', sheets);
             setWorkbookData(sheets);
             
             // Try to load the previously active sheet from localStorage
@@ -136,9 +139,11 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             
             // Set active sheet - use saved sheet if it exists and is valid, otherwise use first sheet
             if (savedSheet && sheets.some(sheet => sheet.sheetName === savedSheet)) {
+              console.log('[fetchAndProcessContent] Setting active sheet to saved sheet:', savedSheet);
               setActiveSheetName(savedSheet);
               console.log(`[Excel Loading] Restored active sheet: ${savedSheet}`);
             } else if (sheets.length > 0) {
+              console.log('[fetchAndProcessContent] Setting active sheet to first sheet:', sheets[0].sheetName);
               setActiveSheetName(sheets[0].sheetName);
               // Also save this to localStorage for consistency
               if (docToLoad?.id) {
@@ -155,6 +160,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         const arrayBuffer = await response.arrayBuffer();
         try {
           const result = await mammoth.convertToHtml({ arrayBuffer });
+          console.log('[fetchAndProcessContent] Setting DOCX HTML content:', result.value);
           setDocxHtml(result.value);
         } catch (mammothError) {
           console.error('Error converting DOCX:', mammothError);
@@ -162,6 +168,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         }
       } else if (docToLoad.contentType?.startsWith('image/')) {
         // Handle image files
+        console.log('[fetchAndProcessContent] Setting image URL:', proxyUrl);
         setImageUrl(proxyUrl);
       }
       // PDF is handled by the dynamic PDFViewer component, no fetch needed here
@@ -172,13 +179,14 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       // Rethrow the error so the caller knows it failed
       throw err; 
     } finally {
-      // The main loading state is handled by the caller now
-      // setIsLoading(false);
+      console.log('[fetchAndProcessContent] Finished fetching and processing content.');
+      setIsLoading(false);
     }
   }, []); // No dependencies, it relies on the passed docToLoad
 
   // Fetch content based on document type when document prop changes
   useEffect(() => {
+    console.log('[DocumentViewer] Effect triggered to load initial content.');
     const initialLoad = async () => {
       if (!document || !document.storagePath) {
         setError('Document data or storage path is missing.');
@@ -199,6 +207,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       try {
         await fetchAndProcessContent(document);
       } finally {
+        console.log('[DocumentViewer] Finished loading initial content.');
         setIsLoading(false);
       }
     };
@@ -208,6 +217,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
 
   // --- Refresh Handler ---
   const handleRefresh = useCallback(async () => {
+    console.log('[handleRefresh] Starting to refresh document content.');
     if (!document?.id || isRefreshing || isLoading) return; // Prevent refresh if no doc, or already loading/refreshing
     if (!user) {
       setError("Authentication required to refresh.");
@@ -246,23 +256,37 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       // Optionally: Notify parent or show success toast
       console.log("Document refreshed successfully");
 
-    } catch (err) {
-      console.error('Error refreshing document:', err);
-      setError(`Failed to refresh document: ${err instanceof Error ? err.message : String(err)}`);
+    } catch (error) {
+      console.error('Error refreshing document:', error);
+      setError(`Failed to refresh document: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      console.log('[handleRefresh] Finished refreshing document content.');
       setIsRefreshing(false);
     }
-  }, [document?.id, user, isRefreshing, isLoading, fetchAndProcessContent, setError, setIsRefreshing, clientDb]); // Dependencies for handleRefresh
+  }, [
+    document?.id, 
+    user?.uid, 
+    isRefreshing, 
+    isLoading, 
+    fetchAndProcessContent, 
+    setError, 
+    setIsRefreshing,
+    clientDb,
+    workbookData // Add workbookData as dependency to log its current state
+  ]);
 
   // Effect to set active sheet when workbookData changes
   useEffect(() => {
+    console.log('[DocumentViewer] Effect triggered to set active sheet.');
     if (workbookData && workbookData.length > 0 && !activeSheetName) {
+      console.log('[DocumentViewer] Setting active sheet to first sheet:', workbookData[0].sheetName);
       setActiveSheetName(workbookData[0].sheetName);
     }
   }, [workbookData, activeSheetName]);
 
   // Effect to listen for excel-document-updated events
   useEffect(() => {
+    console.log('[DocumentViewer] Effect triggered to listen for excel-document-updated events.');
     // Only set up the listener if we have a valid document
     if (!document?.id) return;
     
@@ -300,6 +324,11 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   // Determine if any preview is supported
   const isPreviewSupported = isPdf || isText || isSheet || isImage || isDocx;
   // --- End Derived Constants ---
+
+  // Log workbookData just before rendering
+  const firstSheetDataRender = workbookData && workbookData.length > 0 ? workbookData[0].data : null;
+  const cellValueRender = firstSheetDataRender && firstSheetDataRender.length > 1 && firstSheetDataRender[1].length > 0 ? firstSheetDataRender[1][0] : 'N/A';
+  console.log(`[DocumentViewer Render] Rendering with Cell A2 value: ${cellValueRender}`);
 
   return (
     <div className="flex flex-col h-full bg-background relative">
