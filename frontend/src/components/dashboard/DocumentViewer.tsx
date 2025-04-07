@@ -126,8 +126,24 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             });
             
             setWorkbookData(sheets);
-            if (sheets.length > 0) {
+            
+            // Try to load the previously active sheet from localStorage
+            let savedSheet = null;
+            if (docToLoad?.id) {
+              savedSheet = localStorage.getItem(`activeSheet-${docToLoad.id}`);
+              console.log(`[Excel Loading] Checking for saved active sheet for document ${docToLoad.id}: ${savedSheet || 'none found'}`);
+            }
+            
+            // Set active sheet - use saved sheet if it exists and is valid, otherwise use first sheet
+            if (savedSheet && sheets.some(sheet => sheet.sheetName === savedSheet)) {
+              setActiveSheetName(savedSheet);
+              console.log(`[Excel Loading] Restored active sheet: ${savedSheet}`);
+            } else if (sheets.length > 0) {
               setActiveSheetName(sheets[0].sheetName);
+              // Also save this to localStorage for consistency
+              if (docToLoad?.id) {
+                localStorage.setItem(`activeSheet-${docToLoad.id}`, sheets[0].sheetName);
+              }
             }
           } catch (error) {
             console.error('Error parsing Excel file:', error);
@@ -358,7 +374,25 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                 <TabsTrigger 
                   key={sheet.sheetName} 
                   value={sheet.sheetName}
-                  onClick={() => setActiveSheetName(sheet.sheetName)}
+                  onClick={() => {
+                    // Set active sheet name in state
+                    setActiveSheetName(sheet.sheetName);
+                    
+                    // Store active sheet in localStorage with document ID as part of the key
+                    if (document?.id) {
+                      localStorage.setItem(`activeSheet-${document.id}`, sheet.sheetName);
+                      console.log(`[SheetSelection] Set active sheet for document ${document.id}: ${sheet.sheetName}`);
+                      
+                      // Dispatch a custom event to notify other components of the active sheet change
+                      const event = new CustomEvent('activeSheetChanged', {
+                        detail: {
+                          documentId: document.id,
+                          sheetName: sheet.sheetName
+                        }
+                      });
+                      window.dispatchEvent(event);
+                    }
+                  }}
                 >
                   {sheet.sheetName}
                 </TabsTrigger>

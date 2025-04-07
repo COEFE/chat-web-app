@@ -65,7 +65,7 @@ function extractSheetName(message: string): string | null {
 
 // Helper function to handle Excel operations directly
 // Return type specifies the expected structure
-async function handleExcelOperation(authToken: string, userId: string, message: string, currentDocument: any): Promise<{ success: boolean; response?: object; message?: string }> {
+async function handleExcelOperation(authToken: string, userId: string, message: string, currentDocument: any, activeSheet?: string): Promise<{ success: boolean; response?: object; message?: string }> {
   console.log('Handling Excel operation directly for document:', currentDocument?.id);
 
   // --- Regex and sheet name extraction logic --- 
@@ -113,11 +113,9 @@ async function handleExcelOperation(authToken: string, userId: string, message: 
     
     // Create the Excel operation JSON structure needed by processExcelOperation
     // Try to extract operation parameters via regex or some heuristics
-    const sheetName = extractSheetName(message);
-    if (sheetName) {
-      console.log(`Extracted sheet name from message: ${sheetName}`);
-    }
-
+    const sheetName = extractSheetName(message) || activeSheet || 'Sheet1';
+    console.log(`[handleExcelOperation] Using sheet: ${sheetName} (extracted from message: ${extractSheetName(message)}, active sheet: ${activeSheet})`);
+    
     // Default operation: Use current document and create a simple edit
     // CRITICAL: Always use the current document's ID for editing to prevent duplicates
     const documentId = currentDocument ? currentDocument.id : null;
@@ -133,7 +131,7 @@ async function handleExcelOperation(authToken: string, userId: string, message: 
     // Create the Excel operation JSON structure needed by processExcelOperation
     const operationData = [
       {
-        sheetName: sheetName || "Sheet1", // Use the global extractSheetName function
+        sheetName: sheetName, // Use the global extractSheetName function
         cellUpdates: [
           { cell: cellRef, value: cellValue } // Explicit property assignment
         ]
@@ -259,7 +257,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     console.log('Request body:', body);
-    const { message, documentId, currentDocument } = body;
+    const { message, documentId, currentDocument, activeSheet } = body;
 
     if (!message || !documentId) {
       console.error('Missing message or documentId');
@@ -515,7 +513,7 @@ export async function POST(req: NextRequest) {
           
           // For Excel edit requests, try to handle directly
           if (isEditExcelRequest && currentDocument && currentDocument.id) {
-            const result = await handleExcelOperation(authorization, userId, message, currentDocument);
+            const result = await handleExcelOperation(authorization, userId, message, currentDocument, activeSheet);
             if (result.success) {
               return NextResponse.json(result.response, { status: 200 });
             }
@@ -546,21 +544,26 @@ export async function POST(req: NextRequest) {
         'application/vnd.ms-excel', // .xls
         'text/csv' // .csv
       ].includes(currentDocument.contentType)) {
+        // Include active sheet information if available
+        const sheetInfo = activeSheet ? `\n- Active Sheet: ${activeSheet}` : '';
+        const sheetInstructions = activeSheet ? 
+          `\n\nIMPORTANT: The user is currently viewing the "${activeSheet}" sheet in this Excel document. When making edits, please target this sheet unless the user specifically asks to edit a different sheet.` : '';
+          
         currentDocumentContext = `
 \nCURRENT EXCEL DOCUMENT INFORMATION:
 You are currently viewing an Excel document with the following details:
 - Document ID: ${currentDocument.id}
 - Document Name: ${currentDocument.name || 'Unnamed'}
-- Content Type: ${currentDocument.contentType}
+- Content Type: ${currentDocument.contentType}${sheetInfo}
 
-If the user asks you to edit this Excel file, you should automatically use this document ID in your response.
+If the user asks you to edit this Excel file, you should automatically use this document ID in your response.${sheetInstructions}
 `;
       }
 
       // If it's an edit request and we have a document ID, directly process it
       if (isEditExcelRequest && currentDocument && currentDocument.id) {
         // Try to handle the Excel operation directly
-        const result = await handleExcelOperation(authorization, userId, message, currentDocument);
+        const result = await handleExcelOperation(authorization, userId, message, currentDocument, activeSheet);
         if (result.success) {
           return NextResponse.json(result.response, { status: 200 });
         }

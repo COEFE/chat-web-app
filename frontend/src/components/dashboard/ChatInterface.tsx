@@ -33,6 +33,40 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
   const [isLoading, setIsLoading] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null); 
   const { user } = useAuth(); 
+  
+  // Reference to the active sheet for the current document
+  const [activeSheet, setActiveSheet] = useState<string | null>(null);
+
+  // Effect to check for active sheet in localStorage when document changes
+  useEffect(() => {
+    if (document?.id) {
+      // Try to get active sheet from localStorage
+      const savedSheet = localStorage.getItem(`activeSheet-${document.id}`);
+      if (savedSheet) {
+        console.log(`[ChatInterface] Found active sheet for document ${document.id}: ${savedSheet}`);
+        setActiveSheet(savedSheet);
+      } else {
+        setActiveSheet(null);
+      }
+
+      // Add event listener for active sheet changes
+      const handleActiveSheetChange = (event: CustomEvent) => {
+        const { documentId, sheetName } = event.detail;
+        if (documentId === document.id) {
+          console.log(`[ChatInterface] Received active sheet change event: ${sheetName}`);
+          setActiveSheet(sheetName);
+        }
+      };
+
+      // Add the event listener
+      window.addEventListener('activeSheetChanged', handleActiveSheetChange as EventListener);
+
+      // Clean up the event listener when the component unmounts
+      return () => {
+        window.removeEventListener('activeSheetChanged', handleActiveSheetChange as EventListener);
+      };
+    }
+  }, [document?.id]);
 
   // Function to handle sending a message
   const handleSend = async () => {
@@ -69,7 +103,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
         body: JSON.stringify({ 
           message: userMessage.content, // Send the user's message content
           documentId: documentId,
-          currentDocument: document // Pass the full document object if available
+          currentDocument: document, // Pass the full document object if available
+          activeSheet: activeSheet // Include the active sheet information
         }),
       });
 
