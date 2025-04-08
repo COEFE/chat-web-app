@@ -136,51 +136,62 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
            const aiData = JSON.parse(rawText); 
         console.log('- Frontend: Parsed JSON data:', aiData);
 
-        // --- Simplified Condition Check ---
-        if (aiData && typeof aiData === 'object' && aiData.role === 'ai') {
-          // Assume if role is 'ai', it's the message object we want
-            const aiResponse: ChatMessage = {
-              id: aiData.id || Date.now().toString(),
-              role: 'ai',
-            // Ensure content exists, default to empty string if not (though backend log shows it should)
-            content: typeof aiData.content === 'string' ? aiData.content : '',
-              excelOperation: aiData.excelOperation || undefined // Check directly on aiData
-            };
-            
-            setMessages((prev) => [...prev, aiResponse]);
+         // --- NEW: Check for nested 'response' key --- 
+         let messageData = aiData; // Assume top-level by default
+         if (aiData && typeof aiData === 'object' && aiData.response && typeof aiData.response === 'object' && aiData.response.role) {
+           console.log('- Frontend: Found nested message data under \'response\' key. Using that.');
+           messageData = aiData.response; // Use the nested object
+         } else {
+           console.log('- Frontend: Using top-level parsed data.');
+         }
 
-            let refreshTriggered = false;
-            // Check for successful Excel operation
-            if (aiData.excelOperation && aiData.excelOperation.success) { 
-              console.log('[ChatInterface] Excel operation successful, triggering document refresh');
-              window.dispatchEvent(new Event('excel-document-updated'));
-            refreshTriggered = true;
-            }
+         // --- Simplified Condition Check (using messageData) ---
+         if (messageData && messageData.role === 'ai') {
+           // Assume if role is 'ai', it's the message object we want
+             const aiResponse: ChatMessage = {
+               id: messageData.id || Date.now().toString(),
+               role: 'ai',
+             // Ensure content exists, default to empty string if not (though backend log shows it should)
+             content: typeof messageData.content === 'string' ? messageData.content : '',
+               excelOperation: messageData.excelOperation || undefined // Check on messageData
+             };
+             
+             console.log('[ChatInterface] Successfully parsed AI response:', aiResponse);
+             setMessages((prev) => [...prev, aiResponse]);
 
-            // Handle marker removal (check content exists before calling includes)
-            if (aiResponse.content && aiResponse.content.includes('[EXCEL_DOCUMENT_UPDATED]')) {
-              if (!refreshTriggered) {
-                // Log if the marker was present but didn't trigger a refresh (should not happen often if backend is consistent)
-                console.log('[ChatInterface] Detected Excel update marker, but refresh already triggered by operation status.');
-              }
-              // Remove the marker from the displayed message
-              setMessages((prev) => prev.map(msg => 
-                msg.id === aiResponse.id 
-                  ? { ...msg, content: msg.content.replace('[EXCEL_DOCUMENT_UPDATED]', '').trim() } 
-                  : msg
-              ));
+             let refreshTriggered = false;
+             // Check for successful Excel operation
+             if (messageData.excelOperation && messageData.excelOperation.success) { 
+               console.log('[ChatInterface] Excel operation successful, triggering document refresh');
+               window.dispatchEvent(new Event('excel-document-updated'));
+             refreshTriggered = true;
+             }
+
+             // Handle marker removal (check content exists before calling includes)
+             if (aiResponse.content && aiResponse.content.includes('[EXCEL_DOCUMENT_UPDATED]')) {
+               if (!refreshTriggered) {
+                 // Log if the marker was present but didn't trigger a refresh (should not happen often if backend is consistent)
+                 console.log('[ChatInterface] Detected Excel update marker, but refresh already triggered by operation status.');
+               }
+               // Remove the marker from the displayed message
+               setMessages((prev) => prev.map(msg => 
+                 msg.id === aiResponse.id 
+                   ? { ...msg, content: msg.content.replace('[EXCEL_DOCUMENT_UPDATED]', '').trim() } 
+                   : msg
+               ));
+             }
+           } else {
+           // --- Logging if simplified condition fails ---
+            console.error('[ChatInterface] ERROR: Final messageData object missing or role !== "ai".', messageData);
+            console.error(`[ChatInterface] Check: typeof messageData = ${typeof messageData}`);
+            if (typeof messageData === 'object' && messageData !== null) {
+              console.error(`[ChatInterface] Check: messageData.role = ${messageData.role}, typeof = ${typeof messageData.role}`);
             }
-          } else {
-            // --- Logging if simplified condition fails ---
-             console.error('[ChatInterface] ERROR: AI response object missing or role !== "ai".', aiData);
-            console.error(`[ChatInterface] Check: typeof aiData = ${typeof aiData}`);
-            if (typeof aiData === 'object' && aiData !== null) {
-              console.error(`[ChatInterface] Check: aiData.role = ${aiData.role}, typeof = ${typeof aiData.role}`);
-            }
-            // --- Simplified fallback/error handling --- 
-            const errorMessage = aiData?.error 
-              ? `Error: ${aiData.error}` 
+              // --- Simplified fallback/error handling --- 
+            const errorMessage = messageData?.error 
+              ? `Error: ${messageData.error}` 
               : "Sorry, I received a response in an unexpected format.";
+            console.error("Unknown or invalid final messageData structure:", messageData);
             setMessages((prev) => [...prev, {
               id: Date.now().toString(), 
               role: 'ai', 
