@@ -108,44 +108,57 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
         }),
       });
 
-      console.log('Received response from /api/chat');
+      console.log('--- Frontend: Received response from /api/chat ---');
       console.log('- Status:', fetchResponse.status);
       console.log('- Status Text:', fetchResponse.statusText);
       console.log('- OK:', fetchResponse.ok);
       console.log('- Headers:', Object.fromEntries(fetchResponse.headers.entries()));
 
-        // Attempt to read as text first for debugging
+      // Check if response is OK before attempting to read body
+      if (!fetchResponse.ok) {
+        let errorText = `Error: ${fetchResponse.status} ${fetchResponse.statusText}`;
         try {
-          const rawText = await fetchResponse.text();
-          console.log('- Raw Response Text:', rawText);
+            const errorBody = await fetchResponse.text();
+            console.error("Frontend: Error response body:", errorBody);
+            errorText += ` - ${errorBody}`;
+        } catch (e) {
+             console.error("Frontend: Could not read error response body", e);
+        }
+        throw new Error(errorText); // Throw error to be caught by outer catch block
+      }
 
-          // Now try to parse the raw text as JSON
-          const aiData = JSON.parse(rawText); 
-          console.log('- Parsed JSON data:', aiData);
+      let rawText = ''; // Define rawText here to be accessible in catch block
+      try {
+        rawText = await fetchResponse.text();
+        console.log('- Frontend: Raw Response Text Before Parse:', JSON.stringify(rawText)); // Log raw text carefully
 
-          // Handle the response structure (assuming aiData is the ChatMessage itself)
-          if (aiData && typeof aiData === 'object' && aiData.role === 'ai' && typeof aiData.content === 'string') {
-            // Treat aiData directly as the AI response message
+        // --- Attempt to parse ---
+           const aiData = JSON.parse(rawText); 
+        console.log('- Frontend: Parsed JSON data:', aiData);
+
+        // --- Simplified Condition Check ---
+        if (aiData && typeof aiData === 'object' && aiData.role === 'ai') {
+          // Assume if role is 'ai', it's the message object we want
             const aiResponse: ChatMessage = {
               id: aiData.id || Date.now().toString(),
               role: 'ai',
-              content: aiData.content,
+            // Ensure content exists, default to empty string if not (though backend log shows it should)
+            content: typeof aiData.content === 'string' ? aiData.content : '',
               excelOperation: aiData.excelOperation || undefined // Check directly on aiData
             };
             
             setMessages((prev) => [...prev, aiResponse]);
-            
+
             let refreshTriggered = false;
-            // If there was an Excel operation and it was successful, trigger a document refresh ONCE
+            // Check for successful Excel operation
             if (aiData.excelOperation && aiData.excelOperation.success) { 
               console.log('[ChatInterface] Excel operation successful, triggering document refresh');
               window.dispatchEvent(new Event('excel-document-updated'));
-              refreshTriggered = true; // Mark that we triggered the refresh
+            refreshTriggered = true;
             }
-            
-            // Always check for the special marker in the response content and remove it if present
-            // We no longer trigger a refresh based on the marker itself to avoid duplicates
-            if (aiResponse.content && aiResponse.content.includes('[EXCEL_DOCUMENT_UPDATED]')) { 
+
+            // Handle marker removal (check content exists before calling includes)
+            if (aiResponse.content && aiResponse.content.includes('[EXCEL_DOCUMENT_UPDATED]')) {
               if (!refreshTriggered) {
                 // Log if the marker was present but didn't trigger a refresh (should not happen often if backend is consistent)
                 console.log('[ChatInterface] Detected Excel update marker, but refresh already triggered by operation status.');
@@ -158,12 +171,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
               ));
             }
           } else {
-            // --- Add detailed logging inside the fallback block --- 
-            console.error('[ChatInterface] ERROR: AI response did not match expected structure.', aiData);
+            // --- Logging if simplified condition fails ---
+             console.error('[ChatInterface] ERROR: AI response object missing or role !== "ai".', aiData);
             console.error(`[ChatInterface] Check: typeof aiData = ${typeof aiData}`);
             if (typeof aiData === 'object' && aiData !== null) {
               console.error(`[ChatInterface] Check: aiData.role = ${aiData.role}, typeof = ${typeof aiData.role}`);
-              console.error(`[ChatInterface] Check: aiData.content = ${aiData.content ? aiData.content.substring(0, 50) + '...' : 'undefined'}, typeof = ${typeof aiData.content}`);
             }
             // --- Simplified fallback/error handling --- 
             const errorMessage = aiData?.error 
@@ -176,26 +188,27 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
             }]);
           }
       } catch (parseError) {
-        console.error('Error parsing response JSON:', parseError);
-        setMessages((prev) => [
-          ...prev, 
-          {
-            id: Date.now().toString(), 
-            role: 'ai', 
-            content: 'Sorry, I could not process the response.',
-          },
-        ]);
+         console.error('Frontend: Error parsing response JSON:', parseError);
+         console.error('Frontend: Raw text that failed parse:', rawText); // Log raw text on parse failure
+          setMessages((prev) => [
+            ...prev, 
+            {
+              id: Date.now().toString(), 
+              role: 'ai', 
+              content: 'Sorry, I could not process the response.',
+            },
+          ]);
       }
     } catch (error) {
-      console.error('Error sending message:', error);
-      setMessages((prev) => [
-        ...prev, 
-        {
-          id: Date.now().toString(), 
-          role: 'ai', 
-          content: `Sorry, I couldn't get a response. ${error instanceof Error ? error.message : 'Unknown error'}`
-        },
-      ]);
+       console.error('Frontend: Error sending message or handling response:', error);
+       setMessages((prev) => [
+         ...prev, 
+         {
+           id: Date.now().toString(), 
+           role: 'ai', 
+           content: `Sorry, I couldn't get a response. ${error instanceof Error ? error.message : 'Unknown error'}`
+         },
+       ]);
     } finally {
       setIsLoading(false);
     }
