@@ -129,6 +129,24 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             });
             
             console.log('[fetchAndProcessContent] Setting workbook data:', sheets);
+            
+            // --- NEW: Log specific cell value after refresh fetch --- 
+            if (docToLoad && docToLoad.contentType?.includes('spreadsheet')) {
+              try {
+                const firstSheet = sheets[0];
+                if (firstSheet) {
+                  // Attempt to read A3 specifically (adjust if testing other cells)
+                  const cellValueA3 = firstSheet.data?.[2]?.[0]; // Assuming A3 is row index 2, col index 0
+                  const cellValueA2 = firstSheet.data?.[1]?.[0]; // Log A2 as well for comparison
+                  console.log(`[fetchAndProcessContent] Parsed Cell A2 value: ${JSON.stringify(cellValueA2)}`);
+                  console.log(`[fetchAndProcessContent] Parsed Cell A3 value: ${JSON.stringify(cellValueA3)}`);
+                }
+              } catch (e) {
+                console.warn('[fetchAndProcessContent] Could not read specific cell for logging', e);
+              }
+            }
+            // --- END NEW LOGGING --- 
+            
             setWorkbookData(sheets);
             
             // Try to load the previously active sheet from localStorage
