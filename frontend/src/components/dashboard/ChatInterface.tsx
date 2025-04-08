@@ -123,19 +123,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
           const aiData = JSON.parse(rawText); 
           console.log('- Parsed JSON data:', aiData);
 
-          // Handle the response structure
-          if (aiData && aiData.response) {
-            const aiResponse: ChatMessage = { 
-              id: aiData.response.id || Date.now().toString(), 
-              role: 'ai', 
-              content: aiData.response.content,
-              excelOperation: aiData.response.excelOperation || undefined
+          // Handle the response structure (assuming aiData is the ChatMessage itself)
+          if (aiData && typeof aiData === 'object' && aiData.role === 'ai' && typeof aiData.content === 'string') {
+            // Treat aiData directly as the AI response message
+            const aiResponse: ChatMessage = {
+              id: aiData.id || Date.now().toString(),
+              role: 'ai',
+              content: aiData.content,
+              excelOperation: aiData.excelOperation || undefined // Check directly on aiData
             };
+            
             setMessages((prev) => [...prev, aiResponse]);
             
             let refreshTriggered = false;
             // If there was an Excel operation and it was successful, trigger a document refresh ONCE
-            if (aiResponse.excelOperation && aiResponse.excelOperation.success) {
+            if (aiData.excelOperation && aiData.excelOperation.success) { 
               console.log('[ChatInterface] Excel operation successful, triggering document refresh');
               window.dispatchEvent(new Event('excel-document-updated'));
               refreshTriggered = true; // Mark that we triggered the refresh
@@ -143,35 +145,29 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
             
             // Always check for the special marker in the response content and remove it if present
             // We no longer trigger a refresh based on the marker itself to avoid duplicates
-            if (aiResponse.content.includes('[EXCEL_DOCUMENT_UPDATED]')) {
+            if (aiResponse.content && aiResponse.content.includes('[EXCEL_DOCUMENT_UPDATED]')) { 
               if (!refreshTriggered) {
                 // Log if the marker was present but didn't trigger a refresh (should not happen often if backend is consistent)
                 console.log('[ChatInterface] Detected Excel update marker, but refresh already triggered by operation status.');
               }
               // Remove the marker from the displayed message
-              aiResponse.content = aiResponse.content.replace('[EXCEL_DOCUMENT_UPDATED]', '').trim();
+              setMessages((prev) => prev.map(msg => 
+                msg.id === aiResponse.id 
+                  ? { ...msg, content: msg.content.replace('[EXCEL_DOCUMENT_UPDATED]', '').trim() } 
+                  : msg
+              ));
             }
-          } else if (aiData && typeof aiData === 'object') {
-            // Try to extract content from different possible structures
-            let content = '';
-            
-            if (typeof aiData.content === 'string') {
-              content = aiData.content;
-            } else if (aiData.error) {
-              content = `Error: ${aiData.error}`;
-            } else {
-              console.error("Unknown response structure:", aiData);
-              content = "Sorry, I received a response in an unexpected format.";
-            }
-            
+          } else {
+            // --- Simplified fallback/error handling --- 
+            const errorMessage = aiData?.error 
+              ? `Error: ${aiData.error}` 
+              : "Sorry, I received a response in an unexpected format.";
+            console.error("Unknown or invalid AI response structure:", aiData);
             setMessages((prev) => [...prev, {
               id: Date.now().toString(), 
               role: 'ai', 
-              content: content
+              content: errorMessage
             }]);
-          } else {
-            console.error("Invalid AI response structure after parsing:", aiData);
-            setMessages((prev) => [...prev, {id: Date.now().toString(), role: 'ai', content: "Sorry, I received an invalid response structure."}]);
           }
       } catch (parseError) {
         console.error('Error parsing response JSON:', parseError);
