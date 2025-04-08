@@ -7,6 +7,7 @@ export interface MyDocumentData {
   name: string;
   storagePath: string;
   uploadedAt: Timestamp; // Use Firestore Timestamp
+  updatedAt: Timestamp; // Add the missing updatedAt field
   contentType: string;
   status: string; // e.g., 'uploading', 'complete', 'error'
   downloadURL?: string;

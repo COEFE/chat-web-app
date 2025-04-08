@@ -355,20 +355,33 @@ export async function editExcelFile(db: admin.firestore.Firestore, storage: admi
                 expires: '03-01-2500' // Far future date
             });
             
-            await docRef.set({
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                // Keep original path and name if they exist, otherwise use canonical
-                storagePath: originalStoragePath || canonicalStoragePath, 
-                name: originalName || canonicalFilename, 
-                downloadURL: downloadURL,
-                size: updatedBuffer.length,
-                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                // Keep the original userId to maintain ownership
-                userId: userId
-            }, { merge: true }); // Using merge:true preserves fields we don't explicitly set
+            // --- START: Wrap final Firestore update in try/catch for detailed logging ---
+            try {
+                console.log(`[editExcelFile] Attempting final Firestore set for doc: ${docRef.id}`);
+                await docRef.set({
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    // Keep original path and name if they exist, otherwise use canonical
+                    storagePath: originalStoragePath || canonicalStoragePath, 
+                    name: originalName || canonicalFilename, 
+                    downloadURL: downloadURL,
+                    size: updatedBuffer.length,
+                    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    // Keep the original userId to maintain ownership
+                    userId: userId
+                }, { merge: true }); // Using merge:true preserves fields we don't explicitly set
+                console.log(`[editExcelFile] Successfully completed Firestore set for doc: ${docRef.id}`);
+            } catch(firestoreError: any) {
+                console.error(`[editExcelFile] CRITICAL ERROR during final Firestore set for doc ${docRef.id}:`, firestoreError);
+                // Return failure immediately if the final metadata update fails
+                return { 
+                    success: false, 
+                    message: `Error updating document metadata after file save: ${firestoreError.message}`,
+                    documentId: docRef.id
+                };
+            }
+            // --- END: Wrap final Firestore update ---
             
-            console.log(`[editExcelFile] Successfully updated Firestore document: ${docRef.id}, preserving original path/name.`);
-            
+            console.log(`[editExcelFile] PREPARING TO RETURN SUCCESS for doc: ${docRef.id}`);
             return { success: true, message: "Excel file edited successfully", documentId: docRef.id };
         } catch (error: any) {
             console.error(`[editExcelFile] Error editing Excel file for document ${docRef.id}:`, error);
