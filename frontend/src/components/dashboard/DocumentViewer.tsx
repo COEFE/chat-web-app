@@ -55,7 +55,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   const { user } = useAuth(); // Get user from auth context
 
   // Main function to fetch and process document content
-  const fetchAndProcessContent = useCallback(async (docToLoad: MyDocumentData) => {
+  const fetchAndProcessContent = useCallback(async (docToLoad: MyDocumentData, currentRefreshKey: number) => {
     console.log('[fetchAndProcessContent] Starting to fetch and process content for document:', docToLoad);
     try {
       // Use the storage path directly from the document data
@@ -67,7 +67,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       // Use our proxy API instead of direct Firebase Storage URL
       // Include userId to help with file lookup if needed
       const userId = docToLoad.userId || '';
-      const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(storagePath)}&userId=${encodeURIComponent(userId)}`;
+      const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(storagePath)}&userId=${encodeURIComponent(userId)}&v=${currentRefreshKey}`;
       console.log('[fetchAndProcessContent] Using proxy URL:', proxyUrl);
       console.log('[fetchAndProcessContent] Document metadata:', { 
         name: docToLoad.name, 
@@ -231,7 +231,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       setPosition({ x: 0, y: 0 }); // Reset position
 
       try {
-        await fetchAndProcessContent(document);
+        await fetchAndProcessContent(document, 0);
       } finally {
         console.log('[DocumentViewer] Finished loading initial content.');
         setIsLoading(false);
@@ -277,7 +277,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       console.log('[handleRefresh] Latest document data:', latestDocumentData);
 
       // 3. Re-fetch content using the latest metadata (potentially updated storagePath)
-      await fetchAndProcessContent(latestDocumentData as MyDocumentData); // Use the reusable fetch/process logic
+      await fetchAndProcessContent(latestDocumentData, refreshKey); // Use the reusable fetch/process logic
 
       // Increment refresh key to force re-render
       setRefreshKey(prevKey => prevKey + 1);
@@ -302,7 +302,8 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
     setIsRefreshing,
     setRefreshKey,
     clientDb,
-    workbookData // Add workbookData as dependency to log its current state
+    workbookData, // Add workbookData as dependency to log its current state
+    refreshKey // Add refreshKey as dependency
   ]);
 
   // Effect to set active sheet when workbookData changes
@@ -441,7 +442,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
 
       {/* PDF Viewer */} 
       {!isLoading && !error && isPdf && document?.storagePath && (
-        <PDFViewer documentUrl={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}`} />
+        <PDFViewer documentUrl={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}&v=${refreshKey}`} />
       )}
 
       {/* Text Viewer */}
