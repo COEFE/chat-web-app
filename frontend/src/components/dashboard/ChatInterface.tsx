@@ -158,11 +158,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
               ));
             }
           } else {
+            // --- Add detailed logging inside the fallback block --- 
+            console.error('[ChatInterface] ERROR: AI response did not match expected structure.', aiData);
+            console.error(`[ChatInterface] Check: typeof aiData = ${typeof aiData}`);
+            if (typeof aiData === 'object' && aiData !== null) {
+              console.error(`[ChatInterface] Check: aiData.role = ${aiData.role}, typeof = ${typeof aiData.role}`);
+              console.error(`[ChatInterface] Check: aiData.content = ${aiData.content ? aiData.content.substring(0, 50) + '...' : 'undefined'}, typeof = ${typeof aiData.content}`);
+            }
             // --- Simplified fallback/error handling --- 
             const errorMessage = aiData?.error 
               ? `Error: ${aiData.error}` 
               : "Sorry, I received a response in an unexpected format.";
-            console.error("Unknown or invalid AI response structure:", aiData);
             setMessages((prev) => [...prev, {
               id: Date.now().toString(), 
               role: 'ai', 
