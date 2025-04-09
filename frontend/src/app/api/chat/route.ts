@@ -380,8 +380,10 @@ export async function POST(req: NextRequest) {
         } else if (contentType === 'application/pdf') {
           console.log(`- Fetching PDF content for ${docName}`);
           const [fileBuffer] = await fileRef.download();
-          const { text } = await extractText(fileBuffer);
-          docContent = text.substring(0, 5000); // Limit context size
+          const { text } = await extractText(fileBuffer); // text is string[]
+          // Join the array of page strings into a single string
+          const joinedText = Array.isArray(text) ? text.join('\n\n') : ''; // Use double newline separator
+          docContent = joinedText.substring(0, 5000); // Limit context size
            console.log(`- Extracted text from PDF ${docName}`);
         } else if (contentType.startsWith('text/')) {
           console.log(`- Fetching Text content for ${docName}`);
