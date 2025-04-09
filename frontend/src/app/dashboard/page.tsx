@@ -44,9 +44,18 @@ interface DocumentTableProps {
   error: string | null;
   onToggleSelection: (doc: MyDocumentData) => void;
   onDeleteDocument: (docId: string) => Promise<void>;
+  onSetPrimaryDocument: (doc: MyDocumentData) => void;
 }
 
-function DocumentTable({ documents, selectedDocumentIds, isLoading, error, onToggleSelection, onDeleteDocument }: DocumentTableProps) {
+function DocumentTable({
+  documents,
+  selectedDocumentIds,
+  isLoading,
+  error,
+  onToggleSelection,
+  onDeleteDocument,
+  onSetPrimaryDocument
+}: DocumentTableProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const { toast } = useToast();
@@ -145,63 +154,73 @@ function DocumentTable({ documents, selectedDocumentIds, isLoading, error, onTog
                   <TableCell>{formatDate(doc.uploadedAt)}</TableCell>
                   <TableCell>{doc.status || 'N/A'}</TableCell>
                   <TableCell className="text-right">
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="text-red-600 hover:text-red-700 ml-2"
-                          disabled={isDeleting && deletingId === doc.id}
-                        >
-                          {isDeleting && deletingId === doc.id ? (
-                            <>
-                              <div className="h-3 w-3 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-                              Deleting...
-                            </>
-                          ) : (
-                            'Delete'
-                          )}
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This will permanently delete the document "{doc.name}". This action cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
-                              e.preventDefault();
-                              setDeletingId(doc.id);
-                              setIsDeleting(true);
-                              try {
-                                await onDeleteDocument(doc.id);
-                                toast({
-                                  title: "Document deleted",
-                                  description: `${doc.name} has been successfully deleted.`,
-                                });
-                              } catch (error) {
-                                console.error('Error deleting document:', error);
-                                toast({
-                                  variant: "destructive",
-                                  title: "Error",
-                                  description: `Failed to delete document: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                                });
-                              } finally {
-                                setIsDeleting(false);
-                                setDeletingId(null);
-                              }
-                            }}
-                            className="bg-red-600 hover:bg-red-700"
+                    <div className="flex items-center justify-end space-x-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => onSetPrimaryDocument(doc)}
+                        title={`View ${doc.name}`}
+                      >
+                        <Eye className="h-4 w-4 mr-1" /> View
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="text-red-600 hover:text-red-700 ml-2"
+                            disabled={isDeleting && deletingId === doc.id}
                           >
-                            Delete
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                            {isDeleting && deletingId === doc.id ? (
+                              <>
+                                <div className="h-3 w-3 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                                Deleting...
+                              </>
+                            ) : (
+                              'Delete'
+                            )}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete the document "{doc.name}". This action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
+                                e.preventDefault();
+                                setDeletingId(doc.id);
+                                setIsDeleting(true);
+                                try {
+                                  await onDeleteDocument(doc.id);
+                                  toast({
+                                    title: "Document deleted",
+                                    description: `${doc.name} has been successfully deleted.`,
+                                  });
+                                } catch (error) {
+                                  console.error('Error deleting document:', error);
+                                  toast({
+                                    variant: "destructive",
+                                    title: "Error",
+                                    description: `Failed to delete document: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                                  });
+                                } finally {
+                                  setIsDeleting(false);
+                                  setDeletingId(null);
+                                }
+                              }}
+                              className="bg-red-600 hover:bg-red-700"
+                            >
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </TableCell>
                 </TableRow>
               );
@@ -604,6 +623,7 @@ export default function DashboardPage() {
                               error={errorDocs}
                               onToggleSelection={handleToggleSelection}
                               onDeleteDocument={handleDeleteDocument}
+                              onSetPrimaryDocument={setPrimaryDocument}
                             />
                             {documents.length === 0 && (
                               <p className="mt-4 text-center text-muted-foreground">No documents uploaded yet. Upload a file to start chatting.</p>
