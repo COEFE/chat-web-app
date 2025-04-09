@@ -24,6 +24,7 @@ import DocumentViewer from '@/components/dashboard/DocumentViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
 import { FileUpload } from '@/components/dashboard/FileUpload';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox";
 
 // Import Firestore functions and db instance
 import { db } from '@/lib/firebaseConfig';
@@ -38,13 +39,14 @@ import { MyDocumentData } from '@/types';
 
 interface DocumentTableProps {
   documents: MyDocumentData[];
+  selectedDocumentIds: string[];
   isLoading: boolean;
   error: string | null;
-  onSelectDocument: (doc: MyDocumentData | null) => void;
+  onToggleSelection: (doc: MyDocumentData) => void;
   onDeleteDocument: (docId: string) => Promise<void>;
 }
 
-function DocumentTable({ documents, isLoading, error, onSelectDocument, onDeleteDocument }: DocumentTableProps) {
+function DocumentTable({ documents, selectedDocumentIds, isLoading, error, onToggleSelection, onDeleteDocument }: DocumentTableProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const { toast } = useToast();
@@ -128,14 +130,21 @@ function DocumentTable({ documents, isLoading, error, onSelectDocument, onDelete
           ) : (
             displayDocuments.map((doc) => {
               return (
-                <TableRow key={doc.id}>
+                <TableRow 
+                  key={doc.id}
+                  data-state={selectedDocumentIds.includes(doc.id) ? 'selected' : ''}
+                >
+                  <TableCell>
+                    <Checkbox
+                      checked={selectedDocumentIds.includes(doc.id)}
+                      onCheckedChange={() => onToggleSelection(doc)}
+                      aria-label={`Select document ${doc.name}`}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">{doc.name}</TableCell>
                   <TableCell>{formatDate(doc.uploadedAt)}</TableCell>
                   <TableCell>{doc.status || 'N/A'}</TableCell>
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="sm" onClick={() => onSelectDocument(doc)}>
-                      View
-                    </Button>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button 
@@ -220,10 +229,11 @@ export default function DashboardPage() {
   const [documents, setDocuments] = useState<MyDocumentData[]>([]);
   const [isLoadingDocs, setIsLoadingDocs] = useState(true);
   const [errorDocs, setErrorDocs] = useState<string | null>(null);
-  const [selectedDocument, setSelectedDocument] = useState<MyDocumentData | null>(null);
+  const [selectedDocuments, setSelectedDocuments] = useState<MyDocumentData[]>([]);
+  const [primaryDocument, setPrimaryDocument] = useState<MyDocumentData | null>(null);
+
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const currentRequestIdRef = useRef<string | null>(null);
   const { toast } = useToast();
 
@@ -397,9 +407,11 @@ export default function DashboardPage() {
       setDocuments(prevDocs => prevDocs.filter(doc => doc.id !== docId));
       
       // If the deleted document was selected, clear the selection
-      if (selectedDocumentId === docId) {
-        setSelectedDocument(null);
-        setSelectedDocumentId(null);
+      if (selectedDocuments.find(doc => doc.id === docId)) {
+        setSelectedDocuments(prevDocs => prevDocs.filter(doc => doc.id !== docId));
+        if (primaryDocument && primaryDocument.id === docId) {
+          setPrimaryDocument(null);
+        }
       }
       
       return await response.json();
@@ -407,7 +419,7 @@ export default function DashboardPage() {
       console.error('Error in handleDeleteDocument:', error);
       throw error;
     }
-  }, [user, selectedDocumentId]);
+  }, [user, selectedDocuments, primaryDocument]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -438,21 +450,23 @@ export default function DashboardPage() {
     };
   }, [fetchDocuments]); // Depend on fetchDocuments to ensure the latest version is used
 
-  // Handler for the existing DocumentList component (if used)
-  const handleSelectDocument = (doc: MyDocumentData | null) => {
-    console.log("Selected Document from List:", doc);
-    setSelectedDocument(doc); // Keep this for DocumentViewer perhaps
-    setSelectedDocumentId(doc?.id ?? null);
-    // setView('chat'); // Switch view to chat interface
-  };
+  // New handler for toggling document selection
+  const handleToggleSelection = (doc: MyDocumentData) => {
+    setSelectedDocuments(prevSelected => {
+      const isSelected = prevSelected.some(d => d.id === doc.id);
+      let newSelected;
+      if (isSelected) {
+        newSelected = prevSelected.filter(d => d.id !== doc.id);
+      } else {
+        newSelected = [...prevSelected, doc];
+      }
 
-  // New handler specifically for the Shadcn Select component's onValueChange
-  const handleDocumentSelectChange = (value: string) => {
-    console.log("Selected Document ID from Select:", value);
-    setSelectedDocumentId(value);
-    // Optionally, find the full document object if needed elsewhere
-    const fullDoc = documents.find(d => d.id === value);
-    setSelectedDocument(fullDoc || null);
+      // Update primary document: last selected, or null if empty
+      setPrimaryDocument(newSelected.length > 0 ? newSelected[newSelected.length - 1] : null);
+      console.log("Selected Documents:", newSelected.map(d => d.name));
+      console.log("Primary Document:", newSelected.length > 0 ? newSelected[newSelected.length - 1].name : 'None');
+      return newSelected;
+    });
   };
 
   if (authLoading) {
@@ -469,7 +483,7 @@ export default function DashboardPage() {
         <h1 className="text-xl font-semibold whitespace-nowrap">My Documents</h1>
         {documents.length > 0 && (
           <div className="ml-4 w-full max-w-xs"> 
-            <Select onValueChange={handleDocumentSelectChange} value={selectedDocumentId ?? undefined}>
+            <Select onValueChange={(value) => console.log(value)} value={primaryDocument?.id ?? undefined}>
               <SelectTrigger>
                 <SelectValue placeholder="Select a document..." />
               </SelectTrigger>
@@ -501,7 +515,7 @@ export default function DashboardPage() {
           return (
             <div className="h-full flex flex-col">
               {/* View mode controls - only show when a document is selected */}
-              {selectedDocument && (
+              {primaryDocument && (
                 <div className="flex justify-end mb-2 gap-2">
                   <Button 
                     variant="outline" 
@@ -527,11 +541,11 @@ export default function DashboardPage() {
                 {viewMode === 'full' ? (
                   // Full screen document view
                   <div className="h-full">
-                    {selectedDocument ? (
+                    {primaryDocument ? (
                       <div className="flex h-full flex-col p-6 overflow-auto">
                         <div className="flex h-full flex-col">
                           <div className="flex-1 overflow-hidden">
-                            {selectedDocument && <DocumentViewer document={selectedDocument} />}
+                            {primaryDocument && <DocumentViewer document={primaryDocument} />}
                           </div>
                         </div>
                       </div>
@@ -545,8 +559,8 @@ export default function DashboardPage() {
                   // Chat only view
                   <div className="h-full">
                     <div className="flex h-full flex-col p-6">
-                      {selectedDocumentId ? (
-                        <ChatInterface documentId={selectedDocumentId} document={selectedDocument || undefined} />
+                      {primaryDocument ? (
+                        <ChatInterface documentId={primaryDocument.id} document={primaryDocument} />
                       ) : (
                         <div className="flex h-full items-center justify-center text-muted-foreground">
                           Select a document to start chatting.
@@ -560,10 +574,10 @@ export default function DashboardPage() {
                     {/* Document panel - fixed 70% width */}
                     <div className="w-[70%] border-r">
                       <div className="flex h-full flex-col p-6 overflow-auto">
-                        {selectedDocument ? (
+                        {primaryDocument ? (
                           <div className="flex h-full flex-col">
                             <div className="flex-1 overflow-hidden">
-                              {selectedDocument && <DocumentViewer document={selectedDocument} />}
+                              {primaryDocument && <DocumentViewer document={primaryDocument} />}
                             </div>
                           </div>
                         ) : (
@@ -581,9 +595,10 @@ export default function DashboardPage() {
                             </Card>
                             <DocumentTable
                               documents={documents}
+                              selectedDocumentIds={selectedDocuments.map(d => d.id)}
                               isLoading={isLoadingDocs}
                               error={errorDocs}
-                              onSelectDocument={(doc: MyDocumentData | null) => handleSelectDocument(doc)}
+                              onToggleSelection={handleToggleSelection}
                               onDeleteDocument={handleDeleteDocument}
                             />
                             {documents.length === 0 && (
@@ -597,8 +612,8 @@ export default function DashboardPage() {
                     {/* Chat panel - fixed 30% width */}
                     <div className="w-[30%]">
                       <div className="flex h-full flex-col p-6">
-                        {selectedDocumentId ? (
-                          <ChatInterface documentId={selectedDocumentId} document={selectedDocument || undefined} />
+                        {primaryDocument ? (
+                          <ChatInterface documentId={primaryDocument.id} document={primaryDocument} />
                         ) : (
                           <div className="flex h-full items-center justify-center text-muted-foreground">
                             Select a document to start chatting.
