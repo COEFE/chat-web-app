@@ -143,14 +143,15 @@ function DocumentTable({
                   key={doc.id}
                   data-state={selectedDocumentIds.includes(doc.id) ? 'selected' : ''}
                 >
-                  {/* Add onClick to the TableCell and stop propagation */}
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <Checkbox
-                      id={`checkbox-${doc.id}`}
-                      checked={selectedDocumentIds.includes(doc.id)}
-                      onCheckedChange={() => onToggleSelection(doc)} // Keep this for state change
-                      aria-label={`Select document ${doc.name}`}
-                    />
+                  <TableCell>
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        id={`checkbox-${doc.id}`}
+                        checked={selectedDocumentIds.includes(doc.id)}
+                        onCheckedChange={() => onToggleSelection(doc)} // Keep this for state change
+                        aria-label={`Select document ${doc.name}`}
+                      />
+                    </div>
                   </TableCell>
                   <TableCell className="font-medium">{doc.name}</TableCell>
                   <TableCell>{formatDate(doc.uploadedAt)}</TableCell>
