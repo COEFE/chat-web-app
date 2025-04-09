@@ -145,6 +145,7 @@ function DocumentTable({
                 >
                   <TableCell>
                     <Checkbox
+                      id={`checkbox-${doc.id}`} // Add unique ID
                       checked={selectedDocumentIds.includes(doc.id)}
                       onCheckedChange={() => onToggleSelection(doc)}
                       aria-label={`Select document ${doc.name}`}
