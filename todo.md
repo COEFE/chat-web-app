@@ -46,11 +46,11 @@
     - [x] Receive user query and document ID (`/api/chat` created).
     - [x] Verify the admin's Firebase auth token.
     - [x] Retrieve document text or summaries from Firestore/Storage.
-    - [ ] Forward the query with document context to the Anthropic Claude API.
-    - [ ] Return the AI response to the frontend.
-- [ ] **Document Metadata & Version Management**
-  - Create API endpoints for updating document metadata (e.g., after file uploads or edits).
-  - Implement versioning logic: record each new version in Firestore and update Firebase Storage paths.
+    - [x] Forward the query with document context to the Anthropic Claude API.
+    - [x] Return the AI response to the frontend.
+- [x] **Document Metadata & Version Management**
+  - [x] Create API endpoints for updating document metadata (e.g., after file uploads or edits).
+  - [ ] Implement versioning logic: record each new version in Firestore and update Firebase Storage paths. (Partially done: Fixed update logic to prevent duplicates, full history TBD)
 - [ ] **Firebase Cloud Functions (if needed)**
   - Optionally, develop Cloud Functions for background tasks (e.g., on file upload triggers to extract text or generate previews).
 
@@ -73,8 +73,8 @@
   - [x] Implement API calls from the backend (Next.js API routes) to the Anthropic Claude API.
 - [ ] **Multi-Document Context Handling**
   - Create logic to assemble multiple document texts into a single API request.
-- [ ] **Structured Response Parsing**
-  - Develop parsers to handle structured edit responses (e.g., JSON diff) returned by Claude.
+- [x] **Structured Response Parsing**
+  - [x] Develop parsers to handle structured edit responses (e.g., JSON diff) returned by Claude.
   
 ## Authentication & Security
 - [x] **Firebase Authentication**
@@ -103,10 +103,10 @@
 
 ## Testing & QA
 - [ ] **Unit & Integration Tests**
-  - [ ] Write tests for API endpoints, especially for authentication and AI query handling.
-  - Test document upload and metadata storage.
+  - [x] Write tests for API endpoints, especially for authentication and AI query handling.
+  - [x] Test document upload and metadata storage (Tested metadata update for edits).
 - [ ] **End-to-End Testing**
-  - [ ] Simulate a full workflow: upload document, view in split-pane, interact with AI chat, and apply an edit.
+  - [ ] Simulate a full workflow: upload document, view in split-pane, interact with AI chat, and apply an edit. (Tested Excel edit flow end-to-end)
 - [ ] **Security Testing**
   - Verify authentication and authorization for all protected routes.
   - Test Firestore and Storage security rules.
@@ -134,7 +134,7 @@
 - [x] Integrate Anthropic API for generating chat responses.
 - [x] Connect frontend chat interface to the API route.
 - [x] Resolve Firebase Admin SDK initialization issues in Vercel deployment.
-- [x] Ensure chat functionality works with uploaded PDFs.
+- [x] Ensure chat functionality works with uploaded PDFs (and Excel edits).
 - [ ] Implement document selection/management UI.
 - [ ] Add context awareness (remembering previous messages in a chat session).
 - [ ] Implement UI for displaying chat history.
