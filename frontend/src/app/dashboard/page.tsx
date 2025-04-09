@@ -483,10 +483,7 @@ export default function DashboardPage() {
         newSelected = [...prevSelected, doc];
       }
 
-      // Update primary document: last selected, or null if empty
-      setPrimaryDocument(newSelected.length > 0 ? newSelected[newSelected.length - 1] : null);
       console.log("Selected Documents:", newSelected.map(d => d.name));
-      console.log("Primary Document:", newSelected.length > 0 ? newSelected[newSelected.length - 1].name : 'None');
       return newSelected;
     });
   };
