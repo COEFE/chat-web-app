@@ -29,5 +29,15 @@
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [],
+  "collectionGroupIndexes": [
+    {
+      "collectionGroup": "folders",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "parentFolderId", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    }
+  ]
 }
