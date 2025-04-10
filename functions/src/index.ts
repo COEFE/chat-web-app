@@ -13,8 +13,9 @@ import {getFirestore, Timestamp, FieldValue} from "firebase-admin/firestore";
 import * as admin from "firebase-admin";
 import {initializeApp} from "firebase-admin/app";
 import {getStorage} from "firebase-admin/storage";
-import * as logger from "firebase-functions/logger"; // Import logger
+import * as logger from "firebase-functions/logger"; // Correct logger import path
 import * as path from "path"; // Import path module
+import {HttpsError, onCall, CallableRequest} from "firebase-functions/v2/https"; // Corrected import to v2
 
 // Start writing functions
 // https://firebase.google.com/docs/functions
@@ -29,7 +30,7 @@ if (!admin.apps.length) {
 logger.info("Firebase Admin SDK initialized with admin privileges");
 
 // TODO: Get these from environment variables?
-const firestore = getFirestore();
+const db = getFirestore(); // Use db instead of firestore
 
 // This function triggers when a new file is uploaded to Firebase Storage.
 // It creates a corresponding entry in Firestore.
@@ -131,7 +132,7 @@ export const processDocumentUpload = onObjectFinalized(
       logger.info(`Writing to Firestore path: ${firestorePath}`);
 
       // 1. Generate Firestore Document ID first
-      const docRef = firestore
+      const docRef = db
         .collection("users")
         .doc(userId)
         .collection("documents")
@@ -232,3 +233,133 @@ export const processDocumentUpload = onObjectFinalized(
     }
   }
 );
+
+// ==============================================
+// NEW: Folder Management Functions
+// ==============================================
+
+/**
+ * Creates a new folder for the authenticated user.
+ */
+export const createFolder = onCall(async (request: CallableRequest<any>) => {
+  logger.info("createFolder called with data:", request.data);
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "The function must be called while authenticated."
+    );
+  }
+
+  const userId = request.auth.uid;
+  const data = request.data; // Extract data from request
+  // Type check input data properties
+  const folderName: string | undefined = data.name?.trim();
+  const parentFolderId: string | null = data.parentFolderId === undefined ? null : data.parentFolderId;
+
+  if (!folderName) {
+    throw new HttpsError(
+      "invalid-argument",
+      'The function must be called with a "name" argument.'
+    );
+  }
+
+  // Basic validation for parentFolderId if provided (optional: check if it exists)
+  if (parentFolderId !== null && typeof parentFolderId !== 'string') {
+    throw new HttpsError(
+      "invalid-argument",
+      'The "parentFolderId" must be a string or null.'
+    );
+  }
+
+  try {
+    const newFolderRef = db.collection('users').doc(userId).collection('folders').doc(); // Use db
+    const timestamp = FieldValue.serverTimestamp();
+
+    await newFolderRef.set({
+      name: folderName,
+      parentFolderId: parentFolderId, // Store null for root folders
+      userId: userId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+
+    logger.info(`Folder '${folderName}' created successfully for user ${userId} with ID ${newFolderRef.id}`);
+    return { success: true, folderId: newFolderRef.id };
+  } catch (error) {
+    logger.error(`Error creating folder for user ${userId}:`, error);
+    throw new HttpsError(
+      "internal",
+      "Failed to create folder.",
+      error instanceof Error ? error.message : undefined
+    );
+  }
+});
+
+/**
+ * Moves a document to a different folder (or root) for the authenticated user.
+ */
+export const moveDocument = onCall(async (request: CallableRequest<any>) => {
+  logger.info("moveDocument called with data:", request.data);
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "The function must be called while authenticated."
+    );
+  }
+
+  const userId = request.auth.uid;
+  const data = request.data; // Extract data from request
+  // Type check input data properties
+  const documentId: string | undefined = data.documentId;
+  // Allow targetFolderId to be explicitly null to move to root
+  const targetFolderId: string | null = data.targetFolderId === undefined ? null : data.targetFolderId;
+
+  if (!documentId || typeof documentId !== 'string') {
+    throw new HttpsError(
+      "invalid-argument",
+      'The function must be called with a valid string "documentId".'
+    );
+  }
+
+  if (targetFolderId !== null && typeof targetFolderId !== 'string') {
+    throw new HttpsError(
+      "invalid-argument",
+      'The "targetFolderId" must be a string or null.'
+    );
+  }
+
+  try {
+    const docRef = db.collection('users').doc(userId).collection('documents').doc(documentId); // Use db
+
+    // Optional: Check if targetFolderId (if not null) actually exists
+    if (targetFolderId) {
+      const folderRef = db.collection('users').doc(userId).collection('folders').doc(targetFolderId); // Use db
+      const folderSnap = await folderRef.get();
+      if (!folderSnap.exists) {
+        throw new HttpsError("not-found", `Target folder with ID ${targetFolderId} not found.`);
+      }
+    }
+
+    await docRef.update({
+      folderId: targetFolderId, // Set to null to move to root
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    logger.info(`Document ${documentId} moved to folder ${targetFolderId ?? 'root'} successfully for user ${userId}`);
+    return { success: true };
+  } catch (error) {
+    logger.error(`Error moving document ${documentId} for user ${userId}:`, error);
+    if (error instanceof HttpsError) { // Re-throw HttpsErrors directly
+      throw error;
+    }
+    throw new HttpsError(
+      "internal",
+      "Failed to move document.",
+      error instanceof Error ? error.message : undefined
+    );
+  }
+});
+
+// ==============================================
+// Excel Processing Functions
+// ==============================================

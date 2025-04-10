@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import { getAuth, Auth, connectAuthEmulator } from "firebase/auth";
 import { getFirestore, Firestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getFunctions, Functions, connectFunctionsEmulator, httpsCallable } from "firebase/functions";
 import { getStorage, FirebaseStorage, connectStorageEmulator } from "firebase/storage";
 import { getAuthDomain } from "./authDomainConfig";
 
@@ -47,6 +48,7 @@ let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
 let storage: FirebaseStorage;
+let functionsInstance: Functions;
 
 const initializeFirebase = async () => {
   try {
@@ -59,6 +61,7 @@ const initializeFirebase = async () => {
     auth = getAuth(app);
     db = getFirestore(app);
     storage = getStorage(app);
+    functionsInstance = getFunctions(app);
 
     // Check if we're in development mode to use emulators
     if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS === 'true') {
@@ -66,6 +69,7 @@ const initializeFirebase = async () => {
       connectAuthEmulator(auth, 'http://localhost:9099');
       connectFirestoreEmulator(db, 'localhost', 8080);
       connectStorageEmulator(storage, 'localhost', 9199);
+      connectFunctionsEmulator(functionsInstance, 'localhost', 5001);
     }
 
     // Detect ad blockers and warn if needed
@@ -86,5 +90,59 @@ if (typeof window !== 'undefined') {
   initializeFirebase();
 }
 
-export { app, auth, db, storage };
+// ==============================================
+// NEW: Callable Cloud Function Wrappers
+// ==============================================
 
+interface CreateFolderPayload {
+  name: string;
+  parentFolderId?: string | null;
+}
+
+interface CreateFolderResult {
+  success: boolean;
+  folderId: string;
+}
+
+/**
+ * Calls the 'createFolder' Cloud Function.
+ */
+export const createFolderAPI = async (payload: CreateFolderPayload): Promise<CreateFolderResult> => {
+  if (!functionsInstance) throw new Error("Firebase Functions not initialized.");
+  const createFolderFunction = httpsCallable<CreateFolderPayload, CreateFolderResult>(functionsInstance, 'createFolder');
+  try {
+    const result = await createFolderFunction(payload);
+    return result.data;
+  } catch (error) {
+    console.error("Error calling createFolder function:", error);
+    // Consider more specific error handling/throwing
+    throw error;
+  }
+};
+
+interface MoveDocumentPayload {
+  documentId: string;
+  targetFolderId: string | null;
+}
+
+interface MoveDocumentResult {
+  success: boolean;
+}
+
+/**
+ * Calls the 'moveDocument' Cloud Function.
+ */
+export const moveDocumentAPI = async (payload: MoveDocumentPayload): Promise<MoveDocumentResult> => {
+  if (!functionsInstance) throw new Error("Firebase Functions not initialized.");
+  const moveDocumentFunction = httpsCallable<MoveDocumentPayload, MoveDocumentResult>(functionsInstance, 'moveDocument');
+  try {
+    const result = await moveDocumentFunction(payload);
+    return result.data;
+  } catch (error) {
+    console.error("Error calling moveDocument function:", error);
+    // Consider more specific error handling/throwing
+    throw error;
+  }
+};
+
+export { app, auth, db, storage, functionsInstance };

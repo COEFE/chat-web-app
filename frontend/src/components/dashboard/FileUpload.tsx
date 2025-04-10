@@ -21,6 +21,7 @@ interface UploadingFile {
 interface FileUploadProps {
   className?: string;
   onUploadComplete?: () => void;
+  currentFolderId?: string | null;
 }
 
 const acceptedFileTypes = {
@@ -36,7 +37,8 @@ const acceptedFileTypes = {
 
 export function FileUpload({ 
   className,
-  onUploadComplete
+  onUploadComplete,
+  currentFolderId
 }: FileUploadProps) {
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
   const [rejectedFiles, setRejectedFiles] = useState<File[]>([]);
@@ -78,11 +80,12 @@ export function FileUpload({
       const storageRef = ref(getStorage(), storagePath);
       
       // Add metadata to the upload that the Cloud Function can use
-      const metadata = {
+      const metadata: { customMetadata: Record<string, string> } = {
         customMetadata: {
           userId: user.uid,
           originalName: file.name,
-          timestamp: Date.now().toString() // Add timestamp to ensure uniqueness
+          timestamp: Date.now().toString(), // Add timestamp to ensure uniqueness
+          ...(currentFolderId && { folderId: currentFolderId }) // Include folderId if present
         }
       };
       
@@ -141,7 +144,7 @@ export function FileUpload({
       }, 3000);  // 3-second delay
     }
 
-  }, [user, onUploadComplete]); 
+  }, [user, onUploadComplete, currentFolderId]); 
 
   const onDrop = useCallback(
     (acceptedFiles: File[], fileRejections: FileRejection[]) => {

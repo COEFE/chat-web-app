@@ -1,12 +1,15 @@
 'use client';
 
-import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff, Folder, FolderPlus } from 'lucide-react';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import {
   Table,
@@ -24,56 +27,49 @@ import DocumentViewer from '@/components/dashboard/DocumentViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
 import { FileUpload } from '@/components/dashboard/FileUpload';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-
-// Import Firestore functions and db instance
-import { db } from '@/lib/firebaseConfig';
 import {
   collection,
   query,
   orderBy,
   getDocs,
+  where,
   Timestamp
 } from 'firebase/firestore';
-import { MyDocumentData } from '@/types';
+import { db, createFolderAPI } from '@/lib/firebaseConfig';
+import { MyDocumentData, FolderData, FilesystemItem } from '@/types';
 
 interface DocumentTableProps {
-  documents: MyDocumentData[];
+  items: FilesystemItem[];
   isLoading: boolean;
   error: string | null;
-  onSelectDocument: (doc: MyDocumentData | null) => void;
+  onSelectItem: (item: FilesystemItem | null) => void;
   onDeleteDocument: (docId: string) => Promise<void>;
+  onFolderClick: (folderId: string, folderName: string) => void;
 }
 
-function DocumentTable({ documents, isLoading, error, onSelectDocument, onDeleteDocument }: DocumentTableProps) {
+function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument, onFolderClick }: DocumentTableProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const { toast } = useToast();
   const formatDate = (timestamp: any): string => {
-    // Handle null, undefined, or missing timestamp
     if (!timestamp) return 'N/A';
     
-    // Handle server timestamp (which might be a different format)
     try {
-      // If it's a Firestore Timestamp object
       if (timestamp.toDate && typeof timestamp.toDate === 'function') {
         return timestamp.toDate().toLocaleDateString();
       }
       
-      // If it's a JavaScript Date object
       if (timestamp instanceof Date) {
         return timestamp.toLocaleDateString();
       }
       
-      // If it's a number (seconds or milliseconds since epoch)
       if (typeof timestamp === 'number') {
-        // Assume milliseconds if > 10^12, otherwise seconds
         const date = timestamp > 10**12 
           ? new Date(timestamp) 
           : new Date(timestamp * 1000);
         return date.toLocaleDateString();
       }
       
-      // If it's an ISO string or other string format
       if (typeof timestamp === 'string') {
         return new Date(timestamp).toLocaleDateString();
       }
@@ -81,13 +77,11 @@ function DocumentTable({ documents, isLoading, error, onSelectDocument, onDelete
       console.error('Error formatting date:', error, timestamp);
     }
     
-    // Fallback
     return 'Invalid Date';
   };
 
-  // Prevent flashing content by maintaining previous documents while loading
-  const displayDocuments = documents.length > 0 ? documents : [];
-  
+  const displayItems = items.length > 0 ? items : [];
+
   return (
     <div>
       {error && (
@@ -97,110 +91,137 @@ function DocumentTable({ documents, isLoading, error, onSelectDocument, onDelete
       )}
       
       <Table>
-        <TableCaption>A list of your uploaded documents.</TableCaption>
+        <TableCaption>A list of your uploaded documents and folders.</TableCaption>
         <thead data-slot="table-header" className={"[&_tr]:border-b"}>
           <tr
             data-slot="table-row"
             className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
           >
+            <th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-8"> </th>
             <th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap w-[200px]">Name</th>
-            <th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap">Upload Date</th>
+            <th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap">Date Modified/Created</th>
             <th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap">Status</th>
             <th data-slot="table-head" className="text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-right">Actions</th>
           </tr>
         </thead>
         <TableBody>
-          {isLoading && displayDocuments.length === 0 ? (
+          {isLoading && displayItems.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={4} className="h-24 text-center">
+              <TableCell colSpan={5} className="h-24 text-center"> 
                 <div className="flex items-center justify-center space-x-2">
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-                  <span>Loading documents...</span>
+                  <span>Loading items...</span>
                 </div>
               </TableCell>
             </TableRow>
-          ) : displayDocuments.length === 0 ? (
+          ) : displayItems.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={4} className="h-24 text-center">
-                No documents uploaded yet.
+              <TableCell colSpan={5} className="h-24 text-center"> 
+                This folder is empty.
               </TableCell>
             </TableRow>
           ) : (
-            displayDocuments.map((doc) => {
-              return (
-                <TableRow key={doc.id}>
-                  <TableCell className="font-medium">{doc.name}</TableCell>
-                  <TableCell>{formatDate(doc.uploadedAt)}</TableCell>
-                  <TableCell>{doc.status || 'N/A'}</TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="sm" onClick={() => onSelectDocument(doc)}>
-                      View
-                    </Button>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="text-red-600 hover:text-red-700 ml-2"
-                          disabled={isDeleting && deletingId === doc.id}
-                        >
-                          {isDeleting && deletingId === doc.id ? (
-                            <>
-                              <div className="h-3 w-3 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-                              Deleting...
-                            </>
-                          ) : (
-                            'Delete'
-                          )}
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This will permanently delete the document "{doc.name}". This action cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
-                              e.preventDefault();
-                              setDeletingId(doc.id);
-                              setIsDeleting(true);
-                              try {
-                                await onDeleteDocument(doc.id);
-                                toast({
-                                  title: "Document deleted",
-                                  description: `${doc.name} has been successfully deleted.`,
-                                });
-                              } catch (error) {
-                                console.error('Error deleting document:', error);
-                                toast({
-                                  variant: "destructive",
-                                  title: "Error",
-                                  description: `Failed to delete document: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                                });
-                              } finally {
-                                setIsDeleting(false);
-                                setDeletingId(null);
-                              }
-                            }}
-                            className="bg-red-600 hover:bg-red-700"
+            displayItems.map((item) => {
+              if (item.type === 'folder') {
+                return (
+                  <TableRow key={item.id} className="cursor-pointer hover:bg-muted/50" onClick={() => onFolderClick(item.id, item.name)}>
+                    <TableCell>
+                      <Folder className="h-4 w-4 text-blue-500" />
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {item.name}
+                    </TableCell>
+                    <TableCell>{formatDate(item.updatedAt)}</TableCell>
+                    <TableCell>N/A</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="ghost" size="sm" disabled> 
+                        Options
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              } else {
+                const doc = item;
+                return (
+                  <TableRow key={doc.id}>
+                    <TableCell>
+                      <FileText className="h-4 w-4 text-gray-500" />
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {doc.name}
+                    </TableCell>
+                    <TableCell>{formatDate(doc.updatedAt)}</TableCell>
+                    <TableCell>{doc.status || 'N/A'}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="ghost" size="sm" onClick={() => onSelectItem(doc)}>
+                        View
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="text-red-600 hover:text-red-700 ml-2"
+                            disabled={isDeleting && deletingId === doc.id}
                           >
-                            Delete
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </TableCell>
-                </TableRow>
-              );
+                            {isDeleting && deletingId === doc.id ? (
+                              <>
+                                <div className="h-3 w-3 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                                Deleting...
+                              </>
+                            ) : (
+                              'Delete'
+                            )}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete the document "{doc.name}". This action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
+                                e.preventDefault();
+                                setDeletingId(doc.id);
+                                setIsDeleting(true);
+                                try {
+                                  await onDeleteDocument(doc.id);
+                                  toast({
+                                    title: "Document deleted",
+                                    description: `${doc.name} has been successfully deleted.`,
+                                  });
+                                } catch (error) {
+                                  console.error('Error deleting document:', error);
+                                  toast({
+                                    variant: "destructive",
+                                    title: "Error",
+                                    description: `Failed to delete document: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                                  });
+                                } finally {
+                                  setIsDeleting(false);
+                                  setDeletingId(null);
+                                }
+                              }}
+                              className="bg-red-600 hover:bg-red-700"
+                            >
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </TableCell>
+                  </TableRow>
+                );
+              }
             })
           )}
-          {isLoading && displayDocuments.length > 0 && (
+          {isLoading && displayItems.length > 0 && (
             <TableRow>
-              <TableCell colSpan={4} className="h-10 text-center bg-muted/20">
+              <TableCell colSpan={5} className="h-10 text-center bg-muted/20">
                 <div className="flex items-center justify-center space-x-2 text-sm text-muted-foreground">
                   <div className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
                   <span>Refreshing...</span>
@@ -214,152 +235,134 @@ function DocumentTable({ documents, isLoading, error, onSelectDocument, onDelete
   );
 }
 
-export default function DashboardPage() {
+function DashboardPage() {
   const { user, loading: authLoading, logout } = useAuth();
   const router = useRouter();
-  const [documents, setDocuments] = useState<MyDocumentData[]>([]);
-  const [isLoadingDocs, setIsLoadingDocs] = useState(true);
-  const [errorDocs, setErrorDocs] = useState<string | null>(null);
-  const [selectedDocument, setSelectedDocument] = useState<MyDocumentData | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  const currentRequestIdRef = useRef<string | null>(null);
   const { toast } = useToast();
+  const [documents, setDocuments] = useState<MyDocumentData[]>([]);
+  const [folders, setFolders] = useState<FolderData[]>([]);
+  const [filesystemItems, setFilesystemItems] = useState<FilesystemItem[]>([]);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [breadcrumbs, setBreadcrumbs] = useState<{ id: string | null; name: string }[]>([{ id: null, name: 'Home' }]);
+  const [selectedDocument, setSelectedDocument] = useState<MyDocumentData | null>(null);
+  const [loadingDocs, setLoadingDocs] = useState(true);
+  const [docsError, setDocsError] = useState<string | null>(null);
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [isViewerVisible, setIsViewerVisible] = useState(true);
+  const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  const fetchDocuments = useCallback(async () => {
-    // Create a unique request ID to handle race conditions
-    const requestId = Date.now().toString();
-    currentRequestIdRef.current = requestId;
-    
+  const panelGroupRef = useRef<any>(null);
+
+  const triggerRefresh = useCallback(() => {
+    setRefreshTrigger(prev => prev + 1);
+  }, []);
+
+  useEffect(() => {
     if (authLoading) {
-      console.log('fetchDocuments: Auth context is loading, skipping fetch.');
-      return; // Don't fetch if auth state isn't ready
+      console.log('Auth is loading, skipping fetch.');
+      return;
     }
     if (!user) {
-      console.log('fetchDocuments: No user logged in, skipping fetch.');
-      setErrorDocs('User not logged in');
-      setIsLoadingDocs(false);
-      return; // Don't fetch if user isn't logged in
-    }
-
-    console.log(`fetchDocuments: Fetching for user ${user.uid} with requestId ${requestId}`);
-    setIsLoadingDocs(true);
-    setErrorDocs(null);
-
-    let token: string | null = null;
-    try {
-      token = await user.getIdToken();
-    } catch (tokenError) {
-      console.error("fetchDocuments: Failed to get ID token", tokenError);
-      setErrorDocs('Authentication error. Please refresh.');
-      setIsLoadingDocs(false);
+      console.log('User not logged in, redirecting.');
+      router.push('/login');
       return;
     }
 
-    if (!token) {
-        console.error("fetchDocuments: Got null token after attempt");
-        setErrorDocs('Authentication error. Please refresh.');
-        setIsLoadingDocs(false);
-        return;
-    }
+    console.log(`Fetching items for user: ${user.uid}, folderId: ${currentFolderId}`);
+    setLoadingDocs(true);
+    setDocsError(null);
+    setFilesystemItems([]);
 
-    try {
-      // Fetch from the API route, including the Auth header
-      const response = await fetch('/api/documents', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+    const fetchItems = async () => {
+      try {
+        const userId = user.uid;
 
-      // Check if the request ID has changed (meaning a newer request has started)
-      if (currentRequestIdRef.current !== requestId) {
-        console.log(`[Request ${requestId}] Request ID changed, skipping response processing`);
-        return;
-      }
-
-      if (!response.ok) {
-        let errorMsg = `HTTP error! status: ${response.status}`; 
-        try {
-          const errorData = await response.json();
-          errorMsg = errorData.error || errorData.message || errorMsg;
-        } catch (e) {
-          // Ignore if response body isn't JSON
-        }
-        console.error(`[Request ${requestId}] Error fetching documents: ${errorMsg}`);
-        setErrorDocs(`Failed to fetch documents: ${errorMsg}`);
-        setIsLoadingDocs(false);
-        return;
-      }
-
-      const data = await response.json();
-      const fetchedDocs = data.documents || []; 
-      console.log(`[Request ${requestId}] Fetched ${fetchedDocs.length} documents`);
-
-      // Process documents with careful handling of timestamps
-      const userDocuments = fetchedDocs.map((doc: any) => {
-        console.log('Processing document:', doc);
-        
-        // Handle uploadedAt timestamp
-        let uploadedAt = doc.uploadedAt || doc.createdAt;
-        if (uploadedAt && typeof uploadedAt === 'string') {
-          try {
-            uploadedAt = new Date(uploadedAt); // Convert string timestamp to Date
-            console.log('Parsed string timestamp:', uploadedAt);
-          } catch (e) { 
-            console.warn(`Could not parse timestamp string: ${uploadedAt}`);
-            uploadedAt = null; 
-          }
-        } else if (uploadedAt instanceof Date) {
-            console.log('Timestamp is already a Date object');
-            // It's already a Date, use as is
-        } else if (uploadedAt) { 
-            console.warn(`Unexpected timestamp format: ${typeof uploadedAt}`);
-            try {
-              // Last attempt to convert to Date if it's some other format
-              uploadedAt = new Date(uploadedAt);
-            } catch (e) {
-              uploadedAt = null;
-            }
-        }
-
-        // Ensure we have all required fields with proper fallbacks
-        const processedDoc = {
+        const foldersQuery = query(
+          collection(db, 'users', userId, 'folders'),
+          where('parentFolderId', '==', currentFolderId),
+          orderBy('name', 'asc')
+        );
+        const folderSnapshot = await getDocs(foldersQuery);
+        const fetchedFolders: FolderData[] = folderSnapshot.docs.map(doc => ({
           id: doc.id,
-          name: doc.name || doc.filename || doc.id, // Try both possible field names
-          uploadedAt: uploadedAt || new Date(), // Fallback to current date if no timestamp
-          contentType: doc.contentType || 'unknown',
-          downloadURL: doc.downloadURL || null,
-          storagePath: doc.storagePath || null,
-          status: doc.status || 'processed',
-          userId: doc.userId || user?.uid || '',
-          size: doc.size || 0,
-          createdAt: doc.createdAt || uploadedAt || new Date()
-        } as MyDocumentData; // Cast to your frontend type
-        
-        console.log('Processed document:', processedDoc);
-        return processedDoc;
-      });
-      
-      console.log(`[Request ${requestId}] Processed ${userDocuments.length} documents with timestamp handling`);
-      setDocuments(userDocuments);
-    } catch (err) {
-      console.error(`[Request ${requestId}] Error fetching documents:`, err);
-      const message = (err instanceof Error) ? err.message : 'Unknown error';
-      console.error(`[Request ${requestId}] Detailed error:`, err);
-      setErrorDocs(`Failed to fetch documents: ${message}`);
-    } finally {
-      setIsLoadingDocs(false);
-      console.log(`[Request ${requestId}] Fetch documents complete`);
-    }
-  }, [user]);
+          ...doc.data(),
+        } as FolderData));
+        const folderItems: FilesystemItem[] = fetchedFolders.map(f => ({ ...f, type: 'folder' }));
+        console.log('Fetched Folders:', fetchedFolders);
 
-  const handleUploadComplete = useCallback(() => {
-    console.log("Upload complete signal received, fetching documents...");
-    fetchDocuments();
-  }, [fetchDocuments]);
-  
-  const handleDeleteDocument = useCallback(async (docId: string) => {
+        const documentsQuery = query(
+          collection(db, 'users', userId, 'documents'),
+          where('folderId', '==', currentFolderId),
+          orderBy('name', 'asc')
+        );
+        const documentSnapshot = await getDocs(documentsQuery);
+        const fetchedDocs: MyDocumentData[] = documentSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          uploadedAt: doc.data().uploadedAt as Timestamp,
+          createdAt: doc.data().createdAt as Timestamp,
+          updatedAt: doc.data().updatedAt as Timestamp,
+        } as MyDocumentData));
+        const documentItems: FilesystemItem[] = fetchedDocs.map(d => ({ ...d, type: 'document' }));
+        console.log('Fetched Documents:', fetchedDocs);
+
+        setFilesystemItems([...folderItems, ...documentItems]);
+
+      } catch (error) {
+        console.error('Error fetching documents or folders:', error);
+        setDocsError(`Failed to load items: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } finally {
+        setLoadingDocs(false);
+      }
+    };
+
+    fetchItems();
+
+  }, [user, authLoading, router, currentFolderId, refreshTrigger]);
+
+  const handleSelectDocument = (doc: MyDocumentData | null) => {
+    console.log('Document selected:', doc);
+    setSelectedDocument(doc);
+    if (doc && !isViewerVisible) {
+      setIsViewerVisible(true);
+    }
+  };
+
+  const handleSelectItem = (item: FilesystemItem | null) => {
+    if (item?.type === 'document') {
+      handleSelectDocument(item);
+    } else if (item?.type === 'folder') {
+      console.log('Folder selected (for info):', item);
+      setSelectedDocument(null);
+    } else {
+      handleSelectDocument(null);
+    }
+  };
+
+  const handleFolderClick = (folderId: string, folderName: string) => {
+    console.log(`Navigating into folder: ${folderName} (${folderId})`);
+    setCurrentFolderId(folderId);
+    setBreadcrumbs(prev => [...prev, { id: folderId, name: folderName }]);
+    setSelectedDocument(null);
+  };
+
+  const handleBreadcrumbClick = (index: number) => {
+    const targetFolder = breadcrumbs[index];
+    console.log(`Navigating via breadcrumb to: ${targetFolder.name} (${targetFolder.id})`);
+    setCurrentFolderId(targetFolder.id);
+    setBreadcrumbs(prev => prev.slice(0, index + 1));
+    setSelectedDocument(null);
+  };
+
+  const handleUploadSuccess = () => {
+    console.log("Upload complete signal received, refreshing current folder...");
+    triggerRefresh();
+  };
+
+  const handleDeleteDocument = async (docId: string) => {
     if (!user) {
       console.error('No user available for deleting document');
       throw new Error('Authentication required');
@@ -393,13 +396,10 @@ export default function DashboardPage() {
         throw new Error(errorMsg);
       }
       
-      // If delete was successful, update the documents list
-      setDocuments(prevDocs => prevDocs.filter(doc => doc.id !== docId));
+      setFilesystemItems(prevItems => prevItems.filter(item => item.id !== docId));
       
-      // If the deleted document was selected, clear the selection
-      if (selectedDocumentId === docId) {
+      if (selectedDocument?.id === docId) {
         setSelectedDocument(null);
-        setSelectedDocumentId(null);
       }
       
       return await response.json();
@@ -407,52 +407,36 @@ export default function DashboardPage() {
       console.error('Error in handleDeleteDocument:', error);
       throw error;
     }
-  }, [user, selectedDocumentId]);
-
-  useEffect(() => {
-    if (!authLoading && !user) {
-      router.push('/login');
-    }
-  }, [user, router, authLoading]);
-
-  // Single useEffect to handle document fetching
-  useEffect(() => {
-    if (user && !authLoading) {
-      console.log('Triggering document fetch on user authentication');
-      fetchDocuments();
-    }
-  }, [user, authLoading, fetchDocuments]);
-
-  // Add effect to listen for custom event indicating document update
-  useEffect(() => {
-    const handleDocumentUpdate = () => {
-      console.log('Received excel-document-updated event, fetching documents...');
-      fetchDocuments();
-    };
-
-    window.addEventListener('excel-document-updated', handleDocumentUpdate);
-
-    // Cleanup listener on component unmount
-    return () => {
-      window.removeEventListener('excel-document-updated', handleDocumentUpdate);
-    };
-  }, [fetchDocuments]); // Depend on fetchDocuments to ensure the latest version is used
-
-  // Handler for the existing DocumentList component (if used)
-  const handleSelectDocument = (doc: MyDocumentData | null) => {
-    console.log("Selected Document from List:", doc);
-    setSelectedDocument(doc); // Keep this for DocumentViewer perhaps
-    setSelectedDocumentId(doc?.id ?? null);
-    // setView('chat'); // Switch view to chat interface
   };
 
-  // New handler specifically for the Shadcn Select component's onValueChange
-  const handleDocumentSelectChange = (value: string) => {
-    console.log("Selected Document ID from Select:", value);
-    setSelectedDocumentId(value);
-    // Optionally, find the full document object if needed elsewhere
-    const fullDoc = documents.find(d => d.id === value);
-    setSelectedDocument(fullDoc || null);
+  const handleCreateFolder = async () => {
+    if (!user) {
+      toast({ variant: "destructive", title: "Error", description: "You must be logged in to create a folder." });
+      return;
+    }
+    if (!newFolderName.trim()) {
+      toast({ variant: "destructive", title: "Error", description: "Folder name cannot be empty." });
+      return;
+    }
+
+    setIsCreatingFolder(true);
+    try {
+      const payload = { name: newFolderName.trim(), parentFolderId: currentFolderId };
+      const result = await createFolderAPI(payload);
+      if (result.success) {
+        toast({ title: "Folder created", description: `Folder "${newFolderName.trim()}" created successfully.` });
+        setShowCreateFolderDialog(false);
+        setNewFolderName("");
+        triggerRefresh();
+      } else {
+        toast({ variant: "destructive", title: "Error", description: "Failed to create folder." });
+      }
+    } catch (error) {
+      console.error("Error creating folder:", error);
+      toast({ variant: "destructive", title: "Error", description: `Failed to create folder: ${error instanceof Error ? error.message : 'Unknown error'}` });
+    } finally {
+      setIsCreatingFolder(false);
+    }
   };
 
   if (authLoading) {
@@ -467,152 +451,170 @@ export default function DashboardPage() {
     <div className="flex h-screen flex-col bg-muted/40">
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-4">
         <h1 className="text-xl font-semibold whitespace-nowrap">My Documents</h1>
-        {documents.length > 0 && (
-          <div className="ml-4 w-full max-w-xs"> 
-            <Select onValueChange={handleDocumentSelectChange} value={selectedDocumentId ?? undefined}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select a document..." />
-              </SelectTrigger>
-              <SelectContent>
-                {documents.map((doc) => (
-                  <SelectItem key={doc.id} value={doc.id}>
-                    {doc.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
         <div className="ml-auto flex items-center gap-4">
-          {user && <span className="text-sm text-muted-foreground whitespace-nowrap">Welcome, {user.displayName || user.email}</span>}
+          <span className="text-sm text-muted-foreground whitespace-nowrap">Welcome, {user.displayName || user.email}</span>
           <Button variant="outline" size="sm" onClick={logout}>Logout</Button>
         </div>
       </header>
 
       <main className="flex-1 overflow-hidden p-6 pt-4">
-        {/* View mode state: 'split', 'full', or 'chat-only' */}
-        {(() => {
-          const [viewMode, setViewMode] = useState<'split' | 'full' | 'chat-only'>('split');
-          
-          // Toggle functions for view modes
-          const toggleFullScreen = () => setViewMode(viewMode === 'full' ? 'split' : 'full');
-          const toggleChatOnly = () => setViewMode(viewMode === 'chat-only' ? 'split' : 'chat-only');
-          
-          return (
-            <div className="h-full flex flex-col">
-              {/* View mode controls - only show when a document is selected */}
-              {selectedDocument && (
-                <div className="flex justify-end mb-2 gap-2">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={toggleFullScreen}
-                    title={viewMode === 'full' ? "Exit full screen" : "Full screen"}
-                  >
-                    {viewMode === 'full' ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={toggleChatOnly}
-                    title={viewMode === 'chat-only' ? "Show document" : "Hide document"}
-                  >
-                    {viewMode === 'chat-only' ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                  </Button>
-                </div>
+        <div className="mb-4 text-sm text-muted-foreground">
+          {breadcrumbs.map((crumb, index) => (
+            <span key={crumb.id ?? 'root'}>
+              {index > 0 && <span className="mx-1">/</span>}
+              {index < breadcrumbs.length - 1 ? (
+                <button
+                  onClick={() => handleBreadcrumbClick(index)}
+                  className="hover:underline hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
+                >
+                  {crumb.name}
+                </button>
+              ) : (
+                <span className="font-medium text-foreground">{crumb.name}</span>
               )}
-              
-              {/* Fixed panel layout with different configurations based on view mode */}
-              <div className="flex-1 rounded-lg border overflow-hidden">
-                {viewMode === 'full' ? (
-                  // Full screen document view
-                  <div className="h-full">
-                    {selectedDocument ? (
-                      <div className="flex h-full flex-col p-6 overflow-auto">
-                        <div className="flex h-full flex-col">
-                          <div className="flex-1 overflow-hidden">
-                            {selectedDocument && <DocumentViewer document={selectedDocument} />}
-                          </div>
-                        </div>
+            </span>
+          ))}
+        </div>
+
+        <div className="flex h-full flex-col">
+          {selectedDocument && (
+            <div className="flex justify-end mb-2 gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setIsMaximized(prev => !prev)}
+                title={isMaximized ? "Exit full screen" : "Full screen"}
+              >
+                {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setIsViewerVisible(prev => !prev)}
+                title={isViewerVisible ? "Hide document viewer" : "Show document viewer"}
+              >
+                {isViewerVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+            </div>
+          )}
+          
+          <div className="flex-1 rounded-lg border overflow-hidden">
+            {isMaximized ? (
+              <div className="h-full">
+                {selectedDocument ? (
+                  <div className="flex h-full flex-col p-6 overflow-auto">
+                    <div className="flex h-full flex-col">
+                      <div className="flex-1 overflow-hidden">
+                        {selectedDocument && <DocumentViewer document={selectedDocument}/>}
                       </div>
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-muted-foreground">
-                        Select a document to view.
-                      </div>
-                    )}
-                  </div>
-                ) : viewMode === 'chat-only' ? (
-                  // Chat only view
-                  <div className="h-full">
-                    <div className="flex h-full flex-col p-6">
-                      {selectedDocumentId ? (
-                        <ChatInterface documentId={selectedDocumentId} document={selectedDocument || undefined} />
-                      ) : (
-                        <div className="flex h-full items-center justify-center text-muted-foreground">
-                          Select a document to start chatting.
-                        </div>
-                      )}
                     </div>
                   </div>
                 ) : (
-                  // Default split view (70/30)
-                  <div className="flex h-full">
-                    {/* Document panel - fixed 70% width */}
-                    <div className="w-[70%] border-r">
-                      <div className="flex h-full flex-col p-6 overflow-auto">
-                        {selectedDocument ? (
-                          <div className="flex h-full flex-col">
-                            <div className="flex-1 overflow-hidden">
-                              {selectedDocument && <DocumentViewer document={selectedDocument} />}
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <Card className="mb-6">
-                              <CardHeader>
-                                <CardTitle>Upload New Document</CardTitle>
-                                <CardDescription>Drag & drop files here or click to select files.</CardDescription>
-                              </CardHeader>
-                              <CardContent>
-                                <FileUpload
-                                  onUploadComplete={handleUploadComplete}
-                                />
-                              </CardContent>
-                            </Card>
-                            <DocumentTable
-                              documents={documents}
-                              isLoading={isLoadingDocs}
-                              error={errorDocs}
-                              onSelectDocument={(doc: MyDocumentData | null) => handleSelectDocument(doc)}
-                              onDeleteDocument={handleDeleteDocument}
-                            />
-                            {documents.length === 0 && (
-                              <p className="mt-4 text-center text-muted-foreground">No documents uploaded yet. Upload a file to start chatting.</p>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* Chat panel - fixed 30% width */}
-                    <div className="w-[30%]">
-                      <div className="flex h-full flex-col p-6">
-                        {selectedDocumentId ? (
-                          <ChatInterface documentId={selectedDocumentId} document={selectedDocument || undefined} />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-muted-foreground">
-                            Select a document to start chatting.
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                  <div className="flex h-full items-center justify-center text-muted-foreground">
+                    Select a document to view.
                   </div>
                 )}
               </div>
-            </div>
-          );
-        })()}
+            ) : (
+              <div className="flex h-full">
+                <div className="w-[70%] border-r">
+                  <div className="flex h-full flex-col p-6 overflow-auto">
+                    {selectedDocument ? (
+                      <div className="flex h-full flex-col">
+                        <div className="flex-1 overflow-hidden">
+                          {selectedDocument && <DocumentViewer document={selectedDocument}/>}
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <Card className="mb-6">
+                          <CardHeader>
+                            <CardTitle>Upload New Document</CardTitle>
+                            <CardDescription>Drag & drop files here or click to select files. Files will be added to the current folder: <span className='font-medium'>{breadcrumbs[breadcrumbs.length - 1]?.name ?? 'Home'}</span></CardDescription>
+                          </CardHeader>
+                          <CardContent>
+                            <FileUpload
+                              onUploadComplete={handleUploadSuccess}
+                              currentFolderId={currentFolderId}
+                            />
+                          </CardContent>
+                        </Card>
+                        <DocumentTable
+                          items={filesystemItems}
+                          isLoading={loadingDocs}
+                          error={docsError}
+                          onSelectItem={handleSelectItem}
+                          onDeleteDocument={handleDeleteDocument}
+                          onFolderClick={handleFolderClick}
+                        />
+                        {filesystemItems.length === 0 && (
+                          <p className="mt-4 text-center text-muted-foreground">No documents or folders uploaded yet. Upload a file or create a folder to start.</p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="w-[30%]">
+                  <div className="flex h-full flex-col p-6">
+                    {selectedDocument ? (
+                       <ChatInterface documentId={selectedDocument.id} document={selectedDocument} />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-muted-foreground">
+                        Select a document to start chatting.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </main>
+      <Dialog open={showCreateFolderDialog} onOpenChange={setShowCreateFolderDialog}>
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm" onClick={() => setShowCreateFolderDialog(true)}>
+            <FolderPlus className="h-4 w-4 mr-2" />
+            New Folder
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Create New Folder</DialogTitle>
+            <DialogDescription>
+              Enter a name for your new folder.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="folder-name" className="text-right">
+                Name
+              </Label>
+              <Input 
+                id="folder-name" 
+                value={newFolderName} 
+                onChange={(e) => setNewFolderName(e.target.value)} 
+                className="col-span-3" 
+                placeholder="My Project Files"
+                disabled={isCreatingFolder}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateFolderDialog(false)} disabled={isCreatingFolder}>Cancel</Button>
+            <Button 
+              type="button" 
+              onClick={handleCreateFolder} 
+              disabled={isCreatingFolder || !newFolderName.trim()}
+            >
+              {isCreatingFolder ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {isCreatingFolder ? 'Creating...' : 'Create Folder'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
+export default DashboardPage;

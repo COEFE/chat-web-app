@@ -14,3 +14,17 @@ export interface MyDocumentData {
   size: number; // Size in bytes
   createdAt: Timestamp | null; // Creation timestamp, null if not available
 }
+
+// Interface for Folder data
+export interface FolderData {
+  id: string; // Firestore document ID
+  name: string;
+  parentFolderId: string | null; // ID of the parent folder, or null for root
+  userId: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+// You might also want a type that represents either a folder or a document
+// for use in the display list
+export type FilesystemItem = (FolderData & { type: 'folder' }) | (MyDocumentData & { type: 'document' });
