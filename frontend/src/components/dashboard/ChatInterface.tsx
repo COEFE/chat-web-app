@@ -7,7 +7,6 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext'; 
 import { Timestamp } from 'firebase/firestore'; 
 import { MyDocumentData } from '@/types'; 
-import { Loader2 } from 'lucide-react'; // Import Loader2
 
 // Define the structure of a chat message
 interface ChatMessage {
@@ -24,11 +23,11 @@ interface ChatMessage {
 }
 
 interface ChatInterfaceProps {
-  primaryDocumentId: string | null; 
-  selectedDocuments: MyDocumentData[]; 
+  documentId: string;
+  document?: MyDocumentData; 
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ primaryDocumentId, selectedDocuments }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -40,87 +39,108 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ primaryDocumentId, select
 
   // Effect to check for active sheet in localStorage when document changes
   useEffect(() => {
-    if (primaryDocumentId) { 
-      const storedSheet = localStorage.getItem(`activeSheet_${primaryDocumentId}`);
-      if (storedSheet) {
-        setActiveSheet(storedSheet);
+    if (document?.id) {
+      // Try to get active sheet from localStorage
+      const savedSheet = localStorage.getItem(`activeSheet-${document.id}`);
+      if (savedSheet) {
+        console.log(`[ChatInterface] Found active sheet for document ${document.id}: ${savedSheet}`);
+        setActiveSheet(savedSheet);
       } else {
         setActiveSheet(null);
-        localStorage.removeItem(`activeSheet_${primaryDocumentId}`);
       }
+
+      // Add event listener for active sheet changes
+      const handleActiveSheetChange = (event: CustomEvent) => {
+        const { documentId, sheetName } = event.detail;
+        if (documentId === document.id) {
+          console.log(`[ChatInterface] Received active sheet change event: ${sheetName}`);
+          setActiveSheet(sheetName);
+        }
+      };
+
+      // Add the event listener
+      window.addEventListener('activeSheetChanged', handleActiveSheetChange as EventListener);
+
+      // Clean up the event listener when the component unmounts
+      return () => {
+        window.removeEventListener('activeSheetChanged', handleActiveSheetChange as EventListener);
+      };
     }
-  }, [primaryDocumentId]); 
+  }, [document?.id]);
 
   // Function to handle sending a message
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading || !user) return;
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return; 
 
-    const userMessage: ChatMessage = { id: Date.now().toString(), role: 'user', content: input };
+    const userMessage: ChatMessage = {
+      id: Date.now().toString(), 
+      role: 'user',
+      content: input.trim(),
+    };
+
     setMessages((prev) => [...prev, userMessage]);
-    setInput('');
+    setInput(''); 
     setIsLoading(true);
-    
-    // Get the currently active sheet for the primary document (if applicable)
-    const currentActiveSheet = primaryDocumentId ? localStorage.getItem(`activeSheet_${primaryDocumentId}`) : null;
-    console.log(`[ChatInterface] Sending request with activeSheet for primaryDoc (${primaryDocumentId}): ${currentActiveSheet}`);
 
-    // --- Prepare data for API --- 
-    const selectedDocumentIds = selectedDocuments.map(doc => doc.id);
-    console.log('[ChatInterface] Sending request for selected document IDs:', selectedDocumentIds);
+    if (!user) {
+      console.error("User not authenticated to send message");
+      setMessages((prev) => [...prev, { id: Date.now().toString(), role: 'ai', content: "Error: You must be logged in to chat." }]);
+      setIsLoading(false);
+      return;
+    }
+    
+    // Get the ID token
+    const token = await user.getIdToken();
 
     try {
-      // Get the Firebase ID token for authentication
-      const token = await user.getIdToken();
-
       // === NEW: Call backend API ===
-      const response = await fetch('/api/chat', {
+      const fetchResponse = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`, 
+          'Authorization': `Bearer ${token}`, // Add Authorization header
         },
-        body: JSON.stringify({
-          messages: [...messages, userMessage], 
-          documentIds: selectedDocumentIds, 
-          primaryDocumentId: primaryDocumentId, 
-          activeSheet: currentActiveSheet, 
+        body: JSON.stringify({ 
+          message: userMessage.content, // Send the user's message content
+          documentId: documentId,
+          currentDocument: document, // Pass the full document object if available
+          activeSheet: activeSheet // Include the active sheet information
         }),
       });
 
       console.log('--- Frontend: Received response from /api/chat ---');
-      console.log('- Status:', response.status);
-      console.log('- Status Text:', response.statusText);
-      console.log('- OK:', response.ok);
-      console.log('- Headers:', Object.fromEntries(response.headers.entries()));
+      console.log('- Status:', fetchResponse.status);
+      console.log('- Status Text:', fetchResponse.statusText);
+      console.log('- OK:', fetchResponse.ok);
+      console.log('- Headers:', Object.fromEntries(fetchResponse.headers.entries()));
 
       // Check if response is OK before attempting to read body
-      if (!response.ok) {
-        let errorText = `Error: ${response.status} ${response.statusText}`;
+      if (!fetchResponse.ok) {
+        let errorText = `Error: ${fetchResponse.status} ${fetchResponse.statusText}`;
         try {
-            const errorBody = await response.text();
+            const errorBody = await fetchResponse.text();
             console.error("Frontend: Error response body:", errorBody);
             errorText += ` - ${errorBody}`;
         } catch (e) {
              console.error("Frontend: Could not read error response body", e);
         }
-        throw new Error(errorText); 
+        throw new Error(errorText); // Throw error to be caught by outer catch block
       }
 
-      let rawText = ''; 
+      let rawText = ''; // Define rawText here to be accessible in catch block
       try {
-        rawText = await response.text();
-        console.log('- Frontend: Raw Response Text Before Parse:', JSON.stringify(rawText)); 
+        rawText = await fetchResponse.text();
+        console.log('- Frontend: Raw Response Text Before Parse:', JSON.stringify(rawText)); // Log raw text carefully
 
         // --- Attempt to parse ---
            const aiData = JSON.parse(rawText); 
         console.log('- Frontend: Parsed JSON data:', aiData);
 
          // --- NEW: Check for nested 'response' key --- 
-         let messageData = aiData; 
+         let messageData = aiData; // Assume top-level by default
          if (aiData && typeof aiData === 'object' && aiData.response && typeof aiData.response === 'object' && aiData.response.role) {
            console.log('- Frontend: Found nested message data under \'response\' key. Using that.');
-           messageData = aiData.response; 
+           messageData = aiData.response; // Use the nested object
          } else {
            console.log('- Frontend: Using top-level parsed data.');
          }
@@ -133,7 +153,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ primaryDocumentId, select
                role: 'ai',
              // Ensure content exists, default to empty string if not (though backend log shows it should)
              content: typeof messageData.content === 'string' ? messageData.content : '',
-               excelOperation: messageData.excelOperation || undefined 
+               excelOperation: messageData.excelOperation || undefined // Check on messageData
              };
              
              console.log('[ChatInterface] Successfully parsed AI response:', aiResponse);
@@ -180,7 +200,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ primaryDocumentId, select
           }
       } catch (parseError) {
          console.error('Frontend: Error parsing response JSON:', parseError);
-         console.error('Frontend: Raw text that failed parse:', rawText); 
+         console.error('Frontend: Raw text that failed parse:', rawText); // Log raw text on parse failure
           setMessages((prev) => [
             ...prev, 
             {
@@ -215,19 +235,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ primaryDocumentId, select
     }
   }, [messages]);
 
-  // LOGGING: Check props received
-  console.log('[ChatInterface] Rendered. Received selectedDocuments count:', selectedDocuments.length);
-
-  // LOGGING: Check disabled condition
-  const isDisabled = isLoading || selectedDocuments.length === 0;
-  console.log(`[ChatInterface] isDisabled check: isLoading=${isLoading}, selectedDocuments.length=${selectedDocuments.length}, Result=${isDisabled}`);
+  // Handle Enter key press in input
+  const handleKeyPress = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter' && !isLoading) {
+      handleSend();
+    }
+  };
 
   return (
-    <Card className="flex flex-col h-full w-full border-t-0 rounded-t-none">
+    <Card className="flex flex-col h-full">
       <CardHeader>
-        <CardTitle>Chat</CardTitle>
+        <CardTitle>Chat with Document ID: {documentId}</CardTitle>
       </CardHeader>
-      <CardContent className="flex-grow overflow-hidden p-0"> 
+      <CardContent className="flex-1 overflow-hidden p-0"> {/* Remove padding for ScrollArea */}
         <ScrollArea className="h-full p-4" ref={scrollAreaRef}>
           <div className="space-y-4">
             {!user && (
@@ -293,45 +313,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ primaryDocumentId, select
           </div>
         </ScrollArea>
       </CardContent>
-      <CardFooter>
-        <form onSubmit={handleSubmit} className="flex w-full items-center space-x-2">
-          <Input
-            id="message"
-            placeholder={selectedDocuments.length > 0 ? "Ask about selected documents..." : "Select documents to start chatting..."} 
-            className="flex-1"
-            autoComplete="off"
+      <CardFooter className="p-4 border-t">
+        <div className="flex w-full items-center space-x-2">
+          <Input 
+            placeholder="Ask something about the document..." 
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            // Use the logged variable for clarity
-            disabled={isDisabled} 
+            onKeyPress={handleKeyPress} 
+            disabled={isLoading} 
           />
-          <Button 
-            type="submit" 
-            size="icon" 
-            // Use the logged variable for clarity
-            disabled={isDisabled || !input.trim()}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                />
-              </svg>
-            )}
-            <span className="sr-only">Send</span>
+          <Button onClick={handleSend} disabled={isLoading || !input.trim()}>
+            {isLoading ? 'Sending...' : 'Send'}
           </Button>
-        </form>
+        </div>
       </CardFooter>
     </Card>
   );

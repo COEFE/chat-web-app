@@ -24,7 +24,6 @@ import DocumentViewer from '@/components/dashboard/DocumentViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
 import { FileUpload } from '@/components/dashboard/FileUpload';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Checkbox } from "@/components/ui/checkbox";
 
 // Import Firestore functions and db instance
 import { db } from '@/lib/firebaseConfig';
@@ -39,23 +38,13 @@ import { MyDocumentData } from '@/types';
 
 interface DocumentTableProps {
   documents: MyDocumentData[];
-  selectedDocumentIds: string[];
   isLoading: boolean;
   error: string | null;
-  onToggleSelection: (doc: MyDocumentData) => void;
+  onSelectDocument: (doc: MyDocumentData | null) => void;
   onDeleteDocument: (docId: string) => Promise<void>;
-  onSetPrimaryDocument: (doc: MyDocumentData) => void;
 }
 
-function DocumentTable({
-  documents,
-  selectedDocumentIds,
-  isLoading,
-  error,
-  onToggleSelection,
-  onDeleteDocument,
-  onSetPrimaryDocument
-}: DocumentTableProps) {
+function DocumentTable({ documents, isLoading, error, onSelectDocument, onDeleteDocument }: DocumentTableProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const { toast } = useToast();
@@ -139,91 +128,71 @@ function DocumentTable({
           ) : (
             displayDocuments.map((doc) => {
               return (
-                <TableRow 
-                  key={doc.id}
-                  data-state={selectedDocumentIds.includes(doc.id) ? 'selected' : ''}
-                >
-                  <TableCell>
-                    <div onClick={(e) => e.stopPropagation()}>
-                      <Checkbox
-                        id={`checkbox-${doc.id}`}
-                        checked={selectedDocumentIds.includes(doc.id)}
-                        onCheckedChange={() => onToggleSelection(doc)} // Keep this for state change
-                        aria-label={`Select document ${doc.name}`}
-                      />
-                    </div>
-                  </TableCell>
+                <TableRow key={doc.id}>
                   <TableCell className="font-medium">{doc.name}</TableCell>
                   <TableCell>{formatDate(doc.uploadedAt)}</TableCell>
                   <TableCell>{doc.status || 'N/A'}</TableCell>
                   <TableCell className="text-right">
-                    <div className="flex items-center justify-end space-x-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => onSetPrimaryDocument(doc)}
-                        title={`View ${doc.name}`}
-                      >
-                        <Eye className="h-4 w-4 mr-1" /> View
-                      </Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            className="text-red-600 hover:text-red-700 ml-2"
-                            disabled={isDeleting && deletingId === doc.id}
+                    <Button variant="ghost" size="sm" onClick={() => onSelectDocument(doc)}>
+                      View
+                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-red-600 hover:text-red-700 ml-2"
+                          disabled={isDeleting && deletingId === doc.id}
+                        >
+                          {isDeleting && deletingId === doc.id ? (
+                            <>
+                              <div className="h-3 w-3 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                              Deleting...
+                            </>
+                          ) : (
+                            'Delete'
+                          )}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will permanently delete the document "{doc.name}". This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
+                              e.preventDefault();
+                              setDeletingId(doc.id);
+                              setIsDeleting(true);
+                              try {
+                                await onDeleteDocument(doc.id);
+                                toast({
+                                  title: "Document deleted",
+                                  description: `${doc.name} has been successfully deleted.`,
+                                });
+                              } catch (error) {
+                                console.error('Error deleting document:', error);
+                                toast({
+                                  variant: "destructive",
+                                  title: "Error",
+                                  description: `Failed to delete document: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                                });
+                              } finally {
+                                setIsDeleting(false);
+                                setDeletingId(null);
+                              }
+                            }}
+                            className="bg-red-600 hover:bg-red-700"
                           >
-                            {isDeleting && deletingId === doc.id ? (
-                              <>
-                                <div className="h-3 w-3 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-                                Deleting...
-                              </>
-                            ) : (
-                              'Delete'
-                            )}
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This will permanently delete the document "{doc.name}". This action cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
-                                e.preventDefault();
-                                setDeletingId(doc.id);
-                                setIsDeleting(true);
-                                try {
-                                  await onDeleteDocument(doc.id);
-                                  toast({
-                                    title: "Document deleted",
-                                    description: `${doc.name} has been successfully deleted.`,
-                                  });
-                                } catch (error) {
-                                  console.error('Error deleting document:', error);
-                                  toast({
-                                    variant: "destructive",
-                                    title: "Error",
-                                    description: `Failed to delete document: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                                  });
-                                } finally {
-                                  setIsDeleting(false);
-                                  setDeletingId(null);
-                                }
-                              }}
-                              className="bg-red-600 hover:bg-red-700"
-                            >
-                              Delete
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </TableCell>
                 </TableRow>
               );
@@ -251,11 +220,10 @@ export default function DashboardPage() {
   const [documents, setDocuments] = useState<MyDocumentData[]>([]);
   const [isLoadingDocs, setIsLoadingDocs] = useState(true);
   const [errorDocs, setErrorDocs] = useState<string | null>(null);
-  const [selectedDocuments, setSelectedDocuments] = useState<MyDocumentData[]>([]);
-  const [primaryDocument, setPrimaryDocument] = useState<MyDocumentData | null>(null);
-
+  const [selectedDocument, setSelectedDocument] = useState<MyDocumentData | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const currentRequestIdRef = useRef<string | null>(null);
   const { toast } = useToast();
 
@@ -429,11 +397,9 @@ export default function DashboardPage() {
       setDocuments(prevDocs => prevDocs.filter(doc => doc.id !== docId));
       
       // If the deleted document was selected, clear the selection
-      if (selectedDocuments.find(doc => doc.id === docId)) {
-        setSelectedDocuments(prevDocs => prevDocs.filter(doc => doc.id !== docId));
-        if (primaryDocument && primaryDocument.id === docId) {
-          setPrimaryDocument(null);
-        }
+      if (selectedDocumentId === docId) {
+        setSelectedDocument(null);
+        setSelectedDocumentId(null);
       }
       
       return await response.json();
@@ -441,7 +407,7 @@ export default function DashboardPage() {
       console.error('Error in handleDeleteDocument:', error);
       throw error;
     }
-  }, [user, selectedDocuments, primaryDocument]);
+  }, [user, selectedDocumentId]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -472,20 +438,21 @@ export default function DashboardPage() {
     };
   }, [fetchDocuments]); // Depend on fetchDocuments to ensure the latest version is used
 
-  // New handler for toggling document selection
-  const handleToggleSelection = (doc: MyDocumentData) => {
-    setSelectedDocuments(prevSelected => {
-      const isSelected = prevSelected.some(d => d.id === doc.id);
-      let newSelected;
-      if (isSelected) {
-        newSelected = prevSelected.filter(d => d.id !== doc.id);
-      } else {
-        newSelected = [...prevSelected, doc];
-      }
+  // Handler for the existing DocumentList component (if used)
+  const handleSelectDocument = (doc: MyDocumentData | null) => {
+    console.log("Selected Document from List:", doc);
+    setSelectedDocument(doc); // Keep this for DocumentViewer perhaps
+    setSelectedDocumentId(doc?.id ?? null);
+    // setView('chat'); // Switch view to chat interface
+  };
 
-      console.log("Selected Documents:", newSelected.map(d => d.name));
-      return newSelected;
-    });
+  // New handler specifically for the Shadcn Select component's onValueChange
+  const handleDocumentSelectChange = (value: string) => {
+    console.log("Selected Document ID from Select:", value);
+    setSelectedDocumentId(value);
+    // Optionally, find the full document object if needed elsewhere
+    const fullDoc = documents.find(d => d.id === value);
+    setSelectedDocument(fullDoc || null);
   };
 
   if (authLoading) {
@@ -496,17 +463,13 @@ export default function DashboardPage() {
     return <div>Loading...</div>;
   }
 
-  console.log(
-    `[DashboardPage] Rendering. ViewMode: ${'split'}, PrimaryDoc: ${!!primaryDocument}, SelectedDocs: ${selectedDocuments.length}`
-  );
-
   return (
     <div className="flex h-screen flex-col bg-muted/40">
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-4">
         <h1 className="text-xl font-semibold whitespace-nowrap">My Documents</h1>
         {documents.length > 0 && (
           <div className="ml-4 w-full max-w-xs"> 
-            <Select onValueChange={(value) => console.log(value)} value={primaryDocument?.id ?? undefined}>
+            <Select onValueChange={handleDocumentSelectChange} value={selectedDocumentId ?? undefined}>
               <SelectTrigger>
                 <SelectValue placeholder="Select a document..." />
               </SelectTrigger>
@@ -538,7 +501,7 @@ export default function DashboardPage() {
           return (
             <div className="h-full flex flex-col">
               {/* View mode controls - only show when a document is selected */}
-              {primaryDocument && (
+              {selectedDocument && (
                 <div className="flex justify-end mb-2 gap-2">
                   <Button 
                     variant="outline" 
@@ -563,61 +526,84 @@ export default function DashboardPage() {
               <div className="flex-1 rounded-lg border overflow-hidden">
                 {viewMode === 'full' ? (
                   // Full screen document view
-                  primaryDocument ? (
-                    <DocumentViewer document={primaryDocument} />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-muted-foreground">
-                      Select a document to view.
-                    </div>
-                  )
+                  <div className="h-full">
+                    {selectedDocument ? (
+                      <div className="flex h-full flex-col p-6 overflow-auto">
+                        <div className="flex h-full flex-col">
+                          <div className="flex-1 overflow-hidden">
+                            {selectedDocument && <DocumentViewer document={selectedDocument} />}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-muted-foreground">
+                        Select a document to view.
+                      </div>
+                    )}
+                  </div>
                 ) : viewMode === 'chat-only' ? (
                   // Chat only view
                   <div className="h-full">
                     <div className="flex h-full flex-col p-6">
-                      <ChatInterface
-                        key={`chat-interface-chat-only-${primaryDocument?.id ?? 'always-visible'}`}
-                        primaryDocumentId={primaryDocument?.id ?? null}
-                        selectedDocuments={selectedDocuments}
-                      />
+                      {selectedDocumentId ? (
+                        <ChatInterface documentId={selectedDocumentId} document={selectedDocument || undefined} />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-muted-foreground">
+                          Select a document to start chatting.
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
                   // Default split view (70/30)
                   <div className="flex h-full">
-                    {/* Left Panel: Always shows DocumentTable */}
-                    <div className="w-[40%] border-r pr-6">
-                      <DocumentTable
-                        documents={documents}
-                        selectedDocumentIds={selectedDocuments.map(d => d.id)}
-                        isLoading={isLoadingDocs}
-                        error={errorDocs}
-                        onToggleSelection={handleToggleSelection}
-                        onDeleteDocument={handleDeleteDocument}
-                        onSetPrimaryDocument={setPrimaryDocument}
-                      />
-                      {documents.length === 0 && (
-                        <p className="mt-4 text-center text-muted-foreground">No documents uploaded yet. Upload a file to start chatting.</p>
-                      )}
+                    {/* Document panel - fixed 70% width */}
+                    <div className="w-[70%] border-r">
+                      <div className="flex h-full flex-col p-6 overflow-auto">
+                        {selectedDocument ? (
+                          <div className="flex h-full flex-col">
+                            <div className="flex-1 overflow-hidden">
+                              {selectedDocument && <DocumentViewer document={selectedDocument} />}
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <Card className="mb-6">
+                              <CardHeader>
+                                <CardTitle>Upload New Document</CardTitle>
+                                <CardDescription>Drag & drop files here or click to select files.</CardDescription>
+                              </CardHeader>
+                              <CardContent>
+                                <FileUpload
+                                  onUploadComplete={handleUploadComplete}
+                                />
+                              </CardContent>
+                            </Card>
+                            <DocumentTable
+                              documents={documents}
+                              isLoading={isLoadingDocs}
+                              error={errorDocs}
+                              onSelectDocument={(doc: MyDocumentData | null) => handleSelectDocument(doc)}
+                              onDeleteDocument={handleDeleteDocument}
+                            />
+                            {documents.length === 0 && (
+                              <p className="mt-4 text-center text-muted-foreground">No documents uploaded yet. Upload a file to start chatting.</p>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
- 
-                    {/* Right Panel: Shows Viewer (optional) + Chat */}
-                    <div className="w-[60%] pl-6">
-                      <div className="flex h-full flex-col">
-                        {/* Conditionally render Document Viewer */}
-                        {primaryDocument && (
-                          <div className="flex-shrink-0 h-[50%] border-b mb-4 pb-4 overflow-hidden"> {/* Adjust height as needed */}
-                            <DocumentViewer document={primaryDocument} />
+                    
+                    {/* Chat panel - fixed 30% width */}
+                    <div className="w-[30%]">
+                      <div className="flex h-full flex-col p-6">
+                        {selectedDocumentId ? (
+                          <ChatInterface documentId={selectedDocumentId} document={selectedDocument || undefined} />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-muted-foreground">
+                            Select a document to start chatting.
                           </div>
                         )}
-+
-                        {/* Always render Chat Interface */}
-                        <div className={primaryDocument ? "flex-grow h-[50%]" : "h-full"}> {/* Chat takes remaining/full height */}
-                          <ChatInterface
-                            key={`chat-interface-${primaryDocument?.id ?? 'always-visible'}`} // Key ensures it persists or resets appropriately
-                            primaryDocumentId={primaryDocument?.id ?? null}
-                            selectedDocuments={selectedDocuments}
-                          />
-                        </div>
                       </div>
                     </div>
                   </div>
