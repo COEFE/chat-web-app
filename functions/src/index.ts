@@ -73,11 +73,30 @@ export const processDocumentUpload = onObjectFinalized(
 
     // Try to get userId from metadata or from the file path
     let userId = "";
+    let originalName = "";
+    let folderId: string | null = null; // Initialize folderId as null
 
     // Type-safe access to customMetadata properties
     if (customMetadata && typeof customMetadata === "object") {
       // Safe access with type checking
       userId = "userId" in customMetadata ? String(customMetadata.userId) : "";
+
+      // Extract originalName
+      originalName = (
+        "originalName" in customMetadata ?
+          String(customMetadata.originalName) :
+          filePath.split("/").pop() || "unknown"
+      );
+
+      // Extract folderId, default to null if missing or empty
+      if ("folderId" in customMetadata && customMetadata.folderId) {
+        folderId = String(customMetadata.folderId);
+      } else {
+        folderId = null; // Explicitly set to null for root uploads or if missing
+      }
+    } else {
+      // Fallback if customMetadata is not an object (should not happen with frontend logic)
+      originalName = filePath.split("/").pop() || "unknown";
     }
 
     // If userId is not in metadata, try to extract it from the file path
@@ -88,18 +107,6 @@ export const processDocumentUpload = onObjectFinalized(
         userId = pathParts[1]; // Extract userId from path
         logger.info(`Extracted userId from path: ${userId}`);
       }
-    }
-
-    // Get original name from metadata or fallback to filename
-    let originalName = "";
-    if (customMetadata && typeof customMetadata === "object") {
-      originalName = (
-        "originalName" in customMetadata ?
-          String(customMetadata.originalName) :
-          filePath.split("/").pop() || "unknown"
-      );
-    } else {
-      originalName = filePath.split("/").pop() || "unknown";
     }
 
     // Basic validation
@@ -115,7 +122,7 @@ export const processDocumentUpload = onObjectFinalized(
     // Log successful metadata extraction
     logger.info(
       `Successfully extracted metadata - userId: ${userId}, ` +
-        `originalName: ${originalName}`
+        `originalName: ${originalName}, folderId: ${folderId}` // Log folderId
     );
     logger.info(
       `File path: ${filePath}, size: ${size}, contentType: ${contentType}`
@@ -212,6 +219,7 @@ export const processDocumentUpload = onObjectFinalized(
       await docRef.set({
         userId,
         name: originalName, // Use the original filename from metadata
+        folderId: folderId, // Add the extracted folderId (or null)
         storagePath: canonicalPath, // Use the canonical path
         fileBucket,
         contentType,
