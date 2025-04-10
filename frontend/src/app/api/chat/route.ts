@@ -442,7 +442,8 @@ export async function POST(req: NextRequest) {
     }
 
     // --- 8. Call Anthropic API --- 
-    const anthropic = new Anthropic(); // API Key from env ANTHROPIC_API_KEY
+    console.log('Attempting to instantiate Anthropic. API Key available:', !!process.env.ANTHROPIC_API_KEY);
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }); // Explicitly pass API Key
     console.log('Sending request to Anthropic...');
     const stream = await anthropic.messages.create({
       model: 'claude-3-haiku-20240307', // Or your preferred model
