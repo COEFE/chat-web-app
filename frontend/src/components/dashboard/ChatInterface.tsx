@@ -215,6 +215,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ primaryDocumentId, select
     }
   }, [messages]);
 
+  // LOGGING: Check props received
+  console.log('[ChatInterface] Rendered. Received selectedDocuments count:', selectedDocuments.length);
+
+  // LOGGING: Check disabled condition
+  const isDisabled = isLoading || selectedDocuments.length === 0;
+  console.log(`[ChatInterface] isDisabled check: isLoading=${isLoading}, selectedDocuments.length=${selectedDocuments.length}, Result=${isDisabled}`);
+
   return (
     <Card className="flex flex-col h-full w-full border-t-0 rounded-t-none">
       <CardHeader>
@@ -295,9 +302,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ primaryDocumentId, select
             autoComplete="off"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            disabled={isLoading || selectedDocuments.length === 0} 
+            // Use the logged variable for clarity
+            disabled={isDisabled} 
           />
-          <Button type="submit" size="icon" disabled={isLoading || !input.trim() || selectedDocuments.length === 0}>
+          <Button 
+            type="submit" 
+            size="icon" 
+            // Use the logged variable for clarity
+            disabled={isDisabled || !input.trim()}
+          >
             {isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (

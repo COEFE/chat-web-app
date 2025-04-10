@@ -496,6 +496,10 @@ export default function DashboardPage() {
     return <div>Loading...</div>;
   }
 
+  console.log(
+    `[DashboardPage] Rendering. ViewMode: ${'split'}, PrimaryDoc: ${!!primaryDocument}, SelectedDocs: ${selectedDocuments.length}`
+  );
+
   return (
     <div className="flex h-screen flex-col bg-muted/40">
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-4">
@@ -559,94 +563,61 @@ export default function DashboardPage() {
               <div className="flex-1 rounded-lg border overflow-hidden">
                 {viewMode === 'full' ? (
                   // Full screen document view
-                  <div className="h-full">
-                    {primaryDocument ? (
-                      <div className="flex h-full flex-col p-6 overflow-auto">
-                        <div className="flex h-full flex-col">
-                          <div className="flex-1 overflow-hidden">
-                            {primaryDocument && <DocumentViewer document={primaryDocument} />}
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-muted-foreground">
-                        Select a document to view.
-                      </div>
-                    )}
-                  </div>
+                  primaryDocument ? (
+                    <DocumentViewer document={primaryDocument} />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-muted-foreground">
+                      Select a document to view.
+                    </div>
+                  )
                 ) : viewMode === 'chat-only' ? (
                   // Chat only view
                   <div className="h-full">
                     <div className="flex h-full flex-col p-6">
-                      {primaryDocument ? (
-                        <ChatInterface 
-                          key={`chat-${primaryDocument.id}`}
-                          primaryDocumentId={primaryDocument.id}
-                          selectedDocuments={selectedDocuments}
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center text-muted-foreground">
-                          Select a document to start chatting.
-                        </div>
-                      )}
+                      <ChatInterface
+                        key={`chat-interface-chat-only-${primaryDocument?.id ?? 'always-visible'}`}
+                        primaryDocumentId={primaryDocument?.id ?? null}
+                        selectedDocuments={selectedDocuments}
+                      />
                     </div>
                   </div>
                 ) : (
                   // Default split view (70/30)
                   <div className="flex h-full">
-                    {/* Document panel - fixed 70% width */}
-                    <div className="w-[70%] border-r">
-                      <div className="flex h-full flex-col p-6 overflow-auto">
-                        {primaryDocument ? (
-                          <div className="flex h-full flex-col">
-                            <div className="flex-1 overflow-hidden">
-                              {primaryDocument && <DocumentViewer document={primaryDocument} />}
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <Card className="mb-6">
-                              <CardHeader>
-                                <CardTitle>Upload New Document</CardTitle>
-                                <CardDescription>Drag & drop files here or click to select files.</CardDescription>
-                              </CardHeader>
-                              <CardContent>
-                                <FileUpload
-                                  onUploadComplete={handleUploadComplete}
-                                />
-                              </CardContent>
-                            </Card>
-                            <DocumentTable
-                              documents={documents}
-                              selectedDocumentIds={selectedDocuments.map(d => d.id)}
-                              isLoading={isLoadingDocs}
-                              error={errorDocs}
-                              onToggleSelection={handleToggleSelection}
-                              onDeleteDocument={handleDeleteDocument}
-                              onSetPrimaryDocument={setPrimaryDocument}
-                            />
-                            {documents.length === 0 && (
-                              <p className="mt-4 text-center text-muted-foreground">No documents uploaded yet. Upload a file to start chatting.</p>
-                            )}
-                          </>
-                        )}
-                      </div>
+                    {/* Left Panel: Always shows DocumentTable */}
+                    <div className="w-[40%] border-r pr-6">
+                      <DocumentTable
+                        documents={documents}
+                        selectedDocumentIds={selectedDocuments.map(d => d.id)}
+                        isLoading={isLoadingDocs}
+                        error={errorDocs}
+                        onToggleSelection={handleToggleSelection}
+                        onDeleteDocument={handleDeleteDocument}
+                        onSetPrimaryDocument={setPrimaryDocument}
+                      />
+                      {documents.length === 0 && (
+                        <p className="mt-4 text-center text-muted-foreground">No documents uploaded yet. Upload a file to start chatting.</p>
+                      )}
                     </div>
-                    
-                    {/* Chat panel - fixed 30% width */}
-                    <div className="w-[30%]">
-                      <div className="flex h-full flex-col p-6">
-                        {primaryDocument ? (
-                          <ChatInterface 
-                            key={`chat-${primaryDocument.id}`}
-                            primaryDocumentId={primaryDocument.id}
+ 
+                    {/* Right Panel: Shows Viewer (optional) + Chat */}
+                    <div className="w-[60%] pl-6">
+                      <div className="flex h-full flex-col">
+                        {/* Conditionally render Document Viewer */}
+                        {primaryDocument && (
+                          <div className="flex-shrink-0 h-[50%] border-b mb-4 pb-4 overflow-hidden"> {/* Adjust height as needed */}
+                            <DocumentViewer document={primaryDocument} />
+                          </div>
+                        )}
++
+                        {/* Always render Chat Interface */}
+                        <div className={primaryDocument ? "flex-grow h-[50%]" : "h-full"}> {/* Chat takes remaining/full height */}
+                          <ChatInterface
+                            key={`chat-interface-${primaryDocument?.id ?? 'always-visible'}`} // Key ensures it persists or resets appropriately
+                            primaryDocumentId={primaryDocument?.id ?? null}
                             selectedDocuments={selectedDocuments}
                           />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-muted-foreground">
-                            Select a document to start chatting.
-                          </div>
-                        )}
+                        </div>
                       </div>
                     </div>
                   </div>
