@@ -246,10 +246,21 @@ export const processDocumentUpload = onObjectFinalized(
 // NEW: Folder Management Functions
 // ==============================================
 
+// Define interfaces for callable function request data
+interface CreateFolderRequestData {
+  name: string;
+  parentFolderId?: string | null;
+}
+
+interface MoveDocumentRequestData {
+  documentId: string;
+  targetFolderId: string | null;
+}
+
 /**
  * Creates a new folder for the authenticated user.
  */
-export const createFolder = onCall(async (request: CallableRequest<any>) => {
+export const createFolder = onCall(async (request: CallableRequest<CreateFolderRequestData>) => {
   logger.info("createFolder called with data:", request.data);
   if (!request.auth) {
     throw new HttpsError(
@@ -267,20 +278,20 @@ export const createFolder = onCall(async (request: CallableRequest<any>) => {
   if (!folderName) {
     throw new HttpsError(
       "invalid-argument",
-      'The function must be called with a "name" argument.'
+      "The function must be called with a \"name\" argument."
     );
   }
 
   // Basic validation for parentFolderId if provided (optional: check if it exists)
-  if (parentFolderId !== null && typeof parentFolderId !== 'string') {
+  if (parentFolderId !== null && typeof parentFolderId !== "string") {
     throw new HttpsError(
       "invalid-argument",
-      'The "parentFolderId" must be a string or null.'
+      "The \"parentFolderId\" must be a string or null."
     );
   }
 
   try {
-    const newFolderRef = db.collection('users').doc(userId).collection('folders').doc(); // Use db
+    const newFolderRef = db.collection("users").doc(userId).collection("folders").doc(); // Use db
     const timestamp = FieldValue.serverTimestamp();
 
     await newFolderRef.set({
@@ -292,7 +303,7 @@ export const createFolder = onCall(async (request: CallableRequest<any>) => {
     });
 
     logger.info(`Folder '${folderName}' created successfully for user ${userId} with ID ${newFolderRef.id}`);
-    return { success: true, folderId: newFolderRef.id };
+    return {success: true, folderId: newFolderRef.id};
   } catch (error) {
     logger.error(`Error creating folder for user ${userId}:`, error);
     throw new HttpsError(
@@ -306,7 +317,7 @@ export const createFolder = onCall(async (request: CallableRequest<any>) => {
 /**
  * Moves a document to a different folder (or root) for the authenticated user.
  */
-export const moveDocument = onCall(async (request: CallableRequest<any>) => {
+export const moveDocument = onCall(async (request: CallableRequest<MoveDocumentRequestData>) => {
   logger.info("moveDocument called with data:", request.data);
   if (!request.auth) {
     throw new HttpsError(
@@ -322,26 +333,26 @@ export const moveDocument = onCall(async (request: CallableRequest<any>) => {
   // Allow targetFolderId to be explicitly null to move to root
   const targetFolderId: string | null = data.targetFolderId === undefined ? null : data.targetFolderId;
 
-  if (!documentId || typeof documentId !== 'string') {
+  if (!documentId || typeof documentId !== "string") {
     throw new HttpsError(
       "invalid-argument",
-      'The function must be called with a valid string "documentId".'
+      "The function must be called with a valid string \"documentId\"."
     );
   }
 
-  if (targetFolderId !== null && typeof targetFolderId !== 'string') {
+  if (targetFolderId !== null && typeof targetFolderId !== "string") {
     throw new HttpsError(
       "invalid-argument",
-      'The "targetFolderId" must be a string or null.'
+      "The \"targetFolderId\" must be a string or null."
     );
   }
 
   try {
-    const docRef = db.collection('users').doc(userId).collection('documents').doc(documentId); // Use db
+    const docRef = db.collection("users").doc(userId).collection("documents").doc(documentId); // Use db
 
     // Optional: Check if targetFolderId (if not null) actually exists
     if (targetFolderId) {
-      const folderRef = db.collection('users').doc(userId).collection('folders').doc(targetFolderId); // Use db
+      const folderRef = db.collection("users").doc(userId).collection("folders").doc(targetFolderId); // Use db
       const folderSnap = await folderRef.get();
       if (!folderSnap.exists) {
         throw new HttpsError("not-found", `Target folder with ID ${targetFolderId} not found.`);
@@ -353,8 +364,8 @@ export const moveDocument = onCall(async (request: CallableRequest<any>) => {
       updatedAt: FieldValue.serverTimestamp(),
     });
 
-    logger.info(`Document ${documentId} moved to folder ${targetFolderId ?? 'root'} successfully for user ${userId}`);
-    return { success: true };
+    logger.info(`Document ${documentId} moved to folder ${targetFolderId ?? "root"} successfully for user ${userId}`);
+    return {success: true};
   } catch (error) {
     logger.error(`Error moving document ${documentId} for user ${userId}:`, error);
     if (error instanceof HttpsError) { // Re-throw HttpsErrors directly
