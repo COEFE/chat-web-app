@@ -60,6 +60,7 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [docToDelete, setDocToDelete] = useState<FilesystemItem | null>(null);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const { toast } = useToast();
 
   const formatDate = (timestamp: any): string => {
@@ -166,7 +167,10 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
                     <TableCell>{formatDate(doc.updatedAt)}</TableCell>
                     <TableCell>{doc.status || 'N/A'}</TableCell>
                     <TableCell className="text-right">
-                      <DropdownMenu>
+                      <DropdownMenu 
+                        open={openDropdown === doc.id} 
+                        onOpenChange={(open) => setOpenDropdown(open ? doc.id : null)}
+                      >
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" className="h-8 w-8 p-0">
                             <span className="sr-only">Open menu</span>
@@ -181,7 +185,12 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
                           <DropdownMenuItem 
                             onSelect={(event) => {
                               event.preventDefault(); // Prevent default selection behavior if any
-                              onMoveClick(doc.id, doc.name); // Call the handler passed from DashboardPage
+                              setOpenDropdown(null); // Close dropdown first
+                              
+                              // Delay opening the modal to ensure dropdown is fully closed
+                              setTimeout(() => {
+                                onMoveClick(doc.id, doc.name);
+                              }, 50);
                             }}
                           >
                             <Move className="mr-2 h-4 w-4" />
@@ -191,7 +200,12 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
                             className="text-red-600 hover:text-red-700 focus:bg-red-50 focus:text-red-700"
                             onSelect={(e) => {
                               e.preventDefault();
-                              setDocToDelete(doc); // Set the doc to be deleted
+                              setOpenDropdown(null); // Close dropdown first
+                              
+                              // Delay setting state to ensure dropdown is fully closed
+                              setTimeout(() => {
+                                setDocToDelete(doc); // Set the doc to be deleted
+                              }, 50);
                             }}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
@@ -495,13 +509,11 @@ function DashboardPage() {
 
   const handleOpenMoveModal = (docId: string, docName: string) => {
     // Fetch all folders if not already fetched (or fetch fresh)
-    setTimeout(() => {
-      if (availableFolders.length === 0) {
-        fetchAllFolders(); // Fetch folders if needed
-      }
-      setMovingDocument({ id: docId, name: docName });
-      setIsMoveModalOpen(true);
-    }, 0);
+    if (availableFolders.length === 0) {
+      fetchAllFolders(); // Fetch folders if needed
+    }
+    setMovingDocument({ id: docId, name: docName });
+    setIsMoveModalOpen(true);
   };
 
   const handleMoveConfirm = useCallback(async (targetFolderId: string | null) => {
