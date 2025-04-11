@@ -51,6 +51,8 @@ export function FileUpload({
     console.log('Storage bucket:', getStorage().app.options.storageBucket || 'DEFAULT');
     console.log('Files to process:', filesToProcess.map(f => ({ name: f.file.name, id: f.id, status: f.status })));
 
+    console.log(`handleUpload - currentFolderId prop value: ${currentFolderId}`); // Log prop value
+
     if (!user) {
       console.error('Upload Error: User not authenticated.');
       setUploadingFiles((prev) =>
@@ -89,7 +91,7 @@ export function FileUpload({
         }
       };
       
-      console.log(`Setting metadata for upload:`, metadata);
+      console.log(`Setting metadata for upload: userId=${metadata.customMetadata.userId}, originalName=${metadata.customMetadata.originalName}, folderId=${metadata.customMetadata.folderId}`);
 
       try {
         setUploadingFiles((prev) =>
