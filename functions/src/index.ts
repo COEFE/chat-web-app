@@ -9,13 +9,14 @@
 
 // import * as functions from "firebase-functions/v2";
 import {onObjectFinalized} from "firebase-functions/v2/storage";
-import {getFirestore, Timestamp, FieldValue} from "firebase-admin/firestore";
+import {getFirestore, Timestamp, FieldValue, CollectionReference, DocumentData} from "firebase-admin/firestore"; // Keep only necessary imports
 import * as admin from "firebase-admin";
 import {initializeApp} from "firebase-admin/app";
 import {getStorage} from "firebase-admin/storage";
 import * as logger from "firebase-functions/logger"; // Correct logger import path
 import * as path from "path"; // Import path module
 import {HttpsError, onCall, CallableRequest} from "firebase-functions/v2/https"; // Corrected import to v2
+import {GetSignedUrlConfig} from "@google-cloud/storage"; // Import the type
 
 // Start writing functions
 // https://firebase.google.com/docs/functions
@@ -45,7 +46,13 @@ export const processDocumentUpload = onObjectFinalized(
     const size = event.data.size; // File size in bytes
     const timeCreated = event.data.timeCreated; // File creation time (ISO 8601)
 
-    logger.info("Received file upload with metadata:", metadata);
+    logger.info("Received file upload", {
+      name: event.data.name,
+      bucket: event.data.bucket,
+      metadata: event.data.metadata,
+      metageneration: event.data.metageneration,
+      contentType: event.data.contentType,
+    });
 
     logger.info("Processing new file:", {filePath, contentType, size});
 
@@ -134,49 +141,50 @@ export const processDocumentUpload = onObjectFinalized(
 
     // --- Create Firestore Entry ---
     try {
-      // Log the Firestore path we're writing to
-      const firestorePath = `users/${userId}/documents`;
-      logger.info(`Writing to Firestore path: ${firestorePath}`);
+      // Check if a document for this user and path already exists recently
+      try {
+        // Use a direct path query for efficiency
+        const userDocumentsRef: CollectionReference<DocumentData> = db.collection("users").doc(userId).collection("documents");
+        const snapshot = await userDocumentsRef
+          .where("storagePath", "==", filePath) // Check using the *original* filePath first
+          .orderBy("createdAt", "desc")
+          .limit(1)
+          .get(); // Use .get() with Admin SDK
 
-      // 1. Generate Firestore Document ID first
-      const docRef = db
-        .collection("users")
-        .doc(userId)
-        .collection("documents")
-        .doc(); // Auto-generate ID
-      const newDocId = docRef.id;
-      logger.info(`Generated Firestore Document ID: ${newDocId}`);
+        if (!snapshot.empty) {
+          const existingDoc = snapshot.docs[0].data();
+          const createdAt = existingDoc.createdAt as Timestamp;
+          const now = Timestamp.now();
+          // Check if the existing document was created very recently (e.g., within 10 seconds)
+          if (now.seconds - createdAt.seconds < 10) {
+            logger.warn(`Skipping processing for ${filePath} as a very recent document exists (likely duplicate trigger).`);
+            return;
+          }
+          logger.info(`Found older document for path ${filePath}. Proceeding with potential overwrite/update logic if needed (currently creating new).`);
+        }
+      } catch (error) {
+        logger.error(`Error checking for existing document: ${error}`);
+        // Decide if we should continue or return based on the error
+        // For now, we'll log and continue, but might want to return for critical errors
+      }
 
-      // 2. Construct Canonical Storage Path
-      const fileExtension = path.extname(filePath); // Get extension (e.g., '.xlsx')
-      const canonicalFileName = `${newDocId}${fileExtension}`;
-      const canonicalPath = `users/${userId}/${canonicalFileName}`;
-      logger.info(`Constructed canonical storage path: ${canonicalPath}`);
+      // **CURRENT BEHAVIOR:** We will use the ORIGINAL filePath as the storagePath.
+      // If renaming/moving logic is re-enabled above, ensure 'finalStoragePath' reflects that.
+      const finalStoragePath = filePath;
+      logger.info(`Using final storage path: ${finalStoragePath}`);
 
-      // 3. Move/Rename the file in Storage
+      // 4. Get necessary metadata and generate Signed URL (optional but useful)
       const storage = getStorage();
       const bucket = storage.bucket(fileBucket);
-      const originalFileRef = bucket.file(filePath);
-      const canonicalFileRef = bucket.file(canonicalPath);
+      const finalFile = bucket.file(finalStoragePath); // Use the final path
+      const [metadata] = await finalFile.getMetadata(); // Get metadata from the final file path
+      const contentType = metadata.contentType || "application/octet-stream";
+      // const size = metadata.size;
+      // const timeCreated = metadata.timeCreated;
 
-      try {
-        logger.info(
-          `Attempting to move file from '${filePath}' to '${canonicalPath}'`
-        );
-        await originalFileRef.move(canonicalPath);
-        logger.info("Successfully moved file in Storage to canonical path.");
-      } catch (moveError) {
-        logger.error(
-          `Failed to move file from '${filePath}' to '${canonicalPath}':`,
-          moveError
-        );
-        // Decide how to handle failed move: exit, log, retry?
-        // For now, we'll log the error and potentially continue with the old path,
-        // but this indicates a problem.
-        // Consider returning here or throwing the error if move is critical.
-        // Let's throw for now to prevent inconsistent state
-        throw new Error(`Storage move failed: ${moveError}`);
-      }
+      // Generate a unique ID for the Firestore document
+      const docRef = db.collection("users").doc(userId).collection("documents").doc(); // Generate ID now
+      logger.info(`Generated Firestore Document ID: ${docRef.id}`);
 
       // Prepare data, handling potential undefined values
       let fileSize = 0;
@@ -197,30 +205,26 @@ export const processDocumentUpload = onObjectFinalized(
         }
       }
 
-      // 4. Get Download URL for the CANONICAL path
-      const fileRef = canonicalFileRef; // Use the reference to the moved file
-
-      // Use a longer expiration time (7 days) for better user experience
-      const expirationDate = new Date();
-      expirationDate.setDate(expirationDate.getDate() + 7); // 7 days instead of 1
-
-      logger.info(
-        `Setting signed URL expiration to: ${expirationDate.toISOString()}`
-      );
-      const [downloadURL] = await fileRef.getSignedUrl({
+      // Generate Signed URL for the file
+      const signedUrlConfig: GetSignedUrlConfig = {
         action: "read",
-        expires: expirationDate.toISOString(),
-      });
+        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Expires in 7 days
+      }; // Expires in 7 days (adjust as needed)
+      let signedUrl = "#";
+      try {
+        const [url] = await finalFile.getSignedUrl(signedUrlConfig);
+        signedUrl = url;
+        logger.info(`Generated signed URL expiring on ${signedUrlConfig.expires}: ${signedUrl ? "..." : "ERROR"}`); // Mask URL in log
+      } catch (error) {
+        logger.error(`Error generating signed URL: ${error}`);
+      }
 
-      logger.info(
-        `Generated signed URL with 24-hour expiration: ${downloadURL}`
-      );
-
-      await docRef.set({
+      // Create the Firestore document
+      const documentData = {
         userId,
-        name: originalName, // Use the original filename from metadata
-        folderId: folderId, // Add the extracted folderId (or null)
-        storagePath: canonicalPath, // Use the canonical path
+        name: originalName,
+        folderId: folderId, // Use the extracted folderId (or null)
+        storagePath: finalStoragePath, // Use the final storage path
         fileBucket,
         contentType,
         size: fileSize,
@@ -228,16 +232,20 @@ export const processDocumentUpload = onObjectFinalized(
         uploadedAt: FieldValue.serverTimestamp(),
         createdAt,
         status: "processed", // Changed from "uploaded" to "processed"
-        downloadURL: downloadURL,
-      });
-      // Log timestamp creation
-      logger.info("Created document with server timestamp");
+        downloadURL: signedUrl, // Add the generated signed URL
+      };
+      logger.info("Attempting to create Firestore document with data:", {...documentData, downloadURL: "..."}); // Log data (mask URL)
 
-      // Log success with file path
-      logger.info("Successfully created Firestore entry for: " + filePath);
+      try {
+        // Use set() to create or overwrite the document
+        await docRef.set(documentData);
+        logger.info(`Successfully created Firestore entry for: ${originalName} (ID: ${docRef.id}) with folderId: ${folderId}`);
+      } catch (error) {
+        logger.error("Error creating Firestore entry: " + error);
+        // Consider adding retry logic or moving file to error folder
+      }
     } catch (error) {
-      logger.error("Error creating Firestore entry: " + error);
-      // Consider adding retry logic or moving file to error folder
+      logger.error("Error processing document upload: " + error);
     }
   }
 );

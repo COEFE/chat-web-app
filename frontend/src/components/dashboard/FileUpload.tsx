@@ -141,7 +141,7 @@ export function FileUpload({
       setTimeout(() => {
         console.log('Calling onUploadComplete callback after delay.');
         onUploadComplete();
-      }, 3000);  // 3-second delay
+      }, 7000);  // 7-second delay (Increased for testing)
     }
 
   }, [user, onUploadComplete, currentFolderId]); 
