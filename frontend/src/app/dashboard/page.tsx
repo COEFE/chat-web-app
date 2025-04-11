@@ -134,6 +134,7 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
               if (item.type === 'folder') {
                 return (
                   <TableRow key={item.id} className="cursor-pointer hover:bg-muted/50" onClick={() => {
+                    console.log(`!!! TableRow onClick lambda executed for folder: ${item.id}`);
                     onFolderClick(item.id, item.name);
                   }}>
                     <TableCell>
@@ -357,12 +358,12 @@ function DashboardPage() {
     }
   };
 
-  const handleFolderClick = (folderId: string, folderName: string) => {
+  const handleFolderClick = useCallback((folderId: string, folderName: string) => {
     console.log(`Navigating into folder: ${folderName} (${folderId})`);
     setCurrentFolderId(folderId);
     setBreadcrumbs(prev => [...prev, { id: folderId, name: folderName }]);
     setSelectedDocument(null);
-  };
+  }, [setCurrentFolderId, setBreadcrumbs]);
 
   const handleBreadcrumbClick = (index: number) => {
     const targetFolder = breadcrumbs[index];
