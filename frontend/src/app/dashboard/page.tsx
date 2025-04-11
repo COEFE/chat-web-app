@@ -57,7 +57,6 @@ interface DocumentTableProps {
 }
 
 function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument, onFolderClick, onMoveClick }: DocumentTableProps) {
-  console.log('DocumentTable: Received items prop:', items); // Log received items
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const { toast } = useToast();
@@ -135,7 +134,6 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
               if (item.type === 'folder') {
                 return (
                   <TableRow key={item.id} className="cursor-pointer hover:bg-muted/50" onClick={() => {
-                    console.log(`DocumentTable: Folder row clicked: ${item.id} (${item.name})`);
                     onFolderClick(item.id, item.name);
                   }}>
                     <TableCell>
@@ -644,18 +642,31 @@ function DashboardPage() {
                             />
                           </CardContent>
                         </Card>
-                        {console.log('DashboardPage: Rendering DocumentTable with filesystemItems:', filesystemItems)} // Log before rendering
-                        <DocumentTable
-                          items={filesystemItems}
-                          isLoading={loadingDocs}
-                          error={docsError}
-                          onSelectItem={handleSelectItem}
-                          onDeleteDocument={handleDeleteDocument}
-                          onFolderClick={handleFolderClick}
-                          onMoveClick={handleOpenMoveModal}
-                        />
-                        {filesystemItems.length === 0 && (
-                          <p className="mt-4 text-center text-muted-foreground">No documents or folders uploaded yet. Upload a file or create a folder to start.</p>
+                        {/* Conditional Rendering for Document Table */}
+                        {loadingDocs ? (
+                          <div className="flex items-center justify-center p-10">
+                            <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                            <span>Loading items...</span>
+                          </div>
+                        ) : docsError ? (
+                          <div className="text-red-600 p-4 text-center border border-red-300 rounded-md bg-red-50">
+                            {docsError}
+                          </div>
+                        ) : (
+                          <>
+                            <DocumentTable
+                              items={filesystemItems}
+                              isLoading={false} // Handled outside
+                              error={null}      // Handled outside
+                              onSelectItem={handleSelectItem}
+                              onDeleteDocument={handleDeleteDocument}
+                              onFolderClick={handleFolderClick}
+                              onMoveClick={handleOpenMoveModal}
+                            />
+                            {filesystemItems.length === 0 && (
+                              <p className="mt-4 text-center text-muted-foreground">No documents or folders uploaded yet. Upload a file or create a folder to start.</p>
+                            )}
+                          </>
                         )}
                       </>
                     )}
