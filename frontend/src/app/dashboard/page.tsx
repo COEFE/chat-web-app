@@ -1,7 +1,7 @@
 'use client';
 
-import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff, Folder, FolderPlus } from 'lucide-react';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff, Folder, FolderPlus, Move } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -35,8 +35,16 @@ import {
   where,
   Timestamp
 } from 'firebase/firestore';
-import { db, createFolderAPI } from '@/lib/firebaseConfig';
+import { db, createFolderAPI, functionsInstance } from '@/lib/firebaseConfig';
+import { httpsCallable } from 'firebase/functions';
 import { MyDocumentData, FolderData, FilesystemItem } from '@/types';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { MoveDocumentModal } from '@/components/dashboard/MoveDocumentModal';
 
 interface DocumentTableProps {
   items: FilesystemItem[];
@@ -45,9 +53,10 @@ interface DocumentTableProps {
   onSelectItem: (item: FilesystemItem | null) => void;
   onDeleteDocument: (docId: string) => Promise<void>;
   onFolderClick: (folderId: string, folderName: string) => void;
+  onMoveClick: (docId: string, docName: string) => void;
 }
 
-function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument, onFolderClick }: DocumentTableProps) {
+function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument, onFolderClick, onMoveClick }: DocumentTableProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const { toast } = useToast();
@@ -153,66 +162,71 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
                     <TableCell>{formatDate(doc.updatedAt)}</TableCell>
                     <TableCell>{doc.status || 'N/A'}</TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => onSelectItem(doc)}>
-                        View
-                      </Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            className="text-red-600 hover:text-red-700 ml-2"
-                            disabled={isDeleting && deletingId === doc.id}
-                          >
-                            {isDeleting && deletingId === doc.id ? (
-                              <>
-                                <div className="h-3 w-3 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-                                Deleting...
-                              </>
-                            ) : (
-                              'Delete'
-                            )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" className="h-8 w-8 p-0">
+                            <span className="sr-only">Open menu</span>
+                            <MoreHorizontal className="h-4 w-4" />
                           </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This will permanently delete the document "{doc.name}". This action cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
-                                e.preventDefault();
-                                setDeletingId(doc.id);
-                                setIsDeleting(true);
-                                try {
-                                  await onDeleteDocument(doc.id);
-                                  toast({
-                                    title: "Document deleted",
-                                    description: `${doc.name} has been successfully deleted.`,
-                                  });
-                                } catch (error) {
-                                  console.error('Error deleting document:', error);
-                                  toast({
-                                    variant: "destructive",
-                                    title: "Error",
-                                    description: `Failed to delete document: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                                  });
-                                } finally {
-                                  setIsDeleting(false);
-                                  setDeletingId(null);
-                                }
-                              }}
-                              className="bg-red-600 hover:bg-red-700"
-                            >
-                              Delete
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => onSelectItem(doc)}>
+                            <Eye className="mr-2 h-4 w-4" />
+                            View
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => onMoveClick(doc.id, doc.name)}>
+                            <Move className="mr-2 h-4 w-4" />
+                            Move
+                          </DropdownMenuItem>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <div className="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 text-red-600 hover:text-red-700">
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                <span>Delete</span>
+                              </div>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will permanently delete the document "{doc.name}". This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
+                                    e.preventDefault();
+                                    setDeletingId(doc.id);
+                                    setIsDeleting(true);
+                                    try {
+                                      await onDeleteDocument(doc.id);
+                                      toast({
+                                        title: "Document deleted",
+                                        description: `${doc.name} has been successfully deleted.`,
+                                      });
+                                    } catch (error) {
+                                      console.error('Error deleting document:', error);
+                                      toast({
+                                        variant: "destructive",
+                                        title: "Error",
+                                        description: `Failed to delete ${doc.name}. Please try again. Error: ${error instanceof Error ? error.message : String(error)}`,
+                                      });
+                                    } finally {
+                                      setIsDeleting(false);
+                                      setDeletingId(null);
+                                    }
+                                  }}
+                                  disabled={isDeleting && deletingId === doc.id}
+                                  className="bg-red-600 hover:bg-red-700"
+                                >
+                                  {isDeleting && deletingId === doc.id ? 'Deleting...' : 'Delete'}
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 );
@@ -253,12 +267,16 @@ function DashboardPage() {
   const [newFolderName, setNewFolderName] = useState("");
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [movingDocument, setMovingDocument] = useState<{ id: string; name: string } | null>(null);
+  const [availableFolders, setAvailableFolders] = useState<FolderData[]>([]);
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+  const [isLoadingFolders, setIsLoadingFolders] = useState(false);
 
   const panelGroupRef = useRef<any>(null);
 
-  const triggerRefresh = useCallback(() => {
+  const triggerRefresh = () => {
     setRefreshTrigger(prev => prev + 1);
-  }, []);
+  };
 
   useEffect(() => {
     if (authLoading) {
@@ -439,6 +457,68 @@ function DashboardPage() {
     }
   };
 
+  const fetchAllFolders = async () => {
+    if (!user) return;
+    console.log(`Fetching all folders for user: ${user.uid}`);
+    try {
+      setIsLoadingFolders(true); // Start loading
+      const foldersRef = collection(db, `users/${user.uid}/folders`);
+      const q = query(foldersRef, orderBy('name', 'asc'));
+      const querySnapshot = await getDocs(q);
+      // Ensure createdAt/updatedAt are handled if needed, though FolderData might not require them here
+      const fetchedFolders: FolderData[] = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as FolderData));
+      setAvailableFolders(fetchedFolders);
+    } catch (error) {
+      console.error('Error fetching all folders:', error);
+      toast({ variant: "destructive", title: "Error", description: "Could not load folders for moving." });
+      setAvailableFolders([]); // Reset on error
+    } finally {
+      setIsLoadingFolders(false); // Stop loading regardless of outcome
+    }
+  };
+
+  const handleOpenMoveModal = (docId: string, docName: string) => {
+    // Fetch all folders if not already fetched (or fetch fresh)
+    if (availableFolders.length === 0) {
+      fetchAllFolders(); // Fetch folders if needed
+    }
+    setMovingDocument({ id: docId, name: docName });
+    setIsMoveModalOpen(true);
+  };
+
+  // Define as a standard async function to test scope resolution
+  async function handleMoveConfirm(targetFolderId: string | null) {
+    if (!movingDocument) return;
+ 
+    console.log(`Attempting to move ${movingDocument.id} to ${targetFolderId}`);
+    try {
+      // Ensure 'functions' is imported and initialized correctly in firebaseConfig
+      const moveDocFunc = httpsCallable(functionsInstance, 'moveDocument'); 
+      await moveDocFunc({ 
+        documentId: movingDocument.id, 
+        targetFolderId: targetFolderId // Pass null for root
+      });
+      toast({ title: "Success", description: `Moved '${movingDocument.name}' successfully.` });
+      fetchAllFolders(); // Refresh the list of available folders
+      fetchItems(currentFolderId); // Refresh the current folder view
+    } catch (error: any) {
+      console.error("Error moving document:", error);
+      // Attempt to get a more specific error message
+      const message = error?.details?.message || error?.message || 'An unknown error occurred';
+      toast({ 
+        variant: "destructive", 
+        title: "Error Moving Document", 
+        description: `Failed to move document: ${message}` 
+      });
+    } finally {
+      setIsMoveModalOpen(false);
+      setMovingDocument(null);
+    }
+  };
+
   if (authLoading) {
     return <div>Loading...</div>;
   }
@@ -546,6 +626,7 @@ function DashboardPage() {
                           onSelectItem={handleSelectItem}
                           onDeleteDocument={handleDeleteDocument}
                           onFolderClick={handleFolderClick}
+                          onMoveClick={handleOpenMoveModal}
                         />
                         {filesystemItems.length === 0 && (
                           <p className="mt-4 text-center text-muted-foreground">No documents or folders uploaded yet. Upload a file or create a folder to start.</p>
@@ -613,6 +694,16 @@ function DashboardPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Move Document Modal (Render conditionally) */}
+      <MoveDocumentModal 
+        isOpen={isMoveModalOpen}
+        onClose={() => setIsMoveModalOpen(false)}
+        documentName={movingDocument?.name || ''}
+        folders={availableFolders} 
+        onConfirmMove={handleMoveConfirm} 
+        isLoadingFolders={isLoadingFolders}
+      />
     </div>
   );
 }
