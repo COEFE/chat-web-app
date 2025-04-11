@@ -495,11 +495,13 @@ function DashboardPage() {
 
   const handleOpenMoveModal = (docId: string, docName: string) => {
     // Fetch all folders if not already fetched (or fetch fresh)
-    if (availableFolders.length === 0) {
-      fetchAllFolders(); // Fetch folders if needed
-    }
-    setMovingDocument({ id: docId, name: docName });
-    setIsMoveModalOpen(true);
+    setTimeout(() => {
+      if (availableFolders.length === 0) {
+        fetchAllFolders(); // Fetch folders if needed
+      }
+      setMovingDocument({ id: docId, name: docName });
+      setIsMoveModalOpen(true);
+    }, 0);
   };
 
   const handleMoveConfirm = useCallback(async (targetFolderId: string | null) => {
