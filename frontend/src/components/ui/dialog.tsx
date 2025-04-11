@@ -85,10 +85,6 @@ function DialogContent({
   
   // Handle dialog close with proper focus management
   const handleDialogClose = () => {
-    // Blur any active element to prevent aria-hidden issues
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-    }
   };
 
   return (
@@ -103,8 +99,6 @@ function DialogContent({
         // Handle focus management
         onEscapeKeyDown={handleDialogClose}
         onInteractOutside={handleDialogClose}
-        // Override aria-hidden to prevent accessibility issues
-        aria-hidden={undefined}
         {...props}
       >
         {children}
