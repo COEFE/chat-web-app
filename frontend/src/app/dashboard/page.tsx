@@ -1,7 +1,7 @@
 'use client';
 
 import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff, Folder, FolderPlus, Move } from 'lucide-react';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -278,7 +278,7 @@ function DashboardPage() {
     setRefreshTrigger(prev => prev + 1);
   };
 
-  useEffect(() => {
+  async function fetchItems(folderId: string | null = null) {
     if (authLoading) {
       console.log('Auth is loading, skipping fetch.');
       return;
@@ -294,52 +294,47 @@ function DashboardPage() {
     setDocsError(null);
     setFilesystemItems([]);
 
-    const fetchItems = async () => {
-      try {
-        const userId = user.uid;
+    try {
+      const userId = user.uid;
 
-        const foldersQuery = query(
-          collection(db, 'users', userId, 'folders'),
-          where('parentFolderId', '==', currentFolderId),
-          orderBy('name', 'asc')
-        );
-        const folderSnapshot = await getDocs(foldersQuery);
-        const fetchedFolders: FolderData[] = folderSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-        } as FolderData));
-        const folderItems: FilesystemItem[] = fetchedFolders.map(f => ({ ...f, type: 'folder' }));
-        console.log('Fetched Folders:', fetchedFolders);
+      const foldersQuery = query(
+        collection(db, 'users', userId, 'folders'),
+        where('parentFolderId', '==', currentFolderId),
+        orderBy('name', 'asc')
+      );
+      const folderSnapshot = await getDocs(foldersQuery);
+      const fetchedFolders: FolderData[] = folderSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      } as FolderData));
+      const folderItems: FilesystemItem[] = fetchedFolders.map(f => ({ ...f, type: 'folder' }));
+      console.log('Fetched Folders:', fetchedFolders);
 
-        const documentsQuery = query(
-          collection(db, 'users', userId, 'documents'),
-          where('folderId', '==', currentFolderId),
-          orderBy('name', 'asc')
-        );
-        const documentSnapshot = await getDocs(documentsQuery);
-        const fetchedDocs: MyDocumentData[] = documentSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          uploadedAt: doc.data().uploadedAt as Timestamp,
-          createdAt: doc.data().createdAt as Timestamp,
-          updatedAt: doc.data().updatedAt as Timestamp,
-        } as MyDocumentData));
-        const documentItems: FilesystemItem[] = fetchedDocs.map(d => ({ ...d, type: 'document' }));
-        console.log('Fetched Documents:', fetchedDocs);
+      const documentsQuery = query(
+        collection(db, 'users', userId, 'documents'),
+        where('folderId', '==', currentFolderId),
+        orderBy('name', 'asc')
+      );
+      const documentSnapshot = await getDocs(documentsQuery);
+      const fetchedDocs: MyDocumentData[] = documentSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        uploadedAt: doc.data().uploadedAt as Timestamp,
+        createdAt: doc.data().createdAt as Timestamp,
+        updatedAt: doc.data().updatedAt as Timestamp,
+      } as MyDocumentData));
+      const documentItems: FilesystemItem[] = fetchedDocs.map(d => ({ ...d, type: 'document' }));
+      console.log('Fetched Documents:', fetchedDocs);
 
-        setFilesystemItems([...folderItems, ...documentItems]);
+      setFilesystemItems([...folderItems, ...documentItems]);
 
-      } catch (error) {
-        console.error('Error fetching documents or folders:', error);
-        setDocsError(`Failed to load items: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      } finally {
-        setLoadingDocs(false);
-      }
-    };
-
-    fetchItems();
-
-  }, [user, authLoading, router, currentFolderId, refreshTrigger]);
+    } catch (error) {
+      console.error('Error fetching documents or folders:', error);
+      setDocsError(`Failed to load items: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setLoadingDocs(false);
+    }
+  };
 
   const handleSelectDocument = (doc: MyDocumentData | null) => {
     console.log('Document selected:', doc);
@@ -457,7 +452,7 @@ function DashboardPage() {
     }
   };
 
-  const fetchAllFolders = async () => {
+  async function fetchAllFolders() {
     if (!user) return;
     console.log(`Fetching all folders for user: ${user.uid}`);
     try {
@@ -489,10 +484,9 @@ function DashboardPage() {
     setIsMoveModalOpen(true);
   };
 
-  // Define as a standard async function to test scope resolution
-  async function handleMoveConfirm(targetFolderId: string | null) {
+  const handleMoveConfirm = useCallback(async (targetFolderId: string | null) => {
     if (!movingDocument) return;
- 
+
     console.log(`Attempting to move ${movingDocument.id} to ${targetFolderId}`);
     try {
       // Ensure 'functions' is imported and initialized correctly in firebaseConfig
@@ -517,7 +511,34 @@ function DashboardPage() {
       setIsMoveModalOpen(false);
       setMovingDocument(null);
     }
-  };
+  }, [
+    movingDocument, 
+    functionsInstance, 
+    toast, 
+    currentFolderId, 
+    setIsMoveModalOpen, 
+    setMovingDocument
+  ]);
+
+  useEffect(() => {
+    if (authLoading) {
+      console.log('Auth is loading, skipping fetch.');
+      return;
+    }
+    if (!user) {
+      console.log('User not logged in, redirecting.');
+      router.push('/login');
+      return;
+    }
+
+    console.log(`Fetching items for user: ${user.uid}, folderId: ${currentFolderId}`);
+    setLoadingDocs(true);
+    setDocsError(null);
+    setFilesystemItems([]);
+
+    fetchItems();
+
+  }, [user, authLoading, router, currentFolderId, refreshTrigger, setLoadingDocs, setDocsError, setFilesystemItems]);
 
   if (authLoading) {
     return <div>Loading...</div>;
