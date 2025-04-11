@@ -176,7 +176,12 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
                             <Eye className="mr-2 h-4 w-4" />
                             View
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => onMoveClick(doc.id, doc.name)}>
+                          <DropdownMenuItem 
+                            onSelect={(event) => {
+                              event.preventDefault(); // Prevent default selection behavior if any
+                              onMoveClick(doc.id, doc.name); // Call the handler passed from DashboardPage
+                            }}
+                          >
                             <Move className="mr-2 h-4 w-4" />
                             Move
                           </DropdownMenuItem>
