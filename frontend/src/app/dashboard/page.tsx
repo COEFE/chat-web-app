@@ -59,7 +59,9 @@ interface DocumentTableProps {
 function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument, onFolderClick, onMoveClick }: DocumentTableProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [docToDelete, setDocToDelete] = useState<FilesystemItem | null>(null);
   const { toast } = useToast();
+
   const formatDate = (timestamp: any): string => {
     if (!timestamp) return 'N/A';
     
@@ -185,53 +187,16 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
                             <Move className="mr-2 h-4 w-4" />
                             Move
                           </DropdownMenuItem>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <div className="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 text-red-600 hover:text-red-700">
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                <span>Delete</span>
-                              </div>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This will permanently delete the document "{doc.name}". This action cannot be undone.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
-                                    e.preventDefault();
-                                    setDeletingId(doc.id);
-                                    setIsDeleting(true);
-                                    try {
-                                      await onDeleteDocument(doc.id);
-                                      toast({
-                                        title: "Document deleted",
-                                        description: `${doc.name} has been successfully deleted.`,
-                                      });
-                                    } catch (error) {
-                                      console.error('Error deleting document:', error);
-                                      toast({
-                                        variant: "destructive",
-                                        title: "Error",
-                                        description: `Failed to delete ${doc.name}. Please try again. Error: ${error instanceof Error ? error.message : String(error)}`,
-                                      });
-                                    } finally {
-                                      setIsDeleting(false);
-                                      setDeletingId(null);
-                                    }
-                                  }}
-                                  disabled={isDeleting && deletingId === doc.id}
-                                  className="bg-red-600 hover:bg-red-700"
-                                >
-                                  {isDeleting && deletingId === doc.id ? 'Deleting...' : 'Delete'}
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
+                          <DropdownMenuItem
+                            className="text-red-600 hover:text-red-700 focus:bg-red-50 focus:text-red-700"
+                            onSelect={(e) => {
+                              e.preventDefault();
+                              setDocToDelete(doc); // Set the doc to be deleted
+                            }}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            <span>Delete</span>
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -252,6 +217,52 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
           )}
         </TableBody>
       </Table>
+
+      {/* Decoupled Delete Confirmation Dialog */}
+      <AlertDialog open={docToDelete !== null} onOpenChange={(isOpen) => !isOpen && setDocToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the document 
+              <span className="font-semibold">"{docToDelete?.name}"</span>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDocToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
+                if (!docToDelete) return;
+                e.preventDefault();
+                setDeletingId(docToDelete.id);
+                setIsDeleting(true);
+                try {
+                  await onDeleteDocument(docToDelete.id);
+                  toast({
+                    title: "Document deleted",
+                    description: `"${docToDelete.name}" has been successfully deleted.`,
+                  });
+                  setDocToDelete(null); // Close dialog on success
+                } catch (error) {
+                  console.error('Error deleting document:', error);
+                  toast({
+                    variant: "destructive",
+                    title: "Error",
+                    description: `Failed to delete "${docToDelete.name}". Please try again. Error: ${error instanceof Error ? error.message : String(error)}`,
+                  });
+                } finally {
+                  setIsDeleting(false);
+                  setDeletingId(null);
+                }
+              }}
+              disabled={isDeleting && deletingId === docToDelete?.id}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting && deletingId === docToDelete?.id ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
