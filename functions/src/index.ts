@@ -76,7 +76,7 @@ export const processDocumentUpload = onObjectFinalized(
     // We expect the frontend to set 'userId' in the custom metadata
     // Extract metadata from the file
     const metadataFromEvent = metadata || {};
-    const customMetadata = metadataFromEvent.customMetadata || {};
+    const customMetadata = metadataFromEvent.metadata || {};
 
     // Try to get userId from metadata or from the file path
     let userId = "";
