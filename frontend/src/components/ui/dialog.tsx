@@ -9,13 +9,56 @@ import { cn } from "@/lib/utils"
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />
+  // Create a ref to track the dialog's open state
+  const [isOpen, setIsOpen] = React.useState(false);
+  
+  // Handle open state changes
+  const handleOpenChange = (open: boolean) => {
+    // If closing, blur any active element first to prevent aria-hidden issues
+    if (!open && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    
+    // Call the original onOpenChange if provided
+    if (props.onOpenChange) {
+      props.onOpenChange(open);
+    }
+    
+    setIsOpen(open);
+  };
+  
+  return (
+    <DialogPrimitive.Root 
+      data-slot="dialog" 
+      {...props} 
+      onOpenChange={handleOpenChange}
+    />
+  );
 }
 
 function DialogTrigger({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
-  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />
+  // Handle click to blur the trigger element before opening dialog
+  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    // Call the original onClick if provided
+    if (props.onClick) {
+      props.onClick(event);
+    }
+    
+    // Blur the trigger element to prevent aria-hidden issues
+    if (event.currentTarget) {
+      event.currentTarget.blur();
+    }
+  };
+  
+  return (
+    <DialogPrimitive.Trigger 
+      data-slot="dialog-trigger" 
+      {...props} 
+      onClick={handleClick}
+    />
+  );
 }
 
 function DialogPortal({
@@ -51,26 +94,16 @@ function DialogContent({
   children,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content>) {
-  // Create a ref to track the dialog's open state
-  const [isOpen, setIsOpen] = React.useState(false);
+  // Create a ref for the close button to manage focus
+  const closeButtonRef = React.useRef<HTMLButtonElement>(null);
   
-  // Use effect to sync with Radix UI's state
-  React.useEffect(() => {
-    const handleStateChange = (event: Event) => {
-      const customEvent = event as CustomEvent;
-      if (customEvent.detail === 'open') {
-        setIsOpen(true);
-      } else if (customEvent.detail === 'closed') {
-        setIsOpen(false);
-      }
-    };
-
-    // Listen for state changes
-    document.addEventListener('radix-dialog-state-change', handleStateChange);
-    return () => {
-      document.removeEventListener('radix-dialog-state-change', handleStateChange);
-    };
-  }, []);
+  // Handle dialog close with proper focus management
+  const handleDialogClose = () => {
+    // Blur any active element to prevent aria-hidden issues
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  };
 
   return (
     <DialogPortal data-slot="dialog-portal">
@@ -81,31 +114,44 @@ function DialogContent({
           "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 sm:max-w-lg",
           className
         )}
-        // Override the default forceMount to ensure we control rendering
-        forceMount={true}
-        // Use onOpenAutoFocus to prevent focus issues
+        // Handle focus management
+        onEscapeKeyDown={handleDialogClose}
+        onInteractOutside={handleDialogClose}
         onOpenAutoFocus={(event) => {
-          // Don't prevent default - let Radix handle initial focus
-          // But track that we're open
-          setIsOpen(true);
-          // Dispatch a custom event for other components to listen to
-          document.dispatchEvent(new CustomEvent('radix-dialog-state-change', { detail: 'open' }));
+          // Prevent default to avoid focus issues
+          event.preventDefault();
+          // Set focus to the first focusable element in the dialog
+          setTimeout(() => {
+            const focusableElements = document.querySelectorAll(
+              'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+            );
+            const firstFocusable = Array.from(focusableElements).find(
+              el => el.closest('[data-slot="dialog-content"]')
+            ) as HTMLElement | undefined;
+            
+            if (firstFocusable) {
+              firstFocusable.focus();
+            }
+          }, 0);
         }}
         onCloseAutoFocus={(event) => {
-          // Let Radix handle focus return
-          // But track that we're closed
-          setIsOpen(false);
-          // Dispatch a custom event for other components to listen to
-          document.dispatchEvent(new CustomEvent('radix-dialog-state-change', { detail: 'closed' }));
+          // Prevent default focus behavior
+          event.preventDefault();
+          // Blur any active element
+          if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+          }
         }}
-        // Use data attribute instead of aria-hidden
-        data-inert={!isOpen}
-        // Remove aria-hidden completely
+        // Override aria-hidden to prevent accessibility issues
         aria-hidden={undefined}
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4">
+        <DialogPrimitive.Close 
+          ref={closeButtonRef}
+          className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+          onClick={handleDialogClose}
+        >
           <XIcon />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>
