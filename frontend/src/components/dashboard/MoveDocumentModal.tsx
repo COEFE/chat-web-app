@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+// Import only what we need from dialog components
+import { DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -73,23 +75,24 @@ export function MoveDocumentModal({
     }
   };
 
+  // Custom handler for dialog close
+  const handleOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      // When closing, ensure we handle focus properly
+      if (cancelButtonRef.current) {
+        cancelButtonRef.current.focus();
+      }
+      // Small delay before actually closing
+      setTimeout(() => {
+        onClose();
+      }, 0);
+    }
+  }, [onClose]);
+
   return (
-    <Dialog 
-      open={isOpen} 
-      onOpenChange={(open) => {
-        if (!open) {
-          // When closing, ensure we handle focus properly
-          if (cancelButtonRef.current) {
-            cancelButtonRef.current.focus();
-          }
-          // Small delay before actually closing
-          setTimeout(() => {
-            onClose();
-          }, 0);
-        }
-      }}
-    >
-      <DialogContent className="sm:max-w-[425px]">
+    <DialogPrimitive.Root open={isOpen} onOpenChange={handleOpenChange}>
+      <DialogPrimitive.Portal>
+      <DialogPrimitive.Content className="fixed left-[50%] top-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:max-w-[425px]" data-inert={!isOpen ? true : undefined}>
         <DialogHeader>
           <DialogTitle>Move Document</DialogTitle>
           <DialogDescription>
@@ -143,7 +146,8 @@ export function MoveDocumentModal({
             {isMoving ? 'Moving...' : 'Confirm Move'}
           </Button>
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
