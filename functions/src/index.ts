@@ -97,7 +97,12 @@ export const processDocumentUpload = onObjectFinalized(
       originalName = filePath.split("/").pop() || "unknown";
     }
 
-    // Helper function to extract userId from path (users/{userId}/{filename})
+    /**
+     * Extracts the userId from a Firebase Storage path.
+     * Assumes path format: users/{userId}/...
+     * @param {string} path The full storage path.
+     * @return {string | null} The extracted userId or null if not found.
+     */
     function extractUserIdFromPath(path: string): string | null {
       const parts = path.split("/");
       if (parts.length >= 2 && parts[0] === "users") {
