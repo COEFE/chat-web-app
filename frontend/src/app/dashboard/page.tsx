@@ -704,12 +704,8 @@ function DashboardPage() {
                 
                 <div className="w-[30%]">
                   <div className="flex h-full flex-col p-6">
-                    {selectedDocument ? (
+                    {selectedDocument && (
                        <ChatInterface documentId={selectedDocument.id} document={selectedDocument} />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-muted-foreground">
-                        Select a document to start chatting.
-                      </div>
                     )}
                   </div>
                 </div>
