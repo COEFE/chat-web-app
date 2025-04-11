@@ -134,7 +134,6 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
               if (item.type === 'folder') {
                 return (
                   <TableRow key={item.id} className="cursor-pointer hover:bg-muted/50" onClick={() => {
-                    console.log(`!!! TableRow onClick lambda executed for folder: ${item.id}`);
                     onFolderClick(item.id, item.name);
                   }}>
                     <TableCell>
@@ -498,6 +497,8 @@ function DashboardPage() {
         documentId: movingDocument.id, 
         targetFolderId: targetFolderId // Pass null for root
       });
+      setIsMoveModalOpen(false); 
+      setMovingDocument(null);
       toast({ title: "Success", description: `Moved '${movingDocument.name}' successfully.` });
       fetchAllFolders(); // Refresh the list of available folders
       fetchItems(currentFolderId); // Refresh the current folder view
@@ -510,9 +511,6 @@ function DashboardPage() {
         title: "Error Moving Document", 
         description: `Failed to move document: ${message}` 
       });
-    } finally {
-      setIsMoveModalOpen(false);
-      setMovingDocument(null);
     }
   }, [
     movingDocument, 
