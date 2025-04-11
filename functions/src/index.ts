@@ -75,54 +75,38 @@ export const processDocumentUpload = onObjectFinalized(
     // --- Extract User ID (Crucial!) ---
     // We expect the frontend to set 'userId' in the custom metadata
     // Extract metadata from the file
-    const metadataFromEvent = metadata || {};
-    const customMetadata = metadataFromEvent.metadata || {};
+    const metadataFromEvent = metadata || {}; // Get the main metadata object
 
-    // Log the entire main metadata object as a JSON string
-    logger.log("Main metadata object received:", JSON.stringify(metadataFromEvent, null, 2));
+    // Extract fields directly from the main metadataFromEvent object
+    const userIdFromMeta = metadataFromEvent?.userId;
+    const originalNameFromMeta = metadataFromEvent?.originalName;
+    const folderIdFromMeta = metadataFromEvent?.folderId || null; // Get folderId or default to null
 
-    // Log the extracted nested custom metadata object as a JSON string
-    logger.log("Extracted nested customMetadata object:", JSON.stringify(customMetadata, null, 2));
-
-    // Try to get userId from metadata or from the file path
-    let userId = "";
-    let originalName = "";
-    let folderId: string | null = null; // Initialize folderId as null
-
-    // Type-safe access to customMetadata properties
-    if (customMetadata && typeof customMetadata === "object") {
-      // Safe access with type checking
-      userId = "userId" in customMetadata ? String(customMetadata.userId) : "";
-
-      // Extract originalName
-      originalName = (
-        "originalName" in customMetadata ?
-          String(customMetadata.originalName) :
-          filePath.split("/").pop() || "unknown"
-      );
-
-      // Extract folderId, default to null if missing or empty
-      if ("folderId" in customMetadata && customMetadata.folderId) {
-        folderId = String(customMetadata.folderId);
-      } else {
-        folderId = null; // Explicitly set to null for root uploads or if missing
-      }
-    } else {
-      // Fallback if customMetadata is not an object (should not happen with frontend logic)
-      originalName = filePath.split("/").pop() || "unknown";
-    }
+    // Fallback for userId if not in metadata
+    let userId: string | null = userIdFromMeta || null; // Explicitly allow null
+    let originalName: string | null = originalNameFromMeta || null; // Explicitly allow null
 
     // If userId is not in metadata, try to extract it from the file path
     // Format: users/{userId}/{filename}
-    if (!userId && filePath.startsWith("users/")) {
-      const pathParts = filePath.split("/");
-      if (pathParts.length >= 2) {
-        userId = pathParts[1]; // Extract userId from path
-        logger.info(`Extracted userId from path: ${userId}`);
-      }
+    if (!userId) {
+      userId = extractUserIdFromPath(filePath);
     }
 
-    // Basic validation
+    // Fallback for originalName if not in metadata
+    if (!originalName) {
+      originalName = filePath.split("/").pop() || "unknown";
+    }
+
+    // Helper function to extract userId from path (users/{userId}/{filename})
+    function extractUserIdFromPath(path: string): string | null {
+      const parts = path.split("/");
+      if (parts.length >= 2 && parts[0] === "users") {
+        return parts[1]; // Assuming format users/{userId}/...
+      }
+      return null;
+    }
+
+    // Validate extracted userId
     if (!userId) {
       // Log error and exit if userId is missing
       logger.error(
@@ -135,7 +119,7 @@ export const processDocumentUpload = onObjectFinalized(
     // Log successful metadata extraction
     logger.info(
       `Successfully extracted metadata - userId: ${userId}, ` +
-        `originalName: ${originalName}, folderId: ${folderId}` // Log folderId
+        `originalName: ${originalName}, folderId: ${folderIdFromMeta}` // Log folderId
     );
     logger.info(
       `File path: ${filePath}, size: ${size}, contentType: ${contentType}`
@@ -229,7 +213,7 @@ export const processDocumentUpload = onObjectFinalized(
       const documentData = {
         userId,
         name: originalName,
-        folderId: folderId, // Use the extracted folderId (or null)
+        folderId: folderIdFromMeta, // Use the extracted folderId (or null)
         storagePath: finalStoragePath, // Use the final storage path
         fileBucket,
         contentType,
@@ -245,7 +229,7 @@ export const processDocumentUpload = onObjectFinalized(
       try {
         // Use set() to create or overwrite the document
         await docRef.set(documentData);
-        logger.info(`Successfully created Firestore entry for: ${originalName} (ID: ${docRef.id}) with folderId: ${folderId}`);
+        logger.info(`Successfully created Firestore entry for: ${originalName} (ID: ${docRef.id}) with folderId: ${folderIdFromMeta}`);
       } catch (error) {
         logger.error("Error creating Firestore entry: " + error);
         // Consider adding retry logic or moving file to error folder
