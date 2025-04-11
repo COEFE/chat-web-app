@@ -78,6 +78,12 @@ export const processDocumentUpload = onObjectFinalized(
     const metadataFromEvent = metadata || {};
     const customMetadata = metadataFromEvent.metadata || {};
 
+    // Log the entire main metadata object as a JSON string
+    logger.log('Main metadata object received:', JSON.stringify(metadataFromEvent, null, 2));
+
+    // Log the extracted nested custom metadata object as a JSON string
+    logger.log('Extracted nested customMetadata object:', JSON.stringify(customMetadata, null, 2));
+
     // Try to get userId from metadata or from the file path
     let userId = "";
     let originalName = "";
