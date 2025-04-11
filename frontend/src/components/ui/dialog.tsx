@@ -14,11 +14,6 @@ function Dialog({
   
   // Handle open state changes
   const handleOpenChange = (open: boolean) => {
-    // If closing, blur any active element first to prevent aria-hidden issues
-    if (!open && document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-    }
-    
     // Call the original onOpenChange if provided
     if (props.onOpenChange) {
       props.onOpenChange(open);
@@ -85,14 +80,14 @@ function DialogContent({
   
   // Handle dialog close with proper focus management
   const handleDialogClose = () => {
-    // Blur any active element to prevent aria-hidden issues
+    // Blur any active element to prevent aria-hidden issues before Radix processes close
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
   };
 
   return (
-    <DialogPortal data-slot="dialog-portal">
+    <DialogPortal data-slot="dialog-portal" forceMount>
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
@@ -103,8 +98,6 @@ function DialogContent({
         // Handle focus management
         onEscapeKeyDown={handleDialogClose}
         onInteractOutside={handleDialogClose}
-        // Override aria-hidden to prevent accessibility issues
-        aria-hidden={undefined}
         {...props}
       >
         {children}
