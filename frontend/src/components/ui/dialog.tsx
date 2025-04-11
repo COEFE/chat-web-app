@@ -14,11 +14,6 @@ function Dialog({
   
   // Handle open state changes
   const handleOpenChange = (open: boolean) => {
-    // If closing, blur any active element first to prevent aria-hidden issues
-    if (!open && document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-    }
-    
     // Call the original onOpenChange if provided
     if (props.onOpenChange) {
       props.onOpenChange(open);
