@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,7 @@ export function MoveDocumentModal({
 }: MoveDocumentModalProps) {
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [isMoving, setIsMoving] = useState(false);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
 
   // Reset selection when modal opens or folders change
   useEffect(() => {
@@ -36,13 +37,33 @@ export function MoveDocumentModal({
       setIsMoving(false);
     }
   }, [isOpen, folders]);
+  
+  // Handle focus management when the modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      // Reset any focus-related state when modal is closed
+      setSelectedFolderId(null);
+      setIsMoving(false);
+    }
+  }, [isOpen]);
 
   const handleConfirm = async () => {
     setIsMoving(true);
     try {
       const targetId = selectedFolderId === ROOT_FOLDER_VALUE ? null : selectedFolderId;
+      
+      // First, ensure we're not going to have focus issues
+      // by moving focus to a safe element before closing
+      if (cancelButtonRef.current) {
+        cancelButtonRef.current.focus();
+      }
+      
+      // Small delay before closing to ensure focus is properly managed
+      setTimeout(() => {
+        onClose(); // Close modal
+      }, 0);
+      
       await onConfirmMove(targetId);
-      onClose(); // Close modal on success (or let parent handle)
     } catch (error) { 
       // Error handling is likely done in the parent's onConfirmMove, 
       // but you could add specific modal feedback here if needed.
@@ -53,7 +74,21 @@ export function MoveDocumentModal({
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog 
+      open={isOpen} 
+      onOpenChange={(open) => {
+        if (!open) {
+          // When closing, ensure we handle focus properly
+          if (cancelButtonRef.current) {
+            cancelButtonRef.current.focus();
+          }
+          // Small delay before actually closing
+          setTimeout(() => {
+            onClose();
+          }, 0);
+        }
+      }}
+    >
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Move Document</DialogTitle>
@@ -92,7 +127,12 @@ export function MoveDocumentModal({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isMoving}>
+          <Button 
+            ref={cancelButtonRef}
+            variant="outline" 
+            onClick={onClose} 
+            disabled={isMoving}
+          >
             Cancel
           </Button>
           <Button 
