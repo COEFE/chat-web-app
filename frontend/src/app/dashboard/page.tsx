@@ -57,6 +57,7 @@ interface DocumentTableProps {
 }
 
 function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument, onFolderClick, onMoveClick }: DocumentTableProps) {
+  console.log('DocumentTable: Received items prop:', items); // Log received items
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const { toast } = useToast();
@@ -133,7 +134,10 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
             displayItems.map((item) => {
               if (item.type === 'folder') {
                 return (
-                  <TableRow key={item.id} className="cursor-pointer hover:bg-muted/50" onClick={() => onFolderClick(item.id, item.name)}>
+                  <TableRow key={item.id} className="cursor-pointer hover:bg-muted/50" onClick={() => {
+                    console.log(`DocumentTable: Folder row clicked: ${item.id} (${item.name})`);
+                    onFolderClick(item.id, item.name);
+                  }}>
                     <TableCell>
                       <Folder className="h-4 w-4 text-blue-500" />
                     </TableCell>
@@ -640,6 +644,7 @@ function DashboardPage() {
                             />
                           </CardContent>
                         </Card>
+                        {console.log('DashboardPage: Rendering DocumentTable with filesystemItems:', filesystemItems)} // Log before rendering
                         <DocumentTable
                           items={filesystemItems}
                           isLoading={loadingDocs}
