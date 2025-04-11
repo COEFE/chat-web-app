@@ -39,24 +39,10 @@ function Dialog({
 function DialogTrigger({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
-  // Handle click to blur the trigger element before opening dialog
-  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    // Call the original onClick if provided
-    if (props.onClick) {
-      props.onClick(event);
-    }
-    
-    // Blur the trigger element to prevent aria-hidden issues
-    if (event.currentTarget) {
-      event.currentTarget.blur();
-    }
-  };
-  
   return (
     <DialogPrimitive.Trigger 
       data-slot="dialog-trigger" 
       {...props} 
-      onClick={handleClick}
     />
   );
 }
@@ -117,31 +103,6 @@ function DialogContent({
         // Handle focus management
         onEscapeKeyDown={handleDialogClose}
         onInteractOutside={handleDialogClose}
-        onOpenAutoFocus={(event) => {
-          // Prevent default to avoid focus issues
-          event.preventDefault();
-          // Set focus to the first focusable element in the dialog
-          setTimeout(() => {
-            const focusableElements = document.querySelectorAll(
-              'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-            );
-            const firstFocusable = Array.from(focusableElements).find(
-              el => el.closest('[data-slot="dialog-content"]')
-            ) as HTMLElement | undefined;
-            
-            if (firstFocusable) {
-              firstFocusable.focus();
-            }
-          }, 0);
-        }}
-        onCloseAutoFocus={(event) => {
-          // Prevent default focus behavior
-          event.preventDefault();
-          // Blur any active element
-          if (document.activeElement instanceof HTMLElement) {
-            document.activeElement.blur();
-          }
-        }}
         // Override aria-hidden to prevent accessibility issues
         aria-hidden={undefined}
         {...props}
