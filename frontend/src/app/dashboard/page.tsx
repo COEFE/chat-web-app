@@ -45,6 +45,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { MoveDocumentModal } from '@/components/dashboard/MoveDocumentModal';
+import { cn } from "@/lib/utils"; // Added import for cn
 
 interface DocumentTableProps {
   items: FilesystemItem[];
@@ -649,7 +650,10 @@ function DashboardPage() {
               </div>
             ) : (
               <div className="flex h-full">
-                <div className="w-[70%] border-r">
+                <div className={cn(
+                  "border-r", 
+                  selectedDocument ? "w-[70%]" : "w-full"
+                )}>
                   <div className="flex h-full flex-col p-6 overflow-auto">
                     {selectedDocument ? (
                       <div className="flex h-full flex-col">
@@ -702,13 +706,13 @@ function DashboardPage() {
                   </div>
                 </div>
                 
-                <div className="w-[30%]">
-                  <div className="flex h-full flex-col p-6">
-                    {selectedDocument && (
-                       <ChatInterface documentId={selectedDocument.id} document={selectedDocument} />
-                    )}
+                {selectedDocument && (
+                  <div className="w-[30%]">
+                    <div className="flex h-full flex-col p-6">
+                      <ChatInterface documentId={selectedDocument.id} document={selectedDocument} />
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
           </div>
