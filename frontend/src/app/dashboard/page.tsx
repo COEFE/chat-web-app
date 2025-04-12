@@ -330,6 +330,7 @@ function DashboardPage() {
     try {
       const userId = user.uid;
 
+      // Fetch folders
       const foldersQuery = query(
         collection(db, 'users', userId, 'folders'),
         where('parentFolderId', '==', currentFolderId),
@@ -343,12 +344,23 @@ function DashboardPage() {
       const folderItems: FilesystemItem[] = fetchedFolders.map(f => ({ ...f, type: 'folder' }));
       console.log('Fetched Folders:', fetchedFolders);
 
+      // Fetch documents with improved logging
+      console.log(`[Dashboard] Fetching documents for user ${userId} in folder ${currentFolderId}`);
       const documentsQuery = query(
         collection(db, 'users', userId, 'documents'),
         where('folderId', '==', currentFolderId),
-        orderBy('name', 'asc')
+        orderBy('createdAt', 'desc') // Changed to sort by creation time descending to show newest first
       );
+      
+      console.log('[Dashboard] Executing Firestore query for documents...');
       const documentSnapshot = await getDocs(documentsQuery);
+      console.log(`[Dashboard] Query returned ${documentSnapshot.docs.length} documents`);
+      
+      // Log each document ID for debugging
+      documentSnapshot.docs.forEach((doc, index) => {
+        console.log(`[Dashboard] Document ${index+1}: ID=${doc.id}, Name=${doc.data().name}`);
+      });
+      
       const fetchedDocs: MyDocumentData[] = documentSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
@@ -357,12 +369,13 @@ function DashboardPage() {
         updatedAt: doc.data().updatedAt as Timestamp,
       } as MyDocumentData));
       const documentItems: FilesystemItem[] = fetchedDocs.map(d => ({ ...d, type: 'document' }));
-      console.log('Fetched Documents:', fetchedDocs);
+      console.log(`[Dashboard] Processed ${fetchedDocs.length} documents into UI items`);
 
       setFilesystemItems([...folderItems, ...documentItems]);
+      console.log(`[Dashboard] Updated UI with ${folderItems.length} folders and ${documentItems.length} documents`);
 
     } catch (error) {
-      console.error('Error fetching documents or folders:', error);
+      console.error('[Dashboard] Error fetching documents or folders:', error);
       setDocsError(`Failed to load items: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setLoadingDocs(false);
@@ -556,7 +569,13 @@ function DashboardPage() {
   useEffect(() => {
     const handleDocumentListRefresh = (event: CustomEvent) => {
       console.log('[Dashboard] Received document-list-refresh event:', event.detail);
-      triggerRefresh();
+      
+      // Add a small delay before refreshing to allow Firestore to complete indexing
+      console.log('[Dashboard] Waiting 1.5 seconds before refreshing document list...');
+      setTimeout(() => {
+        console.log('[Dashboard] Triggering document list refresh after delay');
+        triggerRefresh();
+      }, 1500);
     };
 
     window.addEventListener('document-list-refresh', handleDocumentListRefresh as EventListener);
