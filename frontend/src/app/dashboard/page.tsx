@@ -29,6 +29,7 @@ import DocumentViewer from '@/components/dashboard/DocumentViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
 import { FileUpload } from '@/components/dashboard/FileUpload';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import Breadcrumbs, { BreadcrumbItem } from '@/components/dashboard/Breadcrumbs'; // Import Breadcrumbs
 import {
   collection,
   query,
@@ -294,7 +295,7 @@ function DashboardPage() {
   const [folders, setFolders] = useState<FolderData[]>([]);
   const [filesystemItems, setFilesystemItems] = useState<FilesystemItem[]>([]);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
-  const [breadcrumbs, setBreadcrumbs] = useState<{ id: string | null; name: string }[]>([{ id: null, name: 'Home' }]);
+  const [folderPath, setFolderPath] = useState<BreadcrumbItem[]>([]); // State for breadcrumbs
   const [selectedDocument, setSelectedDocument] = useState<MyDocumentData | null>(null);
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [docsError, setDocsError] = useState<string | null>(null);
@@ -434,16 +435,24 @@ function DashboardPage() {
   const handleFolderClick = useCallback((folderId: string, folderName: string) => {
     console.log(`Navigating into folder: ${folderName} (${folderId})`);
     setCurrentFolderId(folderId);
-    setBreadcrumbs(prev => [...prev, { id: folderId, name: folderName }]);
+    setFolderPath(prev => [...prev, { id: folderId, name: folderName }]);
     setSelectedDocument(null);
-  }, [setCurrentFolderId, setBreadcrumbs]);
+  }, [setCurrentFolderId, setFolderPath]);
 
-  const handleBreadcrumbClick = (index: number) => {
-    const targetFolder = breadcrumbs[index];
-    console.log(`Navigating via breadcrumb to: ${targetFolder.name} (${targetFolder.id})`);
-    setCurrentFolderId(targetFolder.id);
-    setBreadcrumbs(prev => prev.slice(0, index + 1));
-    setSelectedDocument(null);
+  const handleBreadcrumbNavigate = (folderId: string) => {
+    console.log(`Navigating via breadcrumb to: ${folderId}`);
+    if (folderId === 'root') {
+      setFolderPath([]);
+      setCurrentFolderId(null);
+      setSelectedDocument(null);
+    } else {
+      const itemIndex = folderPath.findIndex(item => item.id === folderId);
+      if (itemIndex !== -1) {
+        setFolderPath(prevPath => prevPath.slice(0, itemIndex + 1));
+        setCurrentFolderId(folderId);
+        setSelectedDocument(null);
+      }
+    }
   };
 
   const handleUploadSuccess = () => {
@@ -655,21 +664,7 @@ function DashboardPage() {
 
       <main className="flex-1 overflow-hidden p-6 pt-4">
         <div className="mb-4 text-sm text-muted-foreground">
-          {breadcrumbs.map((crumb, index) => (
-            <span key={crumb.id ?? 'root'}>
-              {index > 0 && <span className="mx-1">/</span>}
-              {index < breadcrumbs.length - 1 ? (
-                <button
-                  onClick={() => handleBreadcrumbClick(index)}
-                  className="hover:underline hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
-                >
-                  {crumb.name}
-                </button>
-              ) : (
-                <span className="font-medium text-foreground">{crumb.name}</span>
-              )}
-            </span>
-          ))}
+          <Breadcrumbs path={folderPath} onNavigate={handleBreadcrumbNavigate} />
         </div>
 
         <div className="flex h-full flex-col">
@@ -729,7 +724,7 @@ function DashboardPage() {
                         <Card className="mb-6">
                           <CardHeader>
                             <CardTitle>Upload New Document</CardTitle>
-                            <CardDescription>Drag & drop files here or click to select files. Files will be added to the current folder: <span className='font-medium'>{breadcrumbs[breadcrumbs.length - 1]?.name ?? 'Home'}</span></CardDescription>
+                            <CardDescription>Drag & drop files here or click to select files. Files will be added to the current folder: <span className='font-medium'>{folderPath[folderPath.length - 1]?.name ?? 'Home'}</span></CardDescription>
                           </CardHeader>
                           <CardContent>
                             <FileUpload
