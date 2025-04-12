@@ -8,7 +8,7 @@ import {
 } from "@/lib/firebaseAdminConfig";
 import Anthropic from "@anthropic-ai/sdk";
 import { processDocumentContent } from "@/lib/documentUtils";
-import { handleExcelOperation } from "@/lib/excelUtils";
+import { processExcelOperation } from "@/lib/excelUtils";
 
 // Initialize Firebase Admin if not already initialized
 initializeFirebaseAdmin();
@@ -224,14 +224,20 @@ export async function POST(req: NextRequest) {
       if (message.toLowerCase().includes("excel") && !isMultiDocumentChat && 
           documentTypes[0] === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
         try {
-          const excelResult = await handleExcelOperation(token, userId, message, currentDocument, activeSheet);
+          // processExcelOperation returns a NextResponse object
+          const excelResponse = await processExcelOperation(message, documentId, [], userId);
           
-          if (excelResult.success) {
+          // Extract the response data from the NextResponse
+          const excelResponseData = await excelResponse.json();
+          
+          if (excelResponseData && excelResponseData.success) {
+            // If the Excel operation was successful, return the response
             return NextResponse.json({
-              response: excelResult.response || "Excel operation completed successfully.",
-              message: excelResult.message || "Excel operation completed successfully."
+              response: excelResponseData.message || "Excel operation completed successfully.",
+              message: excelResponseData.message || "Excel operation completed successfully."
             });
           }
+          // If not successful, continue with normal chat
         } catch (error) {
           console.error("Error handling Excel operation:", error);
           // Continue with normal chat if Excel operation fails
