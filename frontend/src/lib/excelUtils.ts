@@ -130,6 +130,8 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
             size: excelBuffer.length,
             status: 'processed',
             uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
+            // Add folderId field, default to null for root folder
+            folderId: null,
         };
         
         // Add appropriate timestamp based on whether this is a new document or an update
