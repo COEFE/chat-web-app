@@ -346,14 +346,40 @@ function DashboardPage() {
 
       // Fetch documents with improved logging
       console.log(`[Dashboard] Fetching documents for user ${userId} in folder ${currentFolderId}`);
-      const documentsQuery = query(
-        collection(db, 'users', userId, 'documents'),
-        where('folderId', '==', currentFolderId),
-        orderBy('createdAt', 'desc') // Changed to sort by creation time descending to show newest first
-      );
       
-      console.log('[Dashboard] Executing Firestore query for documents...');
-      const documentSnapshot = await getDocs(documentsQuery);
+      // Try to fetch documents with newest first (requires composite index)
+      let documentSnapshot;
+      try {
+        const documentsQueryByCreatedAt = query(
+          collection(db, 'users', userId, 'documents'),
+          where('folderId', '==', currentFolderId),
+          orderBy('createdAt', 'desc') // Sort by creation time descending to show newest first
+        );
+        
+        console.log('[Dashboard] Executing Firestore query for documents (sorted by createdAt)...');
+        documentSnapshot = await getDocs(documentsQueryByCreatedAt);
+        console.log('[Dashboard] Successfully retrieved documents sorted by creation date');
+      } catch (indexError) {
+        // If the index doesn't exist, fall back to the original query
+        console.warn('[Dashboard] Index error, falling back to name sorting:', indexError);
+        
+        // Display a toast with the index creation link
+        toast({
+          title: "Missing Firestore Index",
+          description: "Documents are being sorted by name instead of creation date. An administrator should create the required index in Firebase Console.",
+          variant: "destructive"
+        });
+        
+        // Fall back to the original query (sorted by name)
+        const documentsQueryByName = query(
+          collection(db, 'users', userId, 'documents'),
+          where('folderId', '==', currentFolderId),
+          orderBy('name', 'asc')
+        );
+        
+        console.log('[Dashboard] Falling back to name-based sorting query...');
+        documentSnapshot = await getDocs(documentsQueryByName);
+      }
       console.log(`[Dashboard] Query returned ${documentSnapshot.docs.length} documents`);
       
       // Log each document ID for debugging
