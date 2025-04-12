@@ -351,6 +351,11 @@ function DashboardPage() {
   const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  
+  // State for folder renaming
+  const [folderToRename, setFolderToRename] = useState<{id: string; currentName: string} | null>(null);
+  const [newRenameFolderName, setNewRenameFolderName] = useState("");
+  const [isRenamingFolder, setIsRenamingFolder] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [movingDocument, setMovingDocument] = useState<{ id: string; name: string } | null>(null);
   const [availableFolders, setAvailableFolders] = useState<FolderData[]>([]);
@@ -651,10 +656,77 @@ function DashboardPage() {
     setMovingDocument
   ]);
 
-  const handleRenameFolder = async (folderId: string, currentName: string) => {
-    // Implement folder rename logic here
-    console.log(`Renaming folder ${folderId} from ${currentName} to ...`);
-    // For now, just log the event
+  const handleRenameFolder = (folderId: string, currentName: string) => {
+    // Open the rename folder dialog
+    console.log(`Initiating rename for folder: ${currentName} (${folderId})`);
+    setFolderToRename({ id: folderId, currentName });
+    setNewRenameFolderName(currentName); // Pre-fill with current name
+  };
+  
+  const confirmRenameFolder = async () => {
+    if (!folderToRename || !newRenameFolderName.trim() || !user) return;
+    
+    setIsRenamingFolder(true);
+    const { id, currentName } = folderToRename;
+    const trimmedNewName = newRenameFolderName.trim();
+    
+    // Don't do anything if the name hasn't changed
+    if (trimmedNewName === currentName) {
+      setIsRenamingFolder(false);
+      setFolderToRename(null);
+      return;
+    }
+    
+    try {
+      // Call the renameFolder Firebase Function
+      const renameFolderFunction = httpsCallable<
+        { folderId: string; newName: string },
+        { success: boolean; message?: string }
+      >(functionsInstance, 'renameFolder');
+      
+      const result = await renameFolderFunction({ 
+        folderId: id, 
+        newName: trimmedNewName 
+      });
+      
+      const responseData = result.data as { success: boolean; message?: string };
+      
+      if (responseData.success) {
+        toast({ 
+          title: "Success", 
+          description: `Folder renamed to '${trimmedNewName}' successfully.` 
+        });
+        
+        // Update the local state to reflect the change
+        setFolders(prev => prev.map(folder => 
+          folder.id === id ? { ...folder, name: trimmedNewName } : folder
+        ));
+        
+        // If this is the current folder, update the breadcrumbs
+        if (currentFolderId === id) {
+          setFolderPath(prev => prev.map(item => 
+            item.id === id ? { ...item, name: trimmedNewName } : item
+          ));
+        }
+
+        // Trigger a refresh to update the UI
+        triggerRefresh();
+      } else {
+        throw new Error(responseData.message || 'Unknown error occurred');
+      }
+    } catch (error) {
+      console.error(`Error renaming folder ${id}:`, error);
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      toast({ 
+        variant: "destructive", 
+        title: "Error", 
+        description: `Failed to rename folder: ${message}` 
+      });
+    } finally {
+      setIsRenamingFolder(false);
+      setFolderToRename(null);
+      setNewRenameFolderName("");
+    }
   };
 
   // This function is passed to DocumentTable as onDeleteFolder
@@ -877,6 +949,57 @@ function DashboardPage() {
             >
               {isCreatingFolder ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {isCreatingFolder ? 'Creating...' : 'Create Folder'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename Folder Dialog */}
+      <Dialog open={folderToRename !== null} onOpenChange={(open) => !open && setFolderToRename(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Rename Folder</DialogTitle>
+            <DialogDescription>
+              Enter a new name for the folder "{folderToRename?.currentName}".
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="rename-folder-name" className="text-right">
+                Name
+              </Label>
+              <Input
+                id="rename-folder-name"
+                value={newRenameFolderName}
+                onChange={(e) => setNewRenameFolderName(e.target.value)}
+                className="col-span-3"
+                placeholder="Enter new folder name"
+                autoFocus
+                disabled={isRenamingFolder}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => setFolderToRename(null)} 
+              disabled={isRenamingFolder}
+            >
+              Cancel
+            </Button>
+            <Button 
+              type="button"
+              onClick={confirmRenameFolder} 
+              disabled={!newRenameFolderName.trim() || isRenamingFolder}
+            >
+              {isRenamingFolder ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Renaming...
+                </>
+              ) : (
+                'Rename'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

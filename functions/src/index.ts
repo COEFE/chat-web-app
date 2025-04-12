@@ -264,6 +264,12 @@ interface DeleteFolderRequestData {
   folderId: string;
 }
 
+// Interface for renameFolder request data
+interface RenameFolderRequestData {
+  folderId: string;
+  newName: string;
+}
+
 /**
  * Creates a new folder for the authenticated user.
  */
@@ -499,7 +505,66 @@ export const deleteFolder = onCall(async (request: CallableRequest<DeleteFolderR
   }
 });
 
-// TODO: Add functions for renaming folders, moving folders etc.
+/**
+ * Renames a folder for the authenticated user.
+ */
+export const renameFolder = onCall(async (request: CallableRequest<RenameFolderRequestData>) => {
+  logger.info("Received renameFolder request", {data: request.data, auth: request.auth});
+
+  // 1. Authentication Check
+  if (!request.auth) {
+    logger.error("renameFolder called without authentication.");
+    throw new HttpsError("unauthenticated", "The function must be called while authenticated.");
+  }
+  const userId = request.auth.uid;
+
+  // 2. Validate Input
+  const {folderId, newName} = request.data;
+  if (!folderId || typeof folderId !== "string") {
+    logger.error("Invalid folderId provided.", {folderId});
+    throw new HttpsError("invalid-argument", "The function must be called with a valid 'folderId' string.");
+  }
+  if (!newName || typeof newName !== "string" || newName.trim() === "") {
+    logger.error("Invalid newName provided.", {newName});
+    throw new HttpsError("invalid-argument", "The function must be called with a valid 'newName' string.");
+  }
+
+  const trimmedName = newName.trim();
+  logger.info(`User ${userId} attempting to rename folder ${folderId} to '${trimmedName}'`);
+
+  try {
+    // Get reference to the folder document
+    const folderRef = db.collection("users").doc(userId).collection("documents").doc(folderId);
+
+    // Check if folder exists and belongs to the user
+    const folderDoc = await folderRef.get();
+    if (!folderDoc.exists) {
+      logger.error(`Folder ${folderId} not found for user ${userId}`);
+      throw new HttpsError("not-found", "The specified folder does not exist.");
+    }
+
+    const folderData = folderDoc.data();
+    if (!folderData || folderData.type !== "folder") {
+      logger.error(`Document ${folderId} exists but is not a folder`, {data: folderData});
+      throw new HttpsError("failed-precondition", "The specified document is not a folder.");
+    }
+
+    // Update the folder name
+    await folderRef.update({
+      name: trimmedName,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    logger.info(`Successfully renamed folder ${folderId} to '${trimmedName}' for user ${userId}`);
+    return {success: true, message: `Folder renamed successfully to '${trimmedName}'.`};
+  } catch (error) {
+    logger.error(`Error renaming folder ${folderId} for user ${userId}:`, error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new HttpsError("internal", `Failed to rename folder: ${errorMessage}`);
+  }
+});
+
+// TODO: Add functions for moving folders etc.
 
 // ==============================================
 // Excel Processing Functions
