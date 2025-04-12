@@ -545,10 +545,13 @@ export const renameFolder = onCall(async (request: CallableRequest<RenameFolderR
     }
 
     const folderData = folderDoc.data();
-    if (!folderData || folderData.type !== "folder") {
-      logger.error(`Document ${folderId} exists but is not a folder`, {data: folderData});
-      throw new HttpsError("failed-precondition", "The specified document is not a folder.");
+    if (!folderData) {
+      logger.error(`Folder ${folderId} exists but has no data`);
+      throw new HttpsError("failed-precondition", "The specified folder has no data.");
     }
+
+    // Note: We don't check for folderData.type === "folder" because folders in the folders collection
+    // don't have a type field. They're implicitly folders by being in the folders collection.
 
     // Update the folder name
     await folderRef.update({
