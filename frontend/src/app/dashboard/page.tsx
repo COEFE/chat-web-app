@@ -306,15 +306,9 @@ function DocumentTable({
                     const responseData = result.data as { success: boolean; message?: string };
 
                     if (responseData.success) {
-                      toast.success(`Folder '${itemToDelete.name}' and its contents deleted successfully.`);
-                      // Update local state: remove the folder
-                      setFolders((prev) => prev.filter((folder) => folder.id !== itemToDelete.id));
-                      // If the deleted folder is the current folder, navigate up
-                      if (currentFolderId === itemToDelete.id) {
-                        // Navigate to parent (or root if no parent)
-                        const parent = breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : { id: null, name: 'Root' };
-                        handleNavigate(parent.id);
-                      }
+                      toast({ title: "Success", description: `Folder '${itemToDelete.name}' and its contents deleted successfully.` });
+                      // We don't need to manually update state or navigate here
+                      // The page will refresh when the dialog is closed
                     } else {
                       throw new Error(responseData.message || 'Unknown error from function.');
                     }
@@ -322,7 +316,7 @@ function DocumentTable({
                   .catch((error: unknown) => {
                     console.error(`Error calling deleteFolder function for ${itemToDelete.id}:`, error);
                     const message = error instanceof Error ? error.message : 'An unknown error occurred.';
-                    toast.error(`Failed to delete folder '${itemToDelete.name}'. ${message}`);
+                    toast({ variant: "destructive", title: "Error", description: `Failed to delete folder '${itemToDelete.name}'. ${message}` });
                   })
                   .finally(() => {
                     setIsDeleting(false);
@@ -667,6 +661,7 @@ function DashboardPage() {
   const handleDeleteFolder = (folderId: string, folderName: string) => {
     // Open the confirmation dialog instead of directly deleting
     console.log(`Initiating delete for folder: ${folderName} (${folderId})`);
+    // Set the item to delete and open the confirmation dialog
     setItemToDelete({ id: folderId, name: folderName, type: 'folder' });
     setIsDeleteDialogOpen(true);
   };
