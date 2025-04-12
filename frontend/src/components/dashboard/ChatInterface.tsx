@@ -23,18 +23,11 @@ interface ChatMessage {
 }
 
 interface ChatInterfaceProps {
-  documentId?: string; // Optional for single document chat
-  document?: MyDocumentData; // Optional for single document chat
-  documents?: MyDocumentData[]; // Array of documents for folder chat
-  folderName?: string; // Name of the folder when chatting with a folder
+  documentId: string;
+  document?: MyDocumentData; 
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, documents, folderName }) => {
-  // Determine if we're in folder chat mode
-  const isFolderChat = !!documents && documents.length > 0;
-  
-  // For folder chat, we'll use the first document's ID as a reference, but send all document IDs to the API
-  const chatContextId = isFolderChat ? `folder-${documents?.[0]?.id}` : documentId;
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -109,11 +102,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, doc
         },
         body: JSON.stringify({ 
           message: userMessage.content, // Send the user's message content
-          documentId: isFolderChat ? undefined : documentId,
-          currentDocument: isFolderChat ? undefined : document, // Pass the full document object if available
-          documents: isFolderChat ? documents : undefined, // For folder chat - array of documents
-          isFolderChat: isFolderChat, // Flag to indicate folder chat mode
-          folderName: isFolderChat ? folderName : undefined, // Name of the folder for context
+          documentId: documentId,
+          currentDocument: document, // Pass the full document object if available
           activeSheet: activeSheet // Include the active sheet information
         }),
       });
@@ -265,19 +255,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, doc
   };
 
   return (
-    <Card className="h-full flex flex-col">
+    <Card className="flex flex-col h-full">
       <CardHeader>
-        <CardTitle>
-          {isFolderChat 
-            ? `Chat with Folder: ${folderName || 'Documents'}` 
-            : `Chat with ${document?.name || 'Document'}`
-          }
-          {isFolderChat && documents && (
-            <div className="text-xs text-muted-foreground mt-1">
-              {documents.length} document{documents.length !== 1 ? 's' : ''} included
-            </div>
-          )}
-        </CardTitle>
+        <CardTitle>Chat with Document ID: {documentId}</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 overflow-hidden p-0"> {/* Remove padding for ScrollArea */}
         <ScrollArea className="h-full p-4" ref={scrollAreaRef}>
