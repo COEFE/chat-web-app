@@ -75,7 +75,6 @@ function DocumentTable({
 }: DocumentTableProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [docToDelete, setDocToDelete] = useState<FilesystemItem | null>(null);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [itemToDelete, setItemToDelete] = useState<FilesystemItem | null>(null); // State for confirmation dialog
   const { toast } = useToast();
@@ -249,7 +248,7 @@ function DocumentTable({
                               
                               // Delay setting state to ensure dropdown is fully closed
                               setTimeout(() => {
-                                setDocToDelete(doc); // Set the doc to be deleted
+                                setItemToDelete(doc); // Set the doc to be deleted
                               }, 50);
                             }}
                           >
