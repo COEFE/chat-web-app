@@ -298,7 +298,17 @@ function DocumentTable({
               setIsDeleting(true);
 
               if (itemToDelete.type === 'document') {
-                onDeleteDocument(itemToDelete.id);
+                // Simply call the onDeleteDocument function and let it handle the UI updates
+                onDeleteDocument(itemToDelete.id)
+                  .catch((error: unknown) => {
+                    console.error(`Error deleting document ${itemToDelete.id}:`, error);
+                    const message = error instanceof Error ? error.message : 'An unknown error occurred.';
+                    toast({ variant: "destructive", title: "Error", description: `Failed to delete document '${itemToDelete.name}'. ${message}` });
+                  })
+                  .finally(() => {
+                    setIsDeleting(false);
+                    setItemToDelete(null); // This closes the dialog
+                  });
               } else if (itemToDelete.type === 'folder') {
                 const deleteFolderFunction = httpsCallable(functionsInstance, 'deleteFolder');
                 deleteFolderFunction({ folderId: itemToDelete.id })
@@ -527,6 +537,10 @@ function DashboardPage() {
     }
     
     try {
+      // Find the document name before deletion for the success message
+      const docToDelete = filesystemItems.find(item => item.id === docId);
+      const docName = docToDelete?.name || 'Document';
+      
       const response = await fetch(`/api/documents?id=${docId}`, {
         method: 'DELETE',
         headers: {
@@ -546,11 +560,16 @@ function DashboardPage() {
         throw new Error(errorMsg);
       }
       
+      // Update the UI by removing the deleted document
       setFilesystemItems(prevItems => prevItems.filter(item => item.id !== docId));
       
+      // Clear the selected document if it was deleted
       if (selectedDocument?.id === docId) {
         setSelectedDocument(null);
       }
+      
+      // Show success message
+      toast({ title: "Success", description: `Document '${docName}' deleted successfully.` });
       
       return await response.json();
     } catch (error) {
