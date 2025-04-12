@@ -534,7 +534,8 @@ export const renameFolder = onCall(async (request: CallableRequest<RenameFolderR
 
   try {
     // Get reference to the folder document
-    const folderRef = db.collection("users").doc(userId).collection("documents").doc(folderId);
+    // Note: Folders are stored in the 'folders' collection, not 'documents'
+    const folderRef = db.collection("users").doc(userId).collection("folders").doc(folderId);
 
     // Check if folder exists and belongs to the user
     const folderDoc = await folderRef.get();
