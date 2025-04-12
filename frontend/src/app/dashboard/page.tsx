@@ -536,46 +536,31 @@ function DashboardPage() {
       throw new Error('Authentication error. Please refresh and try again.');
     }
     
-    try {
-      // Find the document name before deletion for the success message
-      const docToDelete = filesystemItems.find(item => item.id === docId);
-      const docName = docToDelete?.name || 'Document';
-      
-      const response = await fetch(`/api/documents?id=${docId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-      
-      if (!response.ok) {
-        let errorMsg = `HTTP error! status: ${response.status}`;
-        try {
-          const errorData = await response.json();
-          errorMsg = errorData.error || errorData.message || errorMsg;
-        } catch (e) {
-          // Ignore if response body isn't JSON
-        }
-        console.error(`Error deleting document: ${errorMsg}`);
-        throw new Error(errorMsg);
-      }
-      
-      // Update the UI by removing the deleted document
-      setFilesystemItems(prevItems => prevItems.filter(item => item.id !== docId));
-      
-      // Clear the selected document if it was deleted
-      if (selectedDocument?.id === docId) {
-        setSelectedDocument(null);
-      }
-      
-      // Show success message
-      toast({ title: "Success", description: `Document '${docName}' deleted successfully.` });
-      
-      return await response.json();
-    } catch (error) {
-      console.error('Error in handleDeleteDocument:', error);
-      throw error;
+    console.log(`Attempting to delete document with ID: ${docId}`); // Add logging
+
+    const response = await fetch(`/api/documents?id=${docId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    console.log('Delete API Response Status:', response.status); // Log status
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: 'Failed to parse error response' })); // Try to parse error
+      console.error('Delete API Error Response:', errorData); // Log error response body
+      throw new Error(errorData.message || `Failed to delete document. Status: ${response.status}`);
     }
+
+    // Document deleted successfully
+    console.log('Document deleted successfully via API.'); // Log success
+    toast({ title: "Success", description: "Document deleted successfully." });
+
+    // Refresh the document list
+    console.log('Triggering document list refresh...'); // Log refresh trigger
+    await triggerRefresh(); // Ensure this is called
+
   };
 
   const handleCreateFolder = async () => {
