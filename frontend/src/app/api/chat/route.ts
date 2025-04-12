@@ -1019,9 +1019,15 @@ User Question: ${message}`,
           throw new Error('Operation data is missing "operation" field');
         }
 
-        if (!operationData.documentId) {
-          console.error('Operation data is missing "documentId" field');
-          throw new Error('Operation data is missing "documentId" field');
+        // For 'create' operations, generate a new document ID if one isn't provided
+        if (operationData.operation === "create" && !operationData.documentId) {
+          // Generate a unique ID for new Excel documents
+          operationData.documentId = `doc-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+          console.log(`[processExcelOperation] Generated new documentId for Excel creation: '${operationData.documentId}'`);
+        } else if (operationData.operation === "edit" && !operationData.documentId) {
+          // For edit operations, we still require a document ID
+          console.error('Operation data is missing "documentId" field for edit operation');
+          throw new Error('Operation data is missing "documentId" field for edit operation');
         }
 
         if (!operationData.data) {
