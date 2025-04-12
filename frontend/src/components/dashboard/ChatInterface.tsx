@@ -101,7 +101,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
           'Authorization': `Bearer ${token}`, // Add Authorization header
         },
         body: JSON.stringify({ 
-          message: userMessage.content, // Send the user's message content
+          // Send the entire messages array (current state + new user message)
+          messages: [...messages, userMessage], 
           documentId: documentId,
           currentDocument: document, // Pass the full document object if available
           activeSheet: activeSheet // Include the active sheet information
