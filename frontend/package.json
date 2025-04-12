@@ -10,6 +10,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^1.2.9",
     "@anthropic-ai/sdk": "^0.39.0",
     "@handsontable/react": "^15.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.6",

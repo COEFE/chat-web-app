@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 // Vercel AI SDK imports
-import { Message as VercelChatMessage, experimental_StreamData } from "ai"; // Import experimental_StreamData (Lint error might indicate installation/version issue)
-import { StreamingTextResponse } from 'ai'; // Keep this import (Lint error might indicate installation/version issue)
+import { Message as VercelChatMessage, StreamData, streamText } from "ai"; // Use streamText & StreamData (non-experimental)
 // LangChain imports - commented out until packages are installed
 // import { ChatAnthropic } from '@langchain/anthropic';
 // import { PromptTemplate } from '@langchain/core/prompts';
@@ -19,7 +18,10 @@ import {
   getAdminStorage,
 } from "@/lib/firebaseAdminConfig";
 import * as XLSX from "xlsx";
-import Anthropic from "@anthropic-ai/sdk";
+// Remove old Anthropic SDK import
+// import Anthropic from "@anthropic-ai/sdk";
+// Import the AI SDK provider for Anthropic
+import { anthropic } from '@ai-sdk/anthropic';
 import { FirebaseError } from "firebase-admin/app";
 // Import the function from the other route
 import { processExcelOperation } from "@/lib/excelUtils";
@@ -519,93 +521,68 @@ Answer the user's question based on the chat history and the provided context. I
   // Filter out system messages if Anthropic needs it
   const filteredMessagesForAI = messagesForAI.filter(m => m.role === 'user' || m.role === 'assistant');
 
-  // 5. Call AI (Anthropic)
-  const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-  });
+  // 5. Call AI (Anthropic via AI SDK)
+  // Instantiate the AI SDK Anthropic model with the specific model ID.
+  // The SDK should automatically pick up the ANTHROPIC_API_KEY environment variable.
+  const model = anthropic('claude-3-sonnet-20240229');
 
   try {
-    console.log(`Calling Anthropic with ${filteredMessagesForAI.length} messages. System prompt included.`);
-    const stream = await anthropic.messages.create({
-      model: "claude-3-sonnet-20240229", // Or your preferred model
+    console.log(`Calling Anthropic via streamText with ${filteredMessagesForAI.length} messages. System prompt included.`);
+    const data = new StreamData();
+
+    // Call streamText - Remove the onCompletion callback here
+    const result = await streamText({
+      model: model, // Pass the instantiated model directly
       system: systemPrompt,
       messages: filteredMessagesForAI as any, // Cast needed if type mismatch
-      stream: true,
-      max_tokens: 1024,
-    });
-    console.log("Anthropic stream initiated.");
-
-    // Data stream for completion callback
-    const data = new experimental_StreamData();
-
-    const responseStream = new ReadableStream({
-        async start(controller) {
-            console.log("Stream starting...");
-            try {
-                for await (const chunk of stream) {
-                    if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
-                        const text = chunk.delta.text;
-                        controller.enqueue(text); // Send chunk to client
-                    } else if (chunk.type === 'message_stop') {
-                         console.log("Message stop event received.");
-                         data.close(); // Close data stream on completion
-                         controller.close(); // Close the response stream
-                         break;
-                    }
-                }
-            } catch (error) {
-                console.error("Error reading Anthropic stream:", error);
-                controller.error(error);
-                data.close();
-            } finally {
-                 console.log("Stream processing finished.");
-                 // Ensure controller is closed
-                 try { controller.close(); } catch {}
-                 // Ensure data stream is closed
-                 try { data.close(); } catch {}
-            }
-        },
-        cancel(reason) {
-            console.warn("Stream cancelled:", reason);
-            try { data.close(); } catch {}
-        }
     });
 
-    console.log("Returning StreamingTextResponse...");
-    return new StreamingTextResponse(responseStream, {
-        headers: { "Content-Type": "text/plain; charset=utf-8" },
-        // Use onCompletion to save the full AI response
-        experimental_onCompletion: async (completion: string) => {
-             if (!completion) {
-                  console.warn("Completion callback received empty completion.");
-                  return;
-             }
-            console.log("Stream completed. Full AI response length:", completion.length);
-            // Use the userId and documentId from the outer scope
-            if (documentId && userId) {
-                console.log(`Attempting to save AI response for document ${documentId}`);
-                try {
-                    const messagesRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
-                    const aiMessageData = {
-                        role: 'assistant',
-                        content: completion, // The full response text from the callback
-                        createdAt: Timestamp.now(),
-                    };
-                    await messagesRef.add(aiMessageData);
-                    console.log(`Saved AI message for document ${documentId}`);
-                } catch (error) {
-                    console.error(`Error saving AI message for document ${documentId}:`, error);
-                }
-            } else {
-                 console.log("Skipping AI message save: No document ID or valid user ID.");
-            }
-        },
-        // Pass the StreamData instance if needed (currently not used for sending data back)
-        // data: data,
+    // Append arbitrary data to the stream before returning
+    // Example: data.append({ arbitrary_data: 'value' });
+    // In this case, we might not need to append extra data right now,
+    // but the `data` object enables the stream protocol.
+    data.close(); // Close the data stream as we are done appending
+
+    // Return the response stream using the streamData instance within an options object
+    console.log("Returning streamText result via toDataStreamResponse...");
+    const response = result.toDataStreamResponse({ data }); // Pass data in options
+
+    // --- Save AI message after returning the stream --- 
+    // This allows the client to start receiving the stream immediately.
+    // Use a Promise chain or async IIFE to handle the saving asynchronously.
+    result.text.then(async (fullResponseText: string) => { // Use result.text and type param
+      if (!fullResponseText) {
+        console.warn("Full response text is empty after stream completion.");
+        return;
+      }
+      console.log("Stream completed. Full AI response length:", fullResponseText.length);
+      // Use the userId and documentId from the outer scope
+      if (documentId && userId) {
+          console.log(`Attempting to save AI response for document ${documentId}`);
+          try {
+              const messagesRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
+              const aiMessageData = {
+                  role: 'assistant',
+                  content: fullResponseText, // Use the full response text
+                  createdAt: Timestamp.now(),
+              };
+              await messagesRef.add(aiMessageData);
+              console.log(`Saved AI message for document ${documentId}`);
+          } catch (error) {
+              console.error(`Error saving AI message for document ${documentId}:`, error);
+          }
+      } else {
+           console.log("Skipping AI message save: No document ID or valid user ID.");
+      }
+    }).catch((error: unknown) => { // Type error param
+      console.error("Error processing full AI response for saving:", error);
     });
+    // --- End of saving logic ---
+
+    return response; // Return the stream response immediately
 
   } catch (error: any) {
-    console.error("Error calling Anthropic API:", error);
+    console.error("Error calling Anthropic API via streamText:", error);
     let errorMessage = "Failed to get response from AI";
     if (error.response) {
       console.error("Anthropic API Error Response:", error.response.data);
