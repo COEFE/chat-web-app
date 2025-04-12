@@ -2,6 +2,8 @@
 
 import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff, Folder, FolderPlus, Move } from 'lucide-react';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import Skeleton from 'react-loading-skeleton'; 
+import 'react-loading-skeleton/dist/skeleton.css'; 
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -45,7 +47,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { MoveDocumentModal } from '@/components/dashboard/MoveDocumentModal';
-import { cn } from "@/lib/utils"; // Added import for cn
+import { cn } from "@/lib/utils"; 
 
 interface DocumentTableProps {
   items: FilesystemItem[];
@@ -118,15 +120,17 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
           </tr>
         </thead>
         <TableBody>
-          {isLoading && displayItems.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={5} className="h-24 text-center"> 
-                <div className="flex items-center justify-center space-x-2">
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-                  <span>Loading items...</span>
-                </div>
-              </TableCell>
-            </TableRow>
+          {isLoading ? (
+            // Render Skeleton loaders when loading
+            Array.from({ length: 5 }).map((_, index) => (
+              <TableRow key={`skeleton-${index}`}>
+                <TableCell className="w-8"><Skeleton circle width={16} height={16} /></TableCell>
+                <TableCell className="w-[200px]"><Skeleton height={20} /></TableCell>
+                <TableCell><Skeleton height={20} width={80} /></TableCell>
+                <TableCell><Skeleton height={20} width={60} /></TableCell>
+                <TableCell className="text-right"><Skeleton height={32} width={32} /></TableCell>
+              </TableRow>
+            ))
           ) : displayItems.length === 0 ? (
             <TableRow>
               <TableCell colSpan={5} className="h-24 text-center"> 
