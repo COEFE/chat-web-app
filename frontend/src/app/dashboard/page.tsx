@@ -320,8 +320,7 @@ function DocumentTable({
                   })
                   .finally(() => {
                     setIsDeleting(false);
-                    setIsDeleteDialogOpen(false);
-                    setItemToDelete(null);
+                    setItemToDelete(null); // This closes the dialog since it's controlled by itemToDelete !== null
                   });
               }
             }} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
@@ -658,12 +657,12 @@ function DashboardPage() {
     // For now, just log the event
   };
 
+  // This function is passed to DocumentTable as onDeleteFolder
+  // The DocumentTable component will handle opening the confirmation dialog
   const handleDeleteFolder = (folderId: string, folderName: string) => {
-    // Open the confirmation dialog instead of directly deleting
-    console.log(`Initiating delete for folder: ${folderName} (${folderId})`);
-    // Set the item to delete and open the confirmation dialog
-    setItemToDelete({ id: folderId, name: folderName, type: 'folder' });
-    setIsDeleteDialogOpen(true);
+    console.log(`Delete folder requested: ${folderName} (${folderId})`);
+    // The actual deletion happens in the DocumentTable component
+    // We don't need to do anything here as the DocumentTable will handle the confirmation and deletion
   };
 
   // Effect to listen for document-list-refresh events
