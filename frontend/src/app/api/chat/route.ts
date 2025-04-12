@@ -220,8 +220,9 @@ export async function POST(req: NextRequest) {
       }
 
       // Check for Excel operations
+      // Only attempt Excel operations for single document chats with Excel files
       if (message.toLowerCase().includes("excel") && !isMultiDocumentChat && 
-          contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+          documentTypes[0] === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
         try {
           const excelResult = await handleExcelOperation(token, userId, message, currentDocument, activeSheet);
           
@@ -254,15 +255,8 @@ export async function POST(req: NextRequest) {
       const response = await anthropic.messages.create({
         model: "claude-3-opus-20240229",
         max_tokens: 4000,
+        system: systemMessage,
         messages: [
-          {
-            role: "user",
-            content: systemMessage
-          },
-          {
-            role: "assistant",
-            content: "I'll help you with your questions about the document(s)."
-          },
           {
             role: "user",
             content: message
@@ -271,9 +265,21 @@ export async function POST(req: NextRequest) {
       });
 
       // Return the AI response
+      // Handle different response formats
+      let responseText = "";
+      if (response.content && response.content.length > 0) {
+        // Check if the content has a text property
+        if ('text' in response.content[0]) {
+          responseText = response.content[0].text;
+        } else {
+          // Fallback for other content types
+          responseText = JSON.stringify(response.content[0]);
+        }
+      }
+      
       return NextResponse.json({
-        response: response.content[0].text,
-        message: response.content[0].text
+        response: responseText,
+        message: responseText
       });
     } catch (error) {
       console.error("Error processing request:", error);
