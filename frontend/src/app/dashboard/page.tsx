@@ -1,6 +1,6 @@
 'use client';
 
-import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff, Folder, FolderPlus, Move } from 'lucide-react';
+import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff, Folder, FolderPlus, Move, Pencil } from 'lucide-react';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Skeleton from 'react-loading-skeleton'; 
 import 'react-loading-skeleton/dist/skeleton.css'; 
@@ -58,13 +58,26 @@ interface DocumentTableProps {
   onDeleteDocument: (docId: string) => Promise<void>;
   onFolderClick: (folderId: string, folderName: string) => void;
   onMoveClick: (docId: string, docName: string) => void;
+  onRenameFolder: (folderId: string, currentName: string) => void;
+  onDeleteFolder: (folderId: string, folderName: string) => void;
 }
 
-function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument, onFolderClick, onMoveClick }: DocumentTableProps) {
+function DocumentTable({ 
+  items, 
+  isLoading, 
+  error, 
+  onSelectItem, 
+  onDeleteDocument, 
+  onFolderClick, 
+  onMoveClick, 
+  onRenameFolder, 
+  onDeleteFolder 
+}: DocumentTableProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [docToDelete, setDocToDelete] = useState<FilesystemItem | null>(null);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<FilesystemItem | null>(null); // State for confirmation dialog
   const { toast } = useToast();
 
   const formatDate = (timestamp: any): string => {
@@ -154,9 +167,35 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
                     <TableCell>{formatDate(item.updatedAt)}</TableCell>
                     <TableCell>N/A</TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" disabled> 
-                        Options
-                      </Button>
+                      <DropdownMenu 
+                        open={openDropdown === item.id} 
+                        onOpenChange={(open) => setOpenDropdown(open ? item.id : null)}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" className="h-8 w-8 p-0">
+                            <span className="sr-only">Open folder menu</span>
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => onRenameFolder(item.id, item.name)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-red-600 hover:text-red-700 focus:bg-red-50 focus:text-red-700"
+                            onSelect={(e) => {
+                              e.preventDefault();
+                              setOpenDropdown(null);
+                              setItemToDelete(item); // Set item for confirmation
+                              // Dialog trigger will be handled outside or wrapped
+                            }}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 );
@@ -239,46 +278,60 @@ function DocumentTable({ items, isLoading, error, onSelectItem, onDeleteDocument
       </Table>
 
       {/* Decoupled Delete Confirmation Dialog */}
-      <AlertDialog open={docToDelete !== null} onOpenChange={(isOpen) => !isOpen && setDocToDelete(null)}>
+      <AlertDialog open={itemToDelete !== null} onOpenChange={(isOpen) => !isOpen && setItemToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the document 
-              <span className="font-semibold">"{docToDelete?.name}"</span>.
+              This action cannot be undone. This will permanently delete the {itemToDelete?.type === 'folder' ? 'folder' : 'document'}
+              {' '}
+              <span className="font-medium">'{itemToDelete?.name}'</span>.
+              {itemToDelete?.type === 'folder' && ' All contents within this folder will also be deleted.'} {/* Add warning for folder deletion */}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDocToDelete(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={async (e: React.MouseEvent<HTMLButtonElement>) => {
-                if (!docToDelete) return;
-                e.preventDefault();
-                setDeletingId(docToDelete.id);
-                setIsDeleting(true);
-                try {
-                  await onDeleteDocument(docToDelete.id);
-                  toast({
-                    title: "Document deleted",
-                    description: `"${docToDelete.name}" has been successfully deleted.`,
+            <AlertDialogCancel onClick={() => setItemToDelete(null)} disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (!itemToDelete) return;
+
+              setDeletingId(itemToDelete.id);
+              setIsDeleting(true);
+
+              if (itemToDelete.type === 'document') {
+                onDeleteDocument(itemToDelete.id);
+              } else if (itemToDelete.type === 'folder') {
+                const deleteFolderFunction = httpsCallable(functionsInstance, 'deleteFolder');
+                deleteFolderFunction({ folderId: itemToDelete.id })
+                  .then((result) => {
+                    if (result.data.success) {
+                      toast.success(`Folder '${itemToDelete.name}' and its contents deleted successfully.`);
+                      // Update local state: remove the folder
+                      // setFolders((prev) => prev.filter((folder) => folder.id !== itemToDelete.id));
+                      // If the deleted folder is the current folder, navigate up
+                      // if (currentFolderId === itemToDelete.id) {
+                      //   // Navigate to parent (or root if no parent)
+                      //   const parent = breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : { id: null, name: 'Root' };
+                      //   handleNavigate(parent.id);
+                      // }
+                    } else {
+                      // @ts-expect-error data exists on result
+                      throw new Error(result.data.message || 'Unknown error from function.');
+                    }
+                  })
+                  .catch((error: unknown) => {
+                    console.error(`Error calling deleteFolder function for ${itemToDelete.id}:`, error);
+                    const message = error instanceof Error ? error.message : 'An unknown error occurred.';
+                    toast.error(`Failed to delete folder '${itemToDelete.name}'. ${message}`);
+                  })
+                  .finally(() => {
+                    setIsDeleting(false);
+                    setIsDeleteDialogOpen(false);
+                    setItemToDelete(null);
                   });
-                  setDocToDelete(null); // Close dialog on success
-                } catch (error) {
-                  console.error('Error deleting document:', error);
-                  toast({
-                    variant: "destructive",
-                    title: "Error",
-                    description: `Failed to delete "${docToDelete.name}". Please try again. Error: ${error instanceof Error ? error.message : String(error)}`,
-                  });
-                } finally {
-                  setIsDeleting(false);
-                  setDeletingId(null);
-                }
-              }}
-              disabled={isDeleting && deletingId === docToDelete?.id}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              {isDeleting && deletingId === docToDelete?.id ? 'Deleting...' : 'Delete'}
+              }
+            }} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
+              {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -604,6 +657,41 @@ function DashboardPage() {
     setMovingDocument
   ]);
 
+  const handleRenameFolder = async (folderId: string, currentName: string) => {
+    // Implement folder rename logic here
+    console.log(`Renaming folder ${folderId} from ${currentName} to ...`);
+    // For now, just log the event
+  };
+
+  const handleDeleteFolder = async (folderId: string, folderName: string) => {
+    // Implement folder delete logic here
+    console.log(`Deleting folder ${folderId} named ${folderName}`);
+    // For now, just log the event
+    const deleteFolderFunction = httpsCallable(functionsInstance, 'deleteFolder');
+    deleteFolderFunction({ folderId: folderId })
+      .then((result) => {
+        if (result.data.success) {
+          toast.success(`Folder '${folderName}' and its contents deleted successfully.`);
+          // Update local state: remove the folder
+          setFolders((prev) => prev.filter((folder) => folder.id !== folderId));
+          // If the deleted folder is the current folder, navigate up
+          if (currentFolderId === folderId) {
+            // Navigate to parent (or root if no parent)
+            const parent = folderPath.length > 1 ? folderPath[folderPath.length - 2] : { id: null, name: 'Root' };
+            handleBreadcrumbNavigate(parent.id);
+          }
+        } else {
+          // @ts-expect-error data exists on result
+          throw new Error(result.data.message || 'Unknown error from function.');
+        }
+      })
+      .catch((error: unknown) => {
+        console.error(`Error calling deleteFolder function for ${folderId}:`, error);
+        const message = error instanceof Error ? error.message : 'An unknown error occurred.';
+        toast.error(`Failed to delete folder '${folderName}'. ${message}`);
+      });
+  };
+
   // Effect to listen for document-list-refresh events
   useEffect(() => {
     const handleDocumentListRefresh = (event: CustomEvent) => {
@@ -753,6 +841,8 @@ function DashboardPage() {
                               onDeleteDocument={handleDeleteDocument}
                               onFolderClick={handleFolderClick}
                               onMoveClick={handleOpenMoveModal}
+                              onRenameFolder={handleRenameFolder}
+                              onDeleteFolder={handleDeleteFolder}
                             />
                             {filesystemItems.length === 0 && (
                               <p className="mt-4 text-center text-muted-foreground">No documents or folders uploaded yet. Upload a file or create a folder to start.</p>

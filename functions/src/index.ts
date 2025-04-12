@@ -260,11 +260,17 @@ interface MoveDocumentRequestData {
   targetFolderId: string | null;
 }
 
+interface DeleteFolderRequestData {
+  folderId: string;
+}
+
 /**
  * Creates a new folder for the authenticated user.
  */
 export const createFolder = onCall(async (request: CallableRequest<CreateFolderRequestData>) => {
-  logger.info("createFolder called with data:", request.data);
+  logger.info("Received createFolder request", {data: request.data, auth: request.auth});
+
+  // 1. Authentication Check
   if (!request.auth) {
     throw new HttpsError(
       "unauthenticated",
@@ -381,6 +387,119 @@ export const moveDocument = onCall(async (request: CallableRequest<MoveDocumentR
     );
   }
 });
+
+/**
+ * Deletes a folder and all its contents (sub-folders and documents)
+ * for the authenticated user.
+ */
+export const deleteFolder = onCall(async (request: CallableRequest<DeleteFolderRequestData>) => {
+  logger.info("Received deleteFolder request", {data: request.data, auth: request.auth});
+
+  // 1. Authentication Check
+  if (!request.auth) {
+    logger.error("deleteFolder called without authentication.");
+    throw new HttpsError("unauthenticated", "The function must be called while authenticated.");
+  }
+  const userId = request.auth.uid;
+
+  // 2. Validate Input
+  const {folderId} = request.data;
+  if (!folderId || typeof folderId !== "string") {
+    logger.error("Invalid folderId provided.", {folderId});
+    throw new HttpsError("invalid-argument", "The function must be called with a valid 'folderId' string.");
+  }
+
+  logger.info(`User ${userId} attempting to delete folder ${folderId}`);
+
+  try {
+    const bucket = getStorage().bucket(); // Default bucket
+    const userDocsRef = db.collection("users").doc(userId).collection("documents");
+
+    // Helper function for recursive deletion
+    const deleteFolderRecursive = async (currentFolderId: string): Promise<number> => {
+      let deletedCount = 0;
+      logger.info(`Recursively deleting contents of folder: ${currentFolderId}`);
+
+      const itemsSnapshot = await userDocsRef.where("folderId", "==", currentFolderId).get();
+      if (itemsSnapshot.empty) {
+        logger.info(`Folder ${currentFolderId} is empty or does not exist.`);
+        // We still might need to delete the folder doc itself later
+        return deletedCount;
+      }
+
+      const batch = db.batch();
+      const deletePromises: Promise<unknown>[] = [];
+
+      for (const doc of itemsSnapshot.docs) {
+        const itemData = doc.data();
+        const itemId = doc.id;
+
+        if (itemData.type === "folder") {
+          // Recursively delete sub-folder
+          logger.info(`Found sub-folder ${itemId}, deleting recursively...`);
+          deletedCount += await deleteFolderRecursive(itemId);
+          // Add the sub-folder doc itself to the batch for deletion after its contents
+          batch.delete(doc.ref);
+          logger.info(`Added folder doc ${itemId} to deletion batch.`);
+        } else if (itemData.type === "document") {
+          // Delete associated file from Storage
+          if (itemData.storagePath && typeof itemData.storagePath === "string") {
+            logger.info(`Deleting document ${itemId} storage file: ${itemData.storagePath}`);
+            const fileDeletePromise = bucket.file(itemData.storagePath).delete()
+              .then(() => {
+                logger.info(`Successfully deleted storage file: ${itemData.storagePath}`);
+              })
+              .catch((err) => {
+                // Log error but continue - might be already deleted or permissions issue
+                logger.error(`Failed to delete storage file ${itemData.storagePath}:`, err);
+              });
+            deletePromises.push(fileDeletePromise);
+          }
+          // Add document to batch delete
+          batch.delete(doc.ref);
+          deletedCount++;
+          logger.info(`Added document ${itemId} to deletion batch.`);
+        } else {
+          logger.warn(`Unknown item type found in folder ${currentFolderId}:`, itemData);
+          // Optionally delete unknown types too
+          // batch.delete(doc.ref);
+        }
+      }
+
+      // Wait for all storage deletions for this level to attempt completion
+      await Promise.allSettled(deletePromises);
+      logger.info(`Storage delete promises settled for folder ${currentFolderId}.`);
+
+      // Commit the Firestore batch delete for this level
+      await batch.commit();
+      logger.info(`Committed Firestore delete batch for folder ${currentFolderId}.`);
+
+      return deletedCount;
+    };
+
+    // Start the recursive deletion process
+    const totalDeleted = await deleteFolderRecursive(folderId);
+
+    // Finally, delete the target folder document itself
+    try {
+      await userDocsRef.doc(folderId).delete();
+      logger.info(`Successfully deleted the main folder document: ${folderId}`);
+    } catch (error) {
+      // It might have been deleted in the recursive call if it was listed somehow,
+      // or it might not exist if the initial query was empty.
+      logger.warn(`Could not delete main folder doc ${folderId} (might be already deleted or non-existent):`, error);
+    }
+
+    logger.info(`Successfully deleted folder ${folderId} and ${totalDeleted} nested items for user ${userId}.`);
+    return {success: true, message: `Folder and ${totalDeleted} items deleted successfully.`};
+  } catch (error) {
+    logger.error(`Error deleting folder ${folderId} for user ${userId}:`, error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new HttpsError("internal", `Failed to delete folder: ${errorMessage}`);
+  }
+});
+
+// TODO: Add functions for renaming folders, moving folders etc.
 
 // ==============================================
 // Excel Processing Functions
