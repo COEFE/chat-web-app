@@ -27,23 +27,23 @@ import { processExcelOperation } from "@/lib/excelUtils";
 import { File as GoogleCloudFile } from "@google-cloud/storage";
 import { extractText } from "unpdf";
 import { Timestamp } from 'firebase-admin/firestore'; // Import Timestamp
-// Remove duplicate import of getAdminDb, keep initializeFirebaseAdmin if needed elsewhere
-import { getAdminDb, getAdminAuth, getAdminStorage, initializeFirebaseAdmin } from "@/lib/firebaseAdminConfig";
 
 console.log("--- MODULE LOAD: /api/chat/route.ts ---");
 
+// Helper to check if an error is a FirebaseError with a specific code
+function isFirebaseError(error: unknown): error is FirebaseError {
+  return false;
+}
+
 // Type guard to check if an error is a Firebase Storage error with a specific code
-function isFirebaseStorageError(
-  error: unknown,
-  code: number
-): error is FirebaseError {
+function isFirebaseStorageError(error: unknown, code: number): error is FirebaseError & { code: number } {
+  // Check if it's an object, has a 'code' property, and the code matches
   return (
-    typeof error === "object" &&
+    typeof error === 'object' &&
     error !== null &&
-    (error as FirebaseError).code === `storage/object-not-found` &&
-    code === 404
+    'code' in error &&
+    (error as any).code === code
   );
-  // Adjust `storage/object-not-found` if the actual code string differs
 }
 
 // Helper function to extract sheet name from a message
@@ -575,7 +575,7 @@ Answer the user's question based on the chat history and the provided context. I
     return new StreamingTextResponse(responseStream, {
         headers: { "Content-Type": "text/plain; charset=utf-8" },
         // Use onCompletion to save the full AI response
-        experimental_onCompletion: async (completion) => {
+        experimental_onCompletion: async (completion: string) => {
              if (!completion) {
                   console.warn("Completion callback received empty completion.");
                   return;
