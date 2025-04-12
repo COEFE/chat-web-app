@@ -303,19 +303,20 @@ function DocumentTable({
                 const deleteFolderFunction = httpsCallable(functionsInstance, 'deleteFolder');
                 deleteFolderFunction({ folderId: itemToDelete.id })
                   .then((result) => {
-                    if (result.data.success) {
+                    const responseData = result.data as { success: boolean; message?: string };
+
+                    if (responseData.success) {
                       toast.success(`Folder '${itemToDelete.name}' and its contents deleted successfully.`);
                       // Update local state: remove the folder
-                      // setFolders((prev) => prev.filter((folder) => folder.id !== itemToDelete.id));
+                      setFolders((prev) => prev.filter((folder) => folder.id !== itemToDelete.id));
                       // If the deleted folder is the current folder, navigate up
-                      // if (currentFolderId === itemToDelete.id) {
-                      //   // Navigate to parent (or root if no parent)
-                      //   const parent = breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : { id: null, name: 'Root' };
-                      //   handleNavigate(parent.id);
-                      // }
+                      if (currentFolderId === itemToDelete.id) {
+                        // Navigate to parent (or root if no parent)
+                        const parent = breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : { id: null, name: 'Root' };
+                        handleNavigate(parent.id);
+                      }
                     } else {
-                      // @ts-expect-error data exists on result
-                      throw new Error(result.data.message || 'Unknown error from function.');
+                      throw new Error(responseData.message || 'Unknown error from function.');
                     }
                   })
                   .catch((error: unknown) => {
@@ -663,33 +664,11 @@ function DashboardPage() {
     // For now, just log the event
   };
 
-  const handleDeleteFolder = async (folderId: string, folderName: string) => {
-    // Implement folder delete logic here
-    console.log(`Deleting folder ${folderId} named ${folderName}`);
-    // For now, just log the event
-    const deleteFolderFunction = httpsCallable(functionsInstance, 'deleteFolder');
-    deleteFolderFunction({ folderId: folderId })
-      .then((result) => {
-        if (result.data.success) {
-          toast.success(`Folder '${folderName}' and its contents deleted successfully.`);
-          // Update local state: remove the folder
-          setFolders((prev) => prev.filter((folder) => folder.id !== folderId));
-          // If the deleted folder is the current folder, navigate up
-          if (currentFolderId === folderId) {
-            // Navigate to parent (or root if no parent)
-            const parent = folderPath.length > 1 ? folderPath[folderPath.length - 2] : { id: null, name: 'Root' };
-            handleBreadcrumbNavigate(parent.id);
-          }
-        } else {
-          // @ts-expect-error data exists on result
-          throw new Error(result.data.message || 'Unknown error from function.');
-        }
-      })
-      .catch((error: unknown) => {
-        console.error(`Error calling deleteFolder function for ${folderId}:`, error);
-        const message = error instanceof Error ? error.message : 'An unknown error occurred.';
-        toast.error(`Failed to delete folder '${folderName}'. ${message}`);
-      });
+  const handleDeleteFolder = (folderId: string, folderName: string) => {
+    // Open the confirmation dialog instead of directly deleting
+    console.log(`Initiating delete for folder: ${folderName} (${folderId})`);
+    setItemToDelete({ id: folderId, name: folderName, type: 'folder' });
+    setIsDeleteDialogOpen(true);
   };
 
   // Effect to listen for document-list-refresh events
