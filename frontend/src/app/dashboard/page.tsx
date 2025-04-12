@@ -552,6 +552,20 @@ function DashboardPage() {
     setMovingDocument
   ]);
 
+  // Effect to listen for document-list-refresh events
+  useEffect(() => {
+    const handleDocumentListRefresh = (event: CustomEvent) => {
+      console.log('[Dashboard] Received document-list-refresh event:', event.detail);
+      triggerRefresh();
+    };
+
+    window.addEventListener('document-list-refresh', handleDocumentListRefresh as EventListener);
+    
+    return () => {
+      window.removeEventListener('document-list-refresh', handleDocumentListRefresh as EventListener);
+    };
+  }, []);
+
   useEffect(() => {
     if (authLoading) {
       console.log('Auth is loading, skipping fetch.');

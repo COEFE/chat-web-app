@@ -160,12 +160,24 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
              setMessages((prev) => [...prev, aiResponse]);
 
              let refreshTriggered = false;
-             // Check for successful Excel operation
-             if (messageData.excelOperation && messageData.excelOperation.success) { 
-               console.log('[ChatInterface] Excel operation successful, triggering document refresh');
-               window.dispatchEvent(new Event('excel-document-updated'));
-             refreshTriggered = true;
-             }
+              // Check for successful Excel operation
+              if (messageData.excelOperation && messageData.excelOperation.success) { 
+                console.log('[ChatInterface] Excel operation successful, triggering document refresh');
+                
+                // Trigger document viewer refresh
+                window.dispatchEvent(new Event('excel-document-updated'));
+                
+                // If this is a new document creation (check for documentId in the response)
+                if (messageData.excelOperation.documentId) {
+                  // Dispatch a custom event to refresh the document list in the dashboard
+                  console.log('[ChatInterface] New Excel document created, triggering document list refresh');
+                  window.dispatchEvent(new CustomEvent('document-list-refresh', {
+                    detail: { documentId: messageData.excelOperation.documentId }
+                  }));
+                }
+                
+                refreshTriggered = true;
+              }
 
              // Handle marker removal (check content exists before calling includes)
              if (aiResponse.content && aiResponse.content.includes('[EXCEL_DOCUMENT_UPDATED]')) {
