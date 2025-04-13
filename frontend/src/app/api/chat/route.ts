@@ -496,11 +496,16 @@ export async function POST(req: NextRequest) {
       } else if (fileType === 'pdf') {
         console.log(`[route.ts] Attempting PDF text extraction for document: ${documentId} using unpdf...`); // Added log
         try {
-           const { text } = await extractText(fileBuffer);
-           fileContent = text.join('\n'); // Join array elements into a single string
+           // Convert Node.js Buffer to Uint8Array
+           const fileUint8Array = new Uint8Array(fileBuffer); 
+           console.log(`[route.ts] Converted Buffer (length: ${fileBuffer.length}) to Uint8Array (length: ${fileUint8Array.length}) for unpdf.`);
+          // Pass the Uint8Array to extractText
+          const { text } = await extractText(fileUint8Array); 
+          fileContent = text.join('\n'); // Join array elements into a single string
            console.log(`[route.ts] PDF content extracted successfully for document: ${documentId}.`); // Added log
-        } catch (pdfError: any) { // Catch specific PDF error
-            console.error(`[route.ts] Error during unpdf text extraction for document ${documentId}:`, pdfError);
+         } catch (pdfError: any) { // Catch specific PDF error
+             console.error(`[route.ts] Error during unpdf text extraction for document ${documentId}:`, pdfError);
+             fileContent = ''; // Set to empty string on PDF extraction failure
             // Explicitly log message and stack if they exist
             if (pdfError.message) {
               console.error(`[route.ts] unpdf Error Message: ${pdfError.message}`);
