@@ -18,12 +18,33 @@ interface ChatInterfaceProps {
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) => {
   const scrollAreaRef = useRef<HTMLDivElement>(null); 
   const { user } = useAuth(); 
-  
+  const [authToken, setAuthToken] = useState<string | null>(null); // State for auth token
+
   const [activeSheet, setActiveSheet] = useState<string | null>(null);
+
+  // Effect to fetch the auth token when the user object changes
+  useEffect(() => {
+    if (user) {
+      user.getIdToken()
+        .then(token => {
+          console.log("[ChatInterface] Auth token fetched successfully.");
+          setAuthToken(token);
+        })
+        .catch(error => {
+          console.error("[ChatInterface] Error fetching auth token:", error);
+          setAuthToken(null); // Clear token on error
+        });
+    } else {
+      console.log("[ChatInterface] No user, clearing auth token.");
+      setAuthToken(null); // Clear token if user logs out
+    }
+  }, [user]); // Re-run when user changes
 
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages } = useChat({
     api: '/api/chat', 
     id: documentId, 
+    // Add the headers property conditionally
+    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
     body: {
       documentId: documentId,
       currentDocument: document, 
