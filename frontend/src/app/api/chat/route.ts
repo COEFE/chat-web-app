@@ -497,140 +497,102 @@ export async function POST(req: NextRequest) {
     // Use the messages format for Claude 3
     const systemPrompt = "You are a helpful assistant. If asked to modify an Excel file, respond ONLY with the JSON for the required 'excelOperation' function call, following the specified schema. Do not add any introductory text, explanations, or concluding remarks around the JSON. If asked a general question or a question about the document content, answer normally.";
     
-    // Log incoming message content types for debugging
-    console.log("Inspecting incoming messages structure before mapping:");
-    messages.forEach((msg: VercelChatMessage, index: number) => {
-      console.log(`Message[${index}] ID: ${msg.id}, Role: ${msg.role}, Content Type: ${typeof msg.content}, IsArray: ${Array.isArray(msg.content)}`);
-    });
-
-    // Explicitly type aiMessages as MessageParam[]
-    const aiMessages: MessageParam[] = messages 
-      // Map Vercel messages to Anthropic's format
-      // Filter out system messages if included in history, as Anthropic takes one system prompt
-      .filter((m) => m.role !== 'system') 
-      .map((message) => { 
-        // Defensively handle content
-        const messageContent = Array.isArray(message.content)
-                              ? message.content.join('\n') // Join array elements
-                              : message.content;         // Use string directly
-        return { 
-          role: message.role as 'user' | 'assistant',
-          content: messageContent as string // Cast content directly here
-        };
-      });
+    // Map VercelChatMessages to CoreMessages, filtering for valid roles.
+    const messagesForStreamText: CoreMessage[] = messages
+      .filter(msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system') // Keep only valid roles
+      .map(msg => ({ // Map to the structure CoreMessage expects
+        role: msg.role,
+        content: msg.content,
+      })) as CoreMessage[]; // Explicitly cast the final array
  
-      // Create a final array to send to the API, avoiding in-place modification
-      let finalAiMessagesForApi = [...aiMessages]; 
- 
-      // Modify the last message in the *new* array if needed
-      if (finalAiMessagesForApi.length > 0 && finalAiMessagesForApi[finalAiMessagesForApi.length - 1].role === 'user' && fileContent) {
-        const lastMessageIndex = finalAiMessagesForApi.length - 1;
-        // Create a new object for the last message with modified content
-        finalAiMessagesForApi[lastMessageIndex] = {
-            ...finalAiMessagesForApi[lastMessageIndex], // Copy existing properties (like role)
-            content: 
-                `--- Document Context (${fileName || 'current document'}) ---
-${fileContent.substring(0, 20000)} ${fileContent.length > 20000 ? '\n[Content Truncated]' : ''}
---- End Document Context ---
-
-User Request: ${userMessageContent}`
-        };
-    } else {
-        // If no file content, just use the user message as is
-        // Or if the last message wasn't user (shouldn't happen with useChat normally)
-        console.log("No document context added to the final user message for AI.");
-    }
-
-    console.log("Sending messages to Anthropic API:", JSON.stringify(finalAiMessagesForApi, null, 2)); // Log final messages being sent
-
-    console.log("[route.ts] Payload for Anthropic API:", JSON.stringify(finalAiMessagesForApi, null, 2)); // Log the exact payload
+    console.log("[route.ts] Payload for streamText (Anthropic):", JSON.stringify(messagesForStreamText, null, 2)); // Log the exact payload
 
     // ---- START: Streaming Implementation (Vercel AI SDK v4) ----
     const result = await streamText({
-       model: anthropic('claude-3-7-sonnet-20250219'),
-       system: systemPrompt,
-       messages: finalAiMessagesForApi as CoreMessage[], // Cast to CoreMessage[] as required by streamText
-       maxTokens: 1024,
+      model: anthropic('claude-3-7-sonnet-20250219'),
+      system: systemPrompt,
+      messages: messagesForStreamText, // Pass the full conversation history
+      maxTokens: 1024,
 
-       // --- onFinish replaces onCompletion for post-stream processing --- 
-       async onFinish({ text, toolCalls, toolResults, usage, finishReason, logprobs }) {
-         console.log(`[route.ts][onFinish] Stream finished. Reason: ${finishReason}. Final text length: ${text.length}`);
+      // --- onFinish replaces onCompletion for post-stream processing --- 
+      async onFinish({ text, toolCalls, toolResults, usage, finishReason, logprobs }) {
+        console.log(`[route.ts][onFinish] Stream finished. Reason: ${finishReason}. Final text length: ${text.length}`);
 
-         // --- Re-integrated Excel/History Logic --- 
-         const aiResponseText = text; // Use the final text from the stream
-         let isExcelOperation = false;
-         let parsedJson: any = null;
+        // --- Re-integrated Excel/History Logic --- 
+        const aiResponseText = text; // Use the final text from the stream
+        let isExcelOperation = false;
+        let parsedJson: any = null;
 
-         try {
-           const potentialJson = aiResponseText.trim();
-           if (potentialJson.startsWith('{') && potentialJson.endsWith('}')) {
-             parsedJson = JSON.parse(potentialJson);
-             if (parsedJson.action && (parsedJson.action === 'editExcelFile' || parsedJson.action === 'createExcelFile') && parsedJson.args) {
-               console.log("[route.ts][onFinish] Detected potential Excel operation:", parsedJson.action);
-               isExcelOperation = true;
-             }
-           }
-         } catch (parseError) {
-           console.log("[route.ts][onFinish] AI response is not a valid Excel operation JSON.");
-           isExcelOperation = false;
-         }
-
-         let finalAiMessageContent = aiResponseText; // Default to the raw completion
-         let excelResult: any = null; // Store excel result if applicable
-
-         if (isExcelOperation && parsedJson) {
-             console.log(`[route.ts][onFinish] Handling Excel Operation: ${parsedJson.action}`);
-             const { action, args } = parsedJson;
-             const sheetName = extractSheetName(lastMessage.content as string); // Use lastMessage from outer scope
-             
-             excelResult = await handleExcelOperation(
-                 '', // authToken seems removed/unused here, pass empty or adjust handleExcelOperation
-                 userId,
-                 lastMessage.content as string, // Use lastMessage from outer scope
-                 currentDocument, // Pass the current document context if available
-                 sheetName || undefined
-             );
-
-             console.log('[route.ts][onFinish] Excel Operation Result:', excelResult);
-             
-             // Use helpers to create appropriate message based on Excel result
-             if (excelResult.success) {
-                 finalAiMessageContent = createSuccessMessage(parsedJson, excelResult);
-             } else {
-                 finalAiMessageContent = createErrorMessage(parsedJson, excelResult);
-             }
-             console.log('[route.ts][onFinish] Final message after Excel op:', finalAiMessageContent);
-         }
-
-         // --- Save the final chat history --- 
-         const aiMessage: VercelChatMessage = {
-             id: Date.now().toString(), // Generate ID 
-             role: 'assistant',
-             content: finalAiMessageContent,
-             // Include Excel result details if it was an Excel operation
-             ...(isExcelOperation && excelResult ? { data: { excelOperationResult: excelResult } } : {}),
-         };
-         
-         const finalMessages = [...messages, aiMessage]; // Include the AI message
-
-         try {
-             if (documentId) {
-              const chatDocRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('chats').doc('default');
-              await chatDocRef.set({ messages: finalMessages }, { merge: true });
-              console.log(`[route.ts][onFinish] Chat history saved successfully for document ${documentId}`);
-            } else {
-              console.log("[route.ts][onFinish] Skipping chat history save as no documentId was provided.");
+        try {
+          const potentialJson = aiResponseText.trim();
+          if (potentialJson.startsWith('{') && potentialJson.endsWith('}')) {
+            parsedJson = JSON.parse(potentialJson);
+            if (parsedJson.action && (parsedJson.action === 'editExcelFile' || parsedJson.action === 'createExcelFile') && parsedJson.args) {
+              console.log("[route.ts][onFinish] Detected potential Excel operation:", parsedJson.action);
+              isExcelOperation = true;
             }
-         } catch (saveError) {
-          console.error(`[route.ts][onFinish] Error saving chat history for document ${documentId}:`, saveError);
-         }
-         // --- End Re-integrated Logic --- 
-       },
-   });
+          }
+        } catch (parseError) {
+          console.log("[route.ts][onFinish] AI response is not a valid Excel operation JSON.");
+          isExcelOperation = false;
+        }
 
-   // Return the stream response
-   return result.toDataStreamResponse();
-   // ---- END: Streaming Implementation (Vercel AI SDK v4) ----
+        let finalAiMessageContent = aiResponseText; // Default to the raw completion
+        let excelResult: any = null; // Store excel result if applicable
+
+        if (isExcelOperation && parsedJson) {
+          console.log(`[route.ts][onFinish] Handling Excel Operation: ${parsedJson.action}`);
+          const { action, args } = parsedJson;
+          const sheetName = extractSheetName(lastMessage.content as string); // Use lastMessage from outer scope
+
+          excelResult = await handleExcelOperation(
+            '', // authToken seems removed/unused here, pass empty or adjust handleExcelOperation
+            userId,
+            lastMessage.content as string, // Use lastMessage from outer scope
+            currentDocument, // Pass the current document context if available
+            sheetName || undefined
+          );
+
+          console.log('[route.ts][onFinish] Excel Operation Result:', excelResult);
+
+          // Use helpers to create appropriate message based on Excel result
+          if (excelResult.success) {
+            finalAiMessageContent = createSuccessMessage(parsedJson, excelResult);
+          } else {
+            finalAiMessageContent = createErrorMessage(parsedJson, excelResult);
+          }
+          console.log('[route.ts][onFinish] Final message after Excel op:', finalAiMessageContent);
+        }
+
+        // --- Save the final chat history --- 
+        const aiMessage: VercelChatMessage = {
+          id: Date.now().toString(), // Generate ID 
+          role: 'assistant',
+          content: finalAiMessageContent,
+          // Include Excel result details if it was an Excel operation
+          ...(isExcelOperation && excelResult ? { data: { excelOperationResult: excelResult } } : {}),
+        };
+
+        const finalMessages = [...messages, aiMessage]; // Include the AI message
+
+        try {
+          if (documentId) {
+            const chatDocRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('chats').doc('default');
+            await chatDocRef.set({ messages: finalMessages }, { merge: true });
+            console.log(`[route.ts][onFinish] Chat history saved successfully for document ${documentId}`);
+          } else {
+            console.log("[route.ts][onFinish] Skipping chat history save as no documentId was provided.");
+          }
+        } catch (saveError) {
+          console.error(`[route.ts][onFinish] Error saving chat history for document ${documentId}:`, saveError);
+        }
+        // --- End Re-integrated Logic --- 
+      },
+    });
+
+    // Return the stream response
+    return result.toDataStreamResponse();
+    // ---- END: Streaming Implementation (Vercel AI SDK v4) ----
 
   } catch (error: any) {
     console.error("Error calling Anthropic API:", error);
@@ -645,17 +607,17 @@ User Request: ${userMessageContent}`
     };
     const finalMessagesOnError = [...messages, errorMessage];
     try {
-        if (documentId) {
-             const chatDocRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('chats').doc('default');
-             await chatDocRef.set({ messages: finalMessagesOnError }, { merge: true });
-             console.log(`Chat history saved (with error) for document ${documentId}`);
-         } else {
-             console.log("Skipping chat history save (on error) as no documentId was provided.");
-         }
+      if (documentId) {
+        const chatDocRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('chats').doc('default');
+        await chatDocRef.set({ messages: finalMessagesOnError }, { merge: true });
+        console.log(`Chat history saved (with error) for document ${documentId}`);
+      } else {
+        console.log("Skipping chat history save (on error) as no documentId was provided.");
+      }
     } catch (saveError) {
-         console.error(`Error saving chat history (on error) for document ${documentId}:`, saveError);
+      console.error(`Error saving chat history (on error) for document ${documentId}:`, saveError);
     }
-    
+
     const apiErrorMessage = error instanceof Error ? error.message : "Failed to get response from AI";
     console.error(`[route.ts] Returning 500 error: ${apiErrorMessage}`); 
     return NextResponse.json({ error: apiErrorMessage }, { status: 500 });
