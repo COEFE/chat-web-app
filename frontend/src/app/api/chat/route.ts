@@ -485,7 +485,7 @@ export async function POST(req: NextRequest) {
 
       } else if (fileType === 'pdf') {
         const { text } = await extractText(fileBuffer);
-        fileContent = text;
+        fileContent = text.join('\n'); // Join array elements into a single string
         console.log("PDF content extracted.");
       } else if (['txt', 'md', 'csv', 'json', 'html', 'xml', 'js', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rb', 'php'].includes(fileType || '')) {
         fileContent = fileBuffer.toString('utf-8');
@@ -557,7 +557,7 @@ export async function POST(req: NextRequest) {
                               : message.content;         // Use string directly
         return { 
           role: message.role as 'user' | 'assistant',
-          content: messageContent
+          content: messageContent as string // Cast content directly here
         };
       });
  
@@ -589,9 +589,7 @@ User Request: ${userMessageContent}`
       model: 'claude-3-sonnet-20240229', // Or your preferred model
       max_tokens: 1024,
       system: systemPrompt,
-      // Using 'as any' as a workaround for persistent IDE lint error (2214a402-da01-43e1-adb9-5fe81fdb9e4d)
-      // The type transformation seems correct, but the linter struggles.
-      messages: finalAiMessagesForApi as any
+      messages: finalAiMessagesForApi // Remove workaround cast
     });
 
     console.log("Anthropic Response Received:", JSON.stringify(response, null, 2));
