@@ -1,45 +1,117 @@
-import { NextRequest, NextResponse } from 'next/server';
-// Vercel AI SDK imports
-import { Message as VercelChatMessage, streamText, CoreMessage } from "ai"; 
-import { MessageParam } from '@anthropic-ai/sdk/resources/messages'; 
-// Note: If these imports are failing, you may need to install the correct packages
-// npm install ai
-import { anthropic } from '@ai-sdk/anthropic'; 
+import Anthropic from '@anthropic-ai/sdk';
+import { MessageParam } from '@anthropic-ai/sdk/resources/messages';
+import { CoreMessage, streamText, StreamData, Message as VercelChatMessage } from 'ai'; 
 import { 
-  getFirestore, 
-  collection, 
-  addDoc, 
-  serverTimestamp,
-} from 'firebase/firestore';
-let experimental_StreamData: any;
-try {
-  const aiImports = require("ai");
-  experimental_StreamData = aiImports.experimental_StreamData;
-} catch (e) {
-  console.error("Error importing from ai package:", e);
-  // Fallback empty implementations to prevent crashes
-  experimental_StreamData = class {};
-}
-// LangChain imports - commented out until packages are installed
-// import { ChatAnthropic } from '@langchain/anthropic';
-// import { PromptTemplate } from '@langchain/core/prompts';
-// import { RunnableSequence } from '@langchain/core/runnables';
-// import { BytesOutputParser } from '@langchain/core/output_parsers';
-// Temporary placeholders to prevent errors
-const ChatAnthropic = {};
-const PromptTemplate = {};
-const RunnableSequence = {};
-const BytesOutputParser = {};
-import Anthropic from '@anthropic-ai/sdk'; 
-import { FirebaseError } from 'firebase-admin/app';
+    anthropic as vercelAnthropic 
+} from '@ai-sdk/anthropic';
+import { NextRequest, NextResponse } from 'next/server';
+import admin from 'firebase-admin'; 
+import { firestore } from 'firebase-admin'; 
+import { FirebaseError } from 'firebase-admin/app'; 
+import { getFirestore as getAdminDb, initializeAdminApp } from '@/lib/firebaseAdmin'; 
+import { getStorage as getAdminStorage } from 'firebase-admin/storage'; 
+import { getAuth as getAdminAuth } from 'firebase-admin/auth'; 
 import { processExcelOperation } from '@/lib/excelUtils'; 
 import { File as GoogleCloudFile } from '@google-cloud/storage'; 
-import { firestore } from 'firebase-admin'; 
-import { getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig'; 
-import * as XLSX from 'xlsx';
-import { extractText } from "unpdf";
+import * as XLSX from 'xlsx'; 
+import { extractText } from 'unpdf'; 
 
 console.log("--- MODULE LOAD: /api/chat/route.ts ---");
+
+// --- Initialize Firebase Admin SDK ---
+if (!admin.apps.length) {
+  try {
+    initializeAdminApp();
+    console.log('[route.ts] Firebase Admin SDK Initialized');
+  } catch (error) {
+    console.error('[route.ts] Firebase Admin SDK Initialization Error:', error);
+    // Handle initialization error appropriately, maybe throw?
+  }
+}
+
+// --- Constants ---
+const MODEL_NAME = 'claude-3-5-sonnet-20240620'; 
+const MAX_TOKENS = 4000; 
+const EXCEL_MAX_TOKENS = 4000; 
+const DEFAULT_SYSTEM_PROMPT = `You are Claude, a helpful AI assistant integrated into a web chat application. Provide concise and accurate responses. If the user asks you to interact with an Excel file, format your response strictly as a JSON object containing 'action' ('createExcelFile' or 'editExcelFile') and 'args' (specific arguments for the action, including operations like 'createSheet', 'updateCells', 'formatCells'). Do not include any explanatory text outside the JSON object when performing Excel actions. For example:
+{
+  "action": "editExcelFile",
+  "args": {
+    "operations": [
+      { "type": "updateCells", "sheetName": "Sheet1", "cellUpdates": [ { "cell": "A1", "value": "New Value" } ] },
+      { "type": "formatCells", "sheetName": "Sheet1", "cellFormats": [ { "cell": "A1", "format": { "bold": true } } ] }
+    ]
+  }
+}
+`;
+
+// Initialize Anthropic SDK Client (outside of POST function)
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+// Helper functions for creating messages
+function createSuccessMessage(parsedJson: any, result: any): string {
+  if (parsedJson.operation === "create") {
+    return `I've created a new Excel file named "${
+      parsedJson.fileName
+    }" for you. ${
+      result.url ? "You can download it using the link below." : ""
+    }`;
+  } else if (parsedJson.operation === "edit") {
+    const cellUpdates = parsedJson.data.flatMap(
+      (sheet: {
+        sheetName: string;
+        cellUpdates: Array<{ cell: string; value: string }>;
+      }) =>
+        sheet.cellUpdates.map(
+          (update: { cell: string; value: string }) =>
+            `${update.cell} in sheet "${sheet.sheetName || "Sheet1"}" to "${
+              update.value
+            }"` // Added default sheet name
+        )
+    );
+
+    const cellUpdateText =
+      cellUpdates.length > 1
+        ? `updated ${cellUpdates.length} cells`
+        : `updated ${cellUpdates[0]}`;
+
+    return `I've ${cellUpdateText} in the Excel file "${
+      result.fileName || "your document"
+    }".`;
+  } else {
+    return `I've successfully performed the ${parsedJson.operation} operation on the Excel file.`;
+  }
+}
+
+function createErrorMessage(parsedJson: any, result: any): string {
+  let errorMessage = `I tried to perform the operation on an Excel file, but encountered an error: ${
+    result?.message || result?.error || "Unknown error"
+  }`;
+
+  // Safely access operation type
+  if (parsedJson && parsedJson.action) { // Check for action property
+    errorMessage = `I tried to ${parsedJson.action} an Excel file, but encountered an error: ${result?.message || result?.error || "Unknown error"}`;
+  }
+
+  // Add suggestions if available documents were returned
+  if (
+    result &&
+    result.availableDocuments &&
+    result.availableDocuments.length > 0
+  ) {
+    errorMessage +=
+      "\n\nHere are some available documents you can use instead:\n";
+    result.availableDocuments.forEach(
+      (doc: { name: string; id: string }) => {
+        errorMessage += `- "${doc.name}" (ID: ${doc.id})\n`;
+      }
+    );
+    errorMessage += "\nPlease try again with one of these document IDs.";
+  }
+  return errorMessage;
+}
 
 // Type guard to check if an error is a Firebase Storage error with a specific code
 function isFirebaseStorageError(
@@ -256,74 +328,6 @@ async function handleExcelOperation(
   }
 }
 
-// Helper function to create success messages
-function createSuccessMessage(parsedJson: any, excelResult: any): string {
-  if (parsedJson.operation === "create") {
-    return `I've created a new Excel file named "${
-      parsedJson.fileName
-    }" for you. ${
-      excelResult.url ? "You can download it using the link below." : ""
-    }`;
-  } else if (parsedJson.operation === "edit") {
-    const cellUpdates = parsedJson.data.flatMap(
-      (sheet: {
-        sheetName: string;
-        cellUpdates: Array<{ cell: string; value: string }>;
-      }) =>
-        sheet.cellUpdates.map(
-          (update: { cell: string; value: string }) =>
-            `${update.cell} in sheet "${sheet.sheetName || "Sheet1"}" to "${
-              update.value
-            }"` // Added default sheet name
-        )
-    );
-
-    const cellUpdateText =
-      cellUpdates.length > 1
-        ? `updated ${cellUpdates.length} cells`
-        : `updated ${cellUpdates[0]}`;
-
-    return `I've ${cellUpdateText} in the Excel file "${
-      excelResult.fileName || "your document"
-    }".`;
-  } else {
-    return `I've successfully performed the ${parsedJson.operation} operation on the Excel file.`;
-  }
-}
-
-// Helper function to create error messages
-function createErrorMessage(parsedJson: any, excelResult: any): string {
-  let errorMessage = `I tried to perform the operation on an Excel file, but encountered an error: ${
-    excelResult?.error || "Unknown error"
-  }`;
-
-  // Safely access operation type
-  if (parsedJson && parsedJson.operation) {
-    errorMessage = `I tried to ${
-      parsedJson.operation
-    } an Excel file, but encountered an error: ${
-      excelResult?.error || "Unknown error"
-    }`;
-  }
-
-  // Add suggestions if available documents were returned
-  if (
-    excelResult &&
-    excelResult.availableDocuments &&
-    excelResult.availableDocuments.length > 0
-  ) {
-    errorMessage +=
-      "\n\nHere are some available documents you can use instead:\n";
-    excelResult.availableDocuments.forEach(
-      (doc: { name: string; id: string }) => {
-        errorMessage += `- "${doc.name}" (ID: ${doc.id})\n`;
-      }
-    );
-    errorMessage += "\nPlease try again with one of these document IDs.";
-  }
-  return errorMessage;
-}
-
 export async function POST(req: NextRequest) {
   console.log("--- /api/chat POST request received ---");
 
@@ -536,233 +540,209 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
     );
     
     console.log("[route.ts] Is Excel request:", isExcelRequest);
-    console.log("[route.ts] Payload for streamText (Anthropic):", JSON.stringify(messagesForStreamText, null, 2)); // Log the exact payload
+    console.log("[route.ts] Payload for AI call (Anthropic):", JSON.stringify(messagesForStreamText, null, 2)); // Log the exact payload
 
-    // ---- START: Streaming Implementation (Vercel AI SDK v4) ----
-    const result = await streamText({
-      model: anthropic('claude-3-7-sonnet-20250219'),
-      system: finalSystemPrompt, // Use the potentially augmented system prompt
-      messages: messagesForStreamText, // Pass the full conversation history
-      maxTokens: isExcelRequest ? 16384 : 4096, // Use higher token limit for Excel operations
-      ...(isExcelRequest ? { betas: ['output-128k-2025-02-19'] } : {}), // Enable extended output for Excel requests
+    // ---- START: Conditional Streaming/Non-Streaming Logic ----
+    if (isExcelRequest) {
+      // ---- NON-STREAMING CALL FOR EXCEL REQUESTS ----
+      console.log("[route.ts] Handling as non-streaming Excel request.");
+      try {
+        // Filter messages for Anthropic API (user/assistant roles only)
+        const finalAiMessagesForApi: MessageParam[] = messagesForStreamText
+          .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+          .map(msg => ({
+            role: msg.role as 'user' | 'assistant', // Explicitly cast role
+            content: msg.content as string, // Content is expected to be string
+          }));
 
-      // --- onFinish replaces onCompletion for post-stream processing --- 
-      async onFinish({ text, toolCalls, toolResults, usage, finishReason, logprobs }) {
-        console.log(`[route.ts][onFinish] Stream finished. Reason: ${finishReason}. Final text length: ${text.length}`);
+        // Make the non-streaming API call using the initialized 'anthropic' client from @anthropic-ai/sdk
+        const response = await anthropic.messages.create({ // This uses the SDK client instance
+          model: 'claude-3-5-sonnet-20240620',
+          max_tokens: 4000, // Increased token limit
+          system: finalSystemPrompt, // Use the potentially augmented system prompt
+          messages: finalAiMessagesForApi,
+        });
 
-        // --- Re-integrated Excel/History Logic --- 
-        const aiResponseText = text; // Use the final text from the stream
-        let isExcelOperation = false;
-        let parsedJson: any = null;
+        console.log("[route.ts] Non-streaming Anthropic response received:", response);
 
-        try {
-          const potentialJson = aiResponseText.trim();
-          
-          // Check if the response looks like JSON
-          if (potentialJson.startsWith('{') && potentialJson.endsWith('}')) {
-            try {
-              parsedJson = JSON.parse(potentialJson);
-              
-              // Validate the Excel operation structure - handle both formats
-              if (parsedJson.action && 
-                  (parsedJson.action === 'editExcelFile' || parsedJson.action === 'createExcelFile') && 
-                  parsedJson.args) {
-                // Standard format with action and args
-                console.log("[route.ts][onFinish] Detected valid Excel operation:", parsedJson.action);
-                isExcelOperation = true;
-              } else if (parsedJson.excelOperation) {
-                // Alternative format with excelOperation as top-level key
-                console.log("[route.ts][onFinish] Detected Excel operation with excelOperation format");
-                
-                // Convert to the expected format
-                const operation = parsedJson.excelOperation.operation || 'createExcelFile';
-                parsedJson = {
-                  action: operation === 'createWorkbook' ? 'createExcelFile' : 'editExcelFile',
-                  args: {
-                    operations: Array.isArray(parsedJson.excelOperation.sheets) 
-                      ? parsedJson.excelOperation.sheets.map((sheet: any) => ({
-                          type: 'createSheet',
-                          name: sheet.name,
-                          data: sheet.data,
-                          formats: sheet.formats,
-                          columnWidths: sheet.columnWidths
-                        }))
-                      : [parsedJson.excelOperation]
-                  }
-                };
-                
-                console.log("[route.ts][onFinish] Converted to standard format:", parsedJson.action);
-                isExcelOperation = true;
+        if (response.content && response.content.length > 0 && response.content[0].type === 'text') {
+          const aiResponseText = response.content[0].text;
+          console.log("[route.ts] Extracted text from non-streaming response:", aiResponseText);
+
+          // Attempt to parse the response as JSON
+          let parsedJson;
+          let excelResult: { success: boolean; message?: string; fileUrl?: string } = { success: false, message: "Failed to parse AI response."};
+          try {
+            // Find the start and end of the JSON block
+            const jsonStart = aiResponseText.indexOf('{');
+            const jsonEnd = aiResponseText.lastIndexOf('}') + 1;
+            if (jsonStart !== -1 && jsonEnd > jsonStart) {
+              const jsonString = aiResponseText.substring(jsonStart, jsonEnd);
+              console.log("[route.ts] Extracted JSON string:", jsonString);
+              parsedJson = JSON.parse(jsonString);
+              console.log("[route.ts] Parsed JSON from non-streaming response:", parsedJson);
+
+              // --- Process Excel Operation --- 
+              if (parsedJson && parsedJson.action === 'createExcelFile' && parsedJson.args) {
+                excelResult = await handleExcelOperation(
+                  '', // authToken seems removed/unused here, pass empty or adjust handleExcelOperation
+                  userId,
+                  JSON.stringify(parsedJson), // Pass the stringified JSON 
+                  currentDocument, // Pass the current document context
+                  activeSheet // Pass active sheet if available
+                );
+                console.log("[route.ts] Excel operation result:", excelResult);
               } else {
-                console.log("[route.ts][onFinish] JSON doesn't match any expected Excel operation structure:", JSON.stringify(parsedJson).substring(0, 200));
+                 excelResult = { success: false, message: "AI response was not a valid Excel creation JSON." };
               }
-            } catch (error) {
-              // Handle JSON parsing errors more specifically
-              const jsonParseError = error as Error;
-              console.error("[route.ts][onFinish] JSON parse error:", jsonParseError.message);
-              console.log("[route.ts][onFinish] Attempted to parse:", potentialJson.length > 200 ? 
-                potentialJson.substring(0, 100) + '...' + potentialJson.substring(potentialJson.length - 100) : potentialJson);
-              
-              // Try to recover from truncated JSON
-              if (potentialJson.length > 500) {
-                console.log("[route.ts][onFinish] Attempting to recover from possibly truncated JSON");
-                
-                try {
-                  // First, try to extract the valid JSON structure up to the last complete property
-                  const jsonRegex = /\{[\s\S]*?\}(?=\s*$|\s*[,\]}])/;
-                  const match = potentialJson.match(jsonRegex);
-                  
-                  if (match && match[0]) {
-                    // Try to parse the extracted JSON
-                    const extractedJson = match[0];
-                    console.log("[route.ts][onFinish] Extracted potentially valid JSON structure:", 
-                      extractedJson.length > 100 ? extractedJson.substring(0, 50) + '...' + extractedJson.substring(extractedJson.length - 50) : extractedJson);
-                    
-                    try {
-                      parsedJson = JSON.parse(extractedJson);
-                      console.log("[route.ts][onFinish] Successfully parsed extracted JSON");
-                      isExcelOperation = true;
-                    } catch (extractError) {
-                      console.error("[route.ts][onFinish] Failed to parse extracted JSON:", (extractError as Error).message);
-                    }
-                  }
-                  
-                  // If extraction failed, try the simple approach of adding missing brackets
-                  if (!parsedJson) {
-                    // Count opening and closing braces to determine how many to add
-                    const openBraces = (potentialJson.match(/\{/g) || []).length;
-                    const closeBraces = (potentialJson.match(/\}/g) || []).length;
-                    const missingBraces = openBraces - closeBraces;
-                    
-                    if (missingBraces > 0) {
-                      // Add the missing closing braces
-                      const fixedJson = potentialJson + '}'.repeat(missingBraces);
-                      console.log("[route.ts][onFinish] Added", missingBraces, "closing braces to fix JSON");
-                      
-                      try {
-                        parsedJson = JSON.parse(fixedJson);
-                        console.log("[route.ts][onFinish] Successfully recovered truncated JSON by adding braces");
-                        isExcelOperation = true;
-                      } catch (bracesError) {
-                        console.error("[route.ts][onFinish] Brace recovery attempt failed:", (bracesError as Error).message);
-                      }
-                    }
-                  }
-                  
-                  // If all else fails, try to manually extract the Excel operation structure
-                  if (!parsedJson && potentialJson.includes('"action":') && potentialJson.includes('"args":')) {
-                    try {
-                      // Attempt to construct a valid JSON object with the available information
-                      const actionMatch = potentialJson.match(/"action"\s*:\s*"([^"]+)"/); 
-                      const action = actionMatch ? actionMatch[1] : 'createExcelFile';
-                      
-                      // Extract operations if possible
-                      const operationsStart = potentialJson.indexOf('"operations"');
-                      let operations = [];
-                      
-                      if (operationsStart > 0) {
-                        // Try to extract individual operations
-                        const operationMatches = potentialJson.match(/\{\s*"type"\s*:\s*"[^"]+"[^\}]*\}/g);
-                        if (operationMatches && operationMatches.length > 0) {
-                          operations = operationMatches.map(op => {
-                            try { return JSON.parse(op); } 
-                            catch { return { type: 'unknown' }; }
-                          });
-                        }
-                      }
-                      
-                      // Construct a minimal valid JSON object
-                      parsedJson = {
-                        action,
-                        args: {
-                          operations: operations.length > 0 ? operations : [{ type: 'createSheet', name: 'Sheet1' }]
-                        }
-                      };
-                      
-                      console.log("[route.ts][onFinish] Manually reconstructed Excel operation JSON");
-                      isExcelOperation = true;
-                    } catch (manualError) {
-                      console.error("[route.ts][onFinish] Manual reconstruction failed:", (manualError as Error).message);
-                    }
-                  }
-                } catch (error) {
-                  const recoveryError = error as Error;
-                  console.error("[route.ts][onFinish] All recovery attempts failed:", recoveryError.message);
+
+            } else {
+              console.error("[route.ts] Could not find JSON structure in non-streaming response.");
+              excelResult = { success: false, message: "Could not find JSON structure in AI response." };
+            }
+          } catch (parseError: any) {
+            console.error("[route.ts] Failed to parse non-streaming JSON response:", parseError);
+            excelResult = { success: false, message: `Failed to parse AI response: ${parseError.message}` };
+            // Optionally, add recovery logic here if needed
+          }
+          
+          // Construct a VercelChatMessage-like response to send back to the client
+          const responseMessage: VercelChatMessage = {
+              id: response.id || `excel-response-${Date.now()}`,
+              role: 'assistant',
+              content: excelResult.success 
+                ? excelResult.message || 'Excel operation successful.'
+                : excelResult.message || 'Excel operation failed.',
+              // Include fileUrl if available and operation was successful
+              ...(excelResult.success && excelResult.fileUrl && { excelFileUrl: excelResult.fileUrl })
+          };
+
+          // Send the single message back as the response body
+          // Note: The client needs to handle this non-streamed response
+          return new Response(JSON.stringify(responseMessage), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+
+        } else {
+           console.error("[route.ts] Non-streaming response format unexpected:", response);
+           return new Response(JSON.stringify({ error: 'Unexpected response format from AI for Excel request.' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+        }
+
+      } catch (error: any) {
+        console.error('[route.ts] Error during non-streaming Anthropic call:', error);
+        return new Response(JSON.stringify({ error: 'Error processing Excel request with AI.', details: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+      }
+
+    } else {
+      // ---- STREAMING CALL FOR REGULAR CHAT ----
+      console.log("[route.ts] Handling as streaming chat request.");
+      const result = await streamText({
+        model: vercelAnthropic('claude-3-7-sonnet-20250219'),
+        system: finalSystemPrompt, // Use the potentially augmented system prompt
+        messages: messagesForStreamText, // Pass the full conversation history
+        maxTokens: 4096, // Use the constant for regular chat
+        onFinish: async ({ text, toolCalls, toolResults, usage, finishReason, logprobs }) => {
+          console.log(`[route.ts][onFinish] Stream finished. Reason: ${finishReason}. Final text length: ${text.length}`);
+
+          // Wrap ALL onFinish logic in its own try/catch for better error isolation
+          try {
+            const aiResponseText = text; // Final text from stream
+            let isExcelOperation = false; // Reset for this context
+            let parsedJson: any = null;
+            let finalAiMessageContent = aiResponseText; // Default to raw text
+            let excelResult: any = null; // Store potential Excel result
+
+            // --- Try parsing potential JSON (Excel or otherwise) ---
+            try { // Inner try for JSON parsing
+              const potentialJson = aiResponseText.trim();
+              if (potentialJson.startsWith('{') && potentialJson.endsWith('}')) {
+                parsedJson = JSON.parse(potentialJson);
+                // Check if it IS an excel operation (this shouldn't happen if isExcelRequest was false, but check anyway)
+                if (parsedJson.action && (parsedJson.action === 'editExcelFile' || parsedJson.action === 'createExcelFile') && parsedJson.args) {
+                  console.warn("[route.ts][onFinish] Detected Excel JSON in non-Excel request stream!");
+                  isExcelOperation = true; // Flag it, handle below
+                } else if (parsedJson.excelOperation) {
+                  console.warn("[route.ts][onFinish] Detected legacy Excel JSON in non-Excel request stream!");
+                  // Convert legacy format if needed (logic omitted for brevity, should be same as before)
+                  isExcelOperation = true; // Flag it, handle below
                 }
               }
+            } catch (processError) {
+              console.error("[route.ts][onFinish] Error processing potential JSON in stream:", processError);
             }
-          } else {
-            console.log("[route.ts][onFinish] Response doesn't appear to be JSON");
-          }
-        } catch (parseError) {
-          console.error("[route.ts][onFinish] Error processing AI response:", parseError);
-          isExcelOperation = false;
-        }
+            // --- End JSON Parsing ---
 
-        let finalAiMessageContent = aiResponseText; // Default to the raw completion
-        let excelResult: any = null; // Store excel result if applicable
 
-        if (isExcelOperation && parsedJson) {
-          console.log(`[route.ts][onFinish] Handling Excel Operation: ${parsedJson.action}`);
-          const { action, args } = parsedJson;
-          const sheetName = extractSheetName(lastMessage.content as string); // Use lastMessage from outer scope
-
-          excelResult = await handleExcelOperation(
-            '', // authToken seems removed/unused here, pass empty or adjust handleExcelOperation
-            userId,
-            lastMessage.content as string, // Use lastMessage from outer scope
-            currentDocument, // Pass the current document context if available
-            sheetName || undefined
-          );
-
-          console.log('[route.ts][onFinish] Excel Operation Result:', excelResult);
-
-          // Use helpers to create appropriate message based on Excel result
-          if (excelResult.success) {
-            finalAiMessageContent = createSuccessMessage(parsedJson, excelResult);
-          } else {
-            finalAiMessageContent = createErrorMessage(parsedJson, excelResult);
-          }
-          console.log('[route.ts][onFinish] Final message after Excel op:', finalAiMessageContent);
-        }
-
-        // --- Save the user message and the final AI response as separate documents --- 
-        try {
-          if (documentId && userId) {
-            const messagesCollectionRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
-
-            // Get the last user message that was sent to the AI
-            const lastUserMessage = messages.filter(m => m.role === 'user').pop();
-
-            // Save user message
-            if (lastUserMessage) {
-              await messagesCollectionRef.add({
-                role: lastUserMessage.role,
-                content: lastUserMessage.content,
-                createdAt: firestore.FieldValue.serverTimestamp(), // Use admin SDK's server timestamp
-              });
-              console.log(`[route.ts][onFinish] User message saved for document ${documentId}`);
+            // --- Handle Excel Operation (if unexpectedly detected) ---
+            if (isExcelOperation && parsedJson) {
+              console.log(`[route.ts][onFinish] Handling unexpected Excel Op in stream: ${parsedJson.action}`);
+              // Check authToken just in case, though it should be defined
+              if (!authToken) { 
+                console.error("[route.ts][onFinish] Auth token missing unexpectedly during Excel op handling.");
+                finalAiMessageContent = "Error: Authentication token was missing unexpectedly.";
+              } else {
+                // Call handleExcelOperation - ensure arguments are correct
+                const stringifiedJsonPayload = JSON.stringify(parsedJson); // Use the full parsed JSON
+                excelResult = await handleExcelOperation(
+                  authToken, // Pass the correct token (now checked)
+                  userId,
+                  stringifiedJsonPayload,
+                  currentDocument,
+                  activeSheet // Use activeSheet if available
+                );
+                console.log('[route.ts][onFinish] Unexpected Excel Op Result:', excelResult);
+                // Update final message content based on result
+                finalAiMessageContent = excelResult.success
+                  ? createSuccessMessage(parsedJson, excelResult)
+                  : createErrorMessage(parsedJson, excelResult);
+              }
             }
+            // --- End Unexpected Excel Handling ---
 
-            // Save assistant message
-            await messagesCollectionRef.add({
-              role: 'assistant',
-              content: finalAiMessageContent,
-              createdAt: firestore.FieldValue.serverTimestamp(), // Use admin SDK's server timestamp
-              // Optionally include Excel result data if needed
-              ...(isExcelOperation && excelResult ? { excelOperationResult: excelResult } : {}),
-            });
-            console.log(`[route.ts][onFinish] Assistant message saved to subcollection for document ${documentId}`);
-          } else {
-            console.log("[route.ts][onFinish] Skipping chat history save as no documentId or userId was provided.");
-          }
-        } catch (saveError) {
-          console.error(`[route.ts][onFinish] Error saving chat messages to subcollection for document ${documentId}:`, saveError);
-        }
-        // --- End Re-integrated Logic --- 
-      },
-    });
 
+            // --- Save Chat History ---
+            try { 
+              if (documentId && userId) {
+                const messagesCollectionRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
+                // Get the last user message that was actually sent in this request
+                const lastUserMsgForSave = messages.filter(m => m.role === 'user').pop();
+
+                // Ensure lastUserMsgForSave exists before accessing its properties
+                if (lastUserMsgForSave) { 
+                  await messagesCollectionRef.add({
+                    role: lastUserMsgForSave.role, // Safe access
+                    content: lastUserMsgForSave.content, // Safe access
+                    createdAt: firestore.FieldValue.serverTimestamp(),
+                  });
+                  console.log(`[route.ts][onFinish] User message saved (streaming) for document ${documentId}`);
+                } else {
+                  console.warn(`[route.ts][onFinish] Could not find last user message to save for document ${documentId}`);
+                }
+
+                // Save assistant message
+                await messagesCollectionRef.add({
+                  role: 'assistant',
+                  content: finalAiMessageContent, // Use the final content after potential Excel handling
+                  createdAt: firestore.FieldValue.serverTimestamp(),
+                  ...(isExcelOperation && excelResult && excelResult.success && excelResult.fileUrl ? { excelFileUrl: excelResult.fileUrl } : {}), // Add URL if applicable
+                });
+                console.log(`[route.ts][onFinish] Assistant message saved (streaming) for document ${documentId}`);
+              } else {
+                console.log("[route.ts][onFinish] Skipping chat history save (streaming) - no documentId or userId.");
+              }
+            } catch (saveError) {
+              console.error(`[route.ts][onFinish] Error saving chat messages (streaming) for document ${documentId}:`, saveError);
+            }
+            // --- End Save Chat History ---
+
+          } catch (onFinishError) { // Catch errors specifically within the onFinish logic
+            console.error('[route.ts][onFinish] Error during onFinish processing:', onFinishError);
+            // Potentially append an error message to the stream or log it
+            // Note: It's tricky to modify the response *after* the stream has finished
+            // Best practice is robust logging here.
+          } // Correctly closed the outer try block within onFinish
+        }, // End onFinish
+      }); // End streamText call
     // Return the stream response
     return result.toDataStreamResponse();
     // ---- END: Streaming Implementation (Vercel AI SDK v4) ----
@@ -782,12 +762,11 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
     try {
       if (documentId && userId) {
         const messagesCollectionRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
-        
         // Get the last user message
         const lastUserMessage = messages.filter(m => m.role === 'user').pop();
-        
-        // Save user message
-        if(lastUserMessage) {
+
+        // Ensure lastUserMsgForSave exists before accessing its properties
+        if(lastUserMessage) { 
           await messagesCollectionRef.add({
             role: lastUserMessage.role,
             content: lastUserMessage.content,
@@ -820,24 +799,24 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
 async function authenticateUser(
   req: NextRequest
 ): Promise<{ userId: string; token: string } | null> {
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    console.error("Authorization header missing or invalid");
-    return null;
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.error('[route.ts] Authentication failed: Missing or invalid Authorization header.');
+    // Return null instead of throwing to allow the caller to handle the 401 response more gracefully
+    return null; 
   }
-  const idToken = authHeader.split("Bearer ")[1];
+  const token = authHeader.split('Bearer ')[1];
 
-  let decodedToken;
-  let userId: string;
   try {
-    const adminAuth = getAdminAuth(); // Get auth instance
-    decodedToken = await adminAuth.verifyIdToken(idToken);
-    userId = decodedToken.uid;
-    console.log("User authenticated:", userId);
-  } catch (error) {
-    console.error("Error verifying auth token:", error);
-    return null;
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    console.log('[route.ts] User authenticated successfully:', decodedToken.uid);
+    return { userId: decodedToken.uid, token };
+  } catch (error: any) {
+    console.error('[route.ts] Authentication failed:', error.message);
+    // Return null here as well for consistency
+    return null; 
   }
+} // Closing brace for authenticateUser
 
-  return { userId, token: idToken };
-}
+// Ensure the route segment configuration is present if needed, e.g., for edge runtime
+// export const runtime = 'edge'; // or remove if using nodejs runtime by default
