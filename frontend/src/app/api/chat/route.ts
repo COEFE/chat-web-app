@@ -501,7 +501,7 @@ export async function POST(req: NextRequest) {
   // 5. Call AI (Anthropic Example)
   try {
     // --- Build System Prompt (including Document Context if available) ---
-    let finalSystemPrompt = "You are a helpful assistant. If asked to modify an Excel file or create a spreadsheet, respond ONLY with the complete JSON in the following format:\n\n{\n  \"action\": \"createExcelFile\", // or 'editExcelFile'\n  \"args\": {\n    // Excel operation details\n    \"operations\": [...]\n  }\n}\n\nYour JSON response must be complete and not truncated. Do not use 'excelOperation' as a key. Always use 'action' and 'args' as the top-level keys. Do not add any introductory text, explanations, or concluding remarks around the JSON. If asked a general question or a question about the document content, answer normally.";
+    let finalSystemPrompt = "You are a helpful assistant. If asked to modify an Excel file or create a spreadsheet, respond ONLY with the complete JSON in the following format:\n\n{\n  \"action\": \"createExcelFile\",\n  \"args\": {\n    \"operations\": [\n      {\n        \"type\": \"createSheet\",\n        \"name\": \"Sheet1\"\n      },\n      {\n        \"type\": \"addRow\",\n        \"row\": [\"Column A\", \"Column B\", \"Column C\"]\n      },\n      {\n        \"type\": \"formatCell\",\n        \"cell\": \"A1\",\n        \"format\": {\n          \"bold\": true,\n          \"fontSize\": 14\n        }\n      },\n      {\n        \"type\": \"setColumnWidth\",\n        \"column\": \"A\",\n        \"width\": 200\n      }\n    ]\n  }\n}\n\nYour JSON response must be complete and not truncated. Do not use 'excelOperation' as a key. Always use 'action' and 'args' as the top-level keys. Do not add any introductory text, explanations, or concluding remarks around the JSON. If asked a general question or a question about the document content, answer normally.";
     if (fileContent) {
         // Append document context, truncating if necessary
         const truncatedContent = fileContent.substring(0, 20000); // Limit context size
@@ -604,17 +604,90 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
                 potentialJson.substring(0, 100) + '...' + potentialJson.substring(potentialJson.length - 100) : potentialJson);
               
               // Try to recover from truncated JSON
-              if (potentialJson.length > 500 && !potentialJson.endsWith('}}')) {
+              if (potentialJson.length > 500) {
                 console.log("[route.ts][onFinish] Attempting to recover from possibly truncated JSON");
-                // Add closing brackets if they appear to be missing
-                const fixedJson = potentialJson + (potentialJson.endsWith('}') ? '' : '}');
+                
                 try {
-                  parsedJson = JSON.parse(fixedJson);
-                  console.log("[route.ts][onFinish] Successfully recovered truncated JSON");
-                  isExcelOperation = true;
+                  // First, try to extract the valid JSON structure up to the last complete property
+                  const jsonRegex = /\{[\s\S]*?\}(?=\s*$|\s*[,\]}])/;
+                  const match = potentialJson.match(jsonRegex);
+                  
+                  if (match && match[0]) {
+                    // Try to parse the extracted JSON
+                    const extractedJson = match[0];
+                    console.log("[route.ts][onFinish] Extracted potentially valid JSON structure:", 
+                      extractedJson.length > 100 ? extractedJson.substring(0, 50) + '...' + extractedJson.substring(extractedJson.length - 50) : extractedJson);
+                    
+                    try {
+                      parsedJson = JSON.parse(extractedJson);
+                      console.log("[route.ts][onFinish] Successfully parsed extracted JSON");
+                      isExcelOperation = true;
+                    } catch (extractError) {
+                      console.error("[route.ts][onFinish] Failed to parse extracted JSON:", (extractError as Error).message);
+                    }
+                  }
+                  
+                  // If extraction failed, try the simple approach of adding missing brackets
+                  if (!parsedJson) {
+                    // Count opening and closing braces to determine how many to add
+                    const openBraces = (potentialJson.match(/\{/g) || []).length;
+                    const closeBraces = (potentialJson.match(/\}/g) || []).length;
+                    const missingBraces = openBraces - closeBraces;
+                    
+                    if (missingBraces > 0) {
+                      // Add the missing closing braces
+                      const fixedJson = potentialJson + '}'.repeat(missingBraces);
+                      console.log("[route.ts][onFinish] Added", missingBraces, "closing braces to fix JSON");
+                      
+                      try {
+                        parsedJson = JSON.parse(fixedJson);
+                        console.log("[route.ts][onFinish] Successfully recovered truncated JSON by adding braces");
+                        isExcelOperation = true;
+                      } catch (bracesError) {
+                        console.error("[route.ts][onFinish] Brace recovery attempt failed:", (bracesError as Error).message);
+                      }
+                    }
+                  }
+                  
+                  // If all else fails, try to manually extract the Excel operation structure
+                  if (!parsedJson && potentialJson.includes('"action":') && potentialJson.includes('"args":')) {
+                    try {
+                      // Attempt to construct a valid JSON object with the available information
+                      const actionMatch = potentialJson.match(/"action"\s*:\s*"([^"]+)"/); 
+                      const action = actionMatch ? actionMatch[1] : 'createExcelFile';
+                      
+                      // Extract operations if possible
+                      const operationsStart = potentialJson.indexOf('"operations"');
+                      let operations = [];
+                      
+                      if (operationsStart > 0) {
+                        // Try to extract individual operations
+                        const operationMatches = potentialJson.match(/\{\s*"type"\s*:\s*"[^"]+"[^\}]*\}/g);
+                        if (operationMatches && operationMatches.length > 0) {
+                          operations = operationMatches.map(op => {
+                            try { return JSON.parse(op); } 
+                            catch { return { type: 'unknown' }; }
+                          });
+                        }
+                      }
+                      
+                      // Construct a minimal valid JSON object
+                      parsedJson = {
+                        action,
+                        args: {
+                          operations: operations.length > 0 ? operations : [{ type: 'createSheet', name: 'Sheet1' }]
+                        }
+                      };
+                      
+                      console.log("[route.ts][onFinish] Manually reconstructed Excel operation JSON");
+                      isExcelOperation = true;
+                    } catch (manualError) {
+                      console.error("[route.ts][onFinish] Manual reconstruction failed:", (manualError as Error).message);
+                    }
+                  }
                 } catch (error) {
                   const recoveryError = error as Error;
-                  console.error("[route.ts][onFinish] Recovery attempt failed:", recoveryError.message);
+                  console.error("[route.ts][onFinish] All recovery attempts failed:", recoveryError.message);
                 }
               }
             }
