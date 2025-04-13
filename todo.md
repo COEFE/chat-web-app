@@ -137,7 +137,7 @@
 - [x] Resolve Firebase Admin SDK initialization issues in Vercel deployment.
 - [x] Ensure chat functionality works with uploaded PDFs (and Excel edits). (Verified basic streaming & history)
 - [ ] Implement document selection/management UI.
-- [ ] Add context awareness (remembering previous messages in a chat session).
+- [x] Add context awareness (remembering previous messages in a chat session).
 - [ ] Implement UI for displaying chat history.
 - [ ] Add error handling and loading states to the UI.
 - [ ] Improve UI/UX (styling, responsiveness).
