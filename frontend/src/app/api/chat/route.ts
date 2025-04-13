@@ -501,7 +501,7 @@ export async function POST(req: NextRequest) {
   // 5. Call AI (Anthropic Example)
   try {
     // --- Build System Prompt (including Document Context if available) ---
-    let finalSystemPrompt = "You are a helpful assistant. If asked to modify an Excel file, respond ONLY with the JSON for the required 'excelOperation' function call, following the specified schema. Do not add any introductory text, explanations, or concluding remarks around the JSON. If asked a general question or a question about the document content, answer normally.";
+    let finalSystemPrompt = "You are a helpful assistant. If asked to modify an Excel file or create a spreadsheet, respond ONLY with the complete JSON for the required 'excelOperation' function call, following the specified schema. Your JSON response must be complete and not truncated. Do not add any introductory text, explanations, or concluding remarks around the JSON. If asked a general question or a question about the document content, answer normally.";
     if (fileContent) {
         // Append document context, truncating if necessary
         const truncatedContent = fileContent.substring(0, 20000); // Limit context size
@@ -524,7 +524,18 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
         role: msg.role,
         content: msg.content,
       })) as CoreMessage[]; // Explicitly cast the final array
- 
+
+    // Check if this is an Excel-related request
+    const lastUserMessage = messagesForStreamText.filter(msg => msg.role === 'user').pop();
+    const isExcelRequest = lastUserMessage && typeof lastUserMessage.content === 'string' && (
+      lastUserMessage.content.toLowerCase().includes('excel') ||
+      lastUserMessage.content.toLowerCase().includes('spreadsheet') ||
+      lastUserMessage.content.toLowerCase().includes('workbook') ||
+      lastUserMessage.content.toLowerCase().includes('sheet') ||
+      lastUserMessage.content.toLowerCase().includes('put it in a table')
+    );
+    
+    console.log("[route.ts] Is Excel request:", isExcelRequest);
     console.log("[route.ts] Payload for streamText (Anthropic):", JSON.stringify(messagesForStreamText, null, 2)); // Log the exact payload
 
     // ---- START: Streaming Implementation (Vercel AI SDK v4) ----
@@ -532,7 +543,8 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
       model: anthropic('claude-3-7-sonnet-20250219'),
       system: finalSystemPrompt, // Use the potentially augmented system prompt
       messages: messagesForStreamText, // Pass the full conversation history
-      maxTokens: 4096, // Increased from 1024 to handle complex Excel operations
+      maxTokens: isExcelRequest ? 16384 : 4096, // Use higher token limit for Excel operations
+      ...(isExcelRequest ? { betas: ['output-128k-2025-02-19'] } : {}), // Enable extended output for Excel requests
 
       // --- onFinish replaces onCompletion for post-stream processing --- 
       async onFinish({ text, toolCalls, toolResults, usage, finishReason, logprobs }) {
