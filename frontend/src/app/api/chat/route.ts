@@ -5,6 +5,12 @@ import { MessageParam } from '@anthropic-ai/sdk/resources/messages';
 // Note: If these imports are failing, you may need to install the correct packages
 // npm install ai
 import { anthropic } from '@ai-sdk/anthropic'; 
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  serverTimestamp,
+} from 'firebase/firestore';
 let experimental_StreamData: any;
 try {
   const aiImports = require("ai");
@@ -578,27 +584,38 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
           console.log('[route.ts][onFinish] Final message after Excel op:', finalAiMessageContent);
         }
 
-        // --- Save the final chat history --- 
-        const aiMessage: VercelChatMessage = {
-          id: Date.now().toString(), // Generate ID 
-          role: 'assistant',
-          content: finalAiMessageContent,
-          // Include Excel result details if it was an Excel operation
-          ...(isExcelOperation && excelResult ? { data: { excelOperationResult: excelResult } } : {}),
-        };
-
-        const finalMessages = [...messages, aiMessage]; // Include the AI message
-
+        // --- Save the user message and the final AI response as separate documents --- 
         try {
-          if (documentId) {
-            const chatDocRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('chats').doc('default');
-            await chatDocRef.set({ messages: finalMessages }, { merge: true });
-            console.log(`[route.ts][onFinish] Chat history saved successfully for document ${documentId}`);
+          if (documentId && userId) {
+            const messagesCollectionRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
+
+            // Get the last user message that was sent to the AI
+            const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+
+            // Save user message
+            if (lastUserMessage) {
+              await messagesCollectionRef.add({
+                role: lastUserMessage.role,
+                content: lastUserMessage.content,
+                createdAt: firestore.FieldValue.serverTimestamp(), // Use admin SDK's server timestamp
+              });
+              console.log(`[route.ts][onFinish] User message saved for document ${documentId}`);
+            }
+
+            // Save assistant message
+            await messagesCollectionRef.add({
+              role: 'assistant',
+              content: finalAiMessageContent,
+              createdAt: firestore.FieldValue.serverTimestamp(), // Use admin SDK's server timestamp
+              // Optionally include Excel result data if needed
+              ...(isExcelOperation && excelResult ? { excelOperationResult: excelResult } : {}),
+            });
+            console.log(`[route.ts][onFinish] Assistant message saved to subcollection for document ${documentId}`);
           } else {
-            console.log("[route.ts][onFinish] Skipping chat history save as no documentId was provided.");
+            console.log("[route.ts][onFinish] Skipping chat history save as no documentId or userId was provided.");
           }
         } catch (saveError) {
-          console.error(`[route.ts][onFinish] Error saving chat history for document ${documentId}:`, saveError);
+          console.error(`[route.ts][onFinish] Error saving chat messages to subcollection for document ${documentId}:`, saveError);
         }
         // --- End Re-integrated Logic --- 
       },
@@ -621,12 +638,31 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
     };
     const finalMessagesOnError = [...messages, errorMessage];
     try {
-      if (documentId) {
-        const chatDocRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('chats').doc('default');
-        await chatDocRef.set({ messages: finalMessagesOnError }, { merge: true });
-        console.log(`Chat history saved (with error) for document ${documentId}`);
+      if (documentId && userId) {
+        const messagesCollectionRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
+        
+        // Get the last user message
+        const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+        
+        // Save user message
+        if(lastUserMessage) {
+          await messagesCollectionRef.add({
+            role: lastUserMessage.role,
+            content: lastUserMessage.content,
+            createdAt: firestore.FieldValue.serverTimestamp(),
+          });
+          console.log(`User message saved (on error) for document ${documentId}`);
+        }
+        
+        // Save error message from assistant
+        await messagesCollectionRef.add({
+          role: 'assistant',
+          content: `Sorry, there was an error processing your request. ${error instanceof Error ? error.message : ''}`,
+          createdAt: firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`Error message saved for document ${documentId}`);
       } else {
-        console.log("Skipping chat history save (on error) as no documentId was provided.");
+        console.log("Skipping chat history save (on error) as no documentId or userId was provided.");
       }
     } catch (saveError) {
       console.error(`Error saving chat history (on error) for document ${documentId}:`, saveError);
