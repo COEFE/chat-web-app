@@ -494,9 +494,23 @@ export async function POST(req: NextRequest) {
 
   // 5. Call AI (Anthropic Example)
   try {
-    // Use the messages format for Claude 3
-    const systemPrompt = "You are a helpful assistant. If asked to modify an Excel file, respond ONLY with the JSON for the required 'excelOperation' function call, following the specified schema. Do not add any introductory text, explanations, or concluding remarks around the JSON. If asked a general question or a question about the document content, answer normally.";
-    
+    // --- Build System Prompt (including Document Context if available) ---
+    let finalSystemPrompt = "You are a helpful assistant. If asked to modify an Excel file, respond ONLY with the JSON for the required 'excelOperation' function call, following the specified schema. Do not add any introductory text, explanations, or concluding remarks around the JSON. If asked a general question or a question about the document content, answer normally.";
+    if (fileContent) {
+        // Append document context, truncating if necessary
+        const truncatedContent = fileContent.substring(0, 20000); // Limit context size
+        const isTruncated = fileContent.length > 20000;
+        finalSystemPrompt += `
+        
+--- Document Context (${fileName || 'current document'}) ---
+${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
+--- End Document Context ---`;
+        console.log(`[route.ts] Appending document context (${fileName || 'current document'}) to system prompt. Length: ${truncatedContent.length}, Truncated: ${isTruncated}`);
+    } else {
+        console.log("[route.ts] No document context (fileContent) to append to system prompt.");
+    }
+     
+    // --- Prepare messages for AI API (Use the full conversation history for context) ---
     // Map VercelChatMessages to CoreMessages, filtering for valid roles.
     const messagesForStreamText: CoreMessage[] = messages
       .filter(msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system') // Keep only valid roles
@@ -510,7 +524,7 @@ export async function POST(req: NextRequest) {
     // ---- START: Streaming Implementation (Vercel AI SDK v4) ----
     const result = await streamText({
       model: anthropic('claude-3-7-sonnet-20250219'),
-      system: systemPrompt,
+      system: finalSystemPrompt, // Use the potentially augmented system prompt
       messages: messagesForStreamText, // Pass the full conversation history
       maxTokens: 1024,
 
