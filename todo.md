@@ -138,7 +138,7 @@
 - [x] Ensure chat functionality works with uploaded PDFs (and Excel edits). (Verified basic streaming & history)
 - [ ] Implement document selection/management UI.
 - [x] Add context awareness (remembering previous messages in a chat session).
-- [ ] Implement UI for displaying chat history.
+- [x] Implement UI for displaying chat history.
 - [ ] Add error handling and loading states to the UI.
 - [ ] Improve UI/UX (styling, responsiveness).
 - [ ] Refactor code for clarity and maintainability.
