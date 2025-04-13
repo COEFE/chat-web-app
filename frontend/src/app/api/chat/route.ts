@@ -555,13 +555,21 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
             content: msg.content as string, // Content is expected to be string
           }));
 
-        // Make the non-streaming API call using the initialized 'anthropic' client from @anthropic-ai/sdk
-        const response = await anthropic.messages.create({ // This uses the SDK client instance
-          model: 'claude-3-5-sonnet-20240620',
-          max_tokens: 4000, // Increased token limit
-          system: finalSystemPrompt, // Use the potentially augmented system prompt
-          messages: finalAiMessagesForApi,
+        // Add timeout to prevent function invocation timeout
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('AI request timeout')), 25000); // 25 second timeout
         });
+        
+        // Make the non-streaming API call using the initialized 'anthropic' client from @anthropic-ai/sdk
+        const response = await Promise.race([
+          anthropic.messages.create({ // This uses the SDK client instance
+            model: 'claude-3-5-sonnet-20240620',
+            max_tokens: 4000, // Increased token limit
+            system: finalSystemPrompt, // Use the potentially augmented system prompt
+            messages: finalAiMessagesForApi,
+          }),
+          timeoutPromise
+        ]) as any; // Cast to any since we know the response structure
 
         console.log("[route.ts] Non-streaming Anthropic response received:", response);
 
@@ -594,15 +602,21 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
                 } else {
                     console.log(`[route.ts] Calling processExcelOperation directly for action: ${parsedJson.action}`);
                     try {
-                         // Call processExcelOperation directly with parsed details
-                        // Assuming processExcelOperation is imported and returns a promise with the correct structure
-                        // IMPORTANT: Adjust the result handling based on the actual return type of processExcelOperation
-                        const operationResult = await processExcelOperation(
-                            parsedJson.action,       // 'createExcelFile' or 'editExcelFile'
-                            docIdForOperation,       // null for create, ID for edit
-                            parsedJson.args.operations, // The array of operations
-                            userId                   // The authenticated user ID
-                        );
+                        // Create a timeout promise for Excel operations
+                        const excelOpTimeoutPromise = new Promise((_, reject) => {
+                            setTimeout(() => reject(new Error('Excel operation timeout')), 20000); // 20 second timeout
+                        });
+                        
+                        // Call processExcelOperation with timeout protection
+                        const operationResult = await Promise.race([
+                            processExcelOperation(
+                                parsedJson.action,       // 'createExcelFile' or 'editExcelFile'
+                                docIdForOperation,       // null for create, ID for edit
+                                parsedJson.args.operations, // The array of operations
+                                userId                   // The authenticated user ID
+                            ),
+                            excelOpTimeoutPromise
+                        ]) as NextResponse;
 
                         // Assuming operationResult is a NextResponse containing the success/message object
                         // Parse the JSON body from the response
@@ -611,7 +625,13 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
                         console.log("[route.ts] processExcelOperation parsed result:", excelResult);
                     } catch (opError: any) {
                         console.error("[route.ts] Error calling or parsing processExcelOperation:", opError);
-                        excelResult = { success: false, message: `Error performing Excel operation: ${opError.message}` };
+                        const isTimeout = opError.message && opError.message.includes('timeout');
+                        excelResult = { 
+                          success: false, 
+                          message: isTimeout 
+                            ? `The Excel operation timed out. Please try again with a simpler request or fewer operations.` 
+                            : `Error performing Excel operation: ${opError.message}` 
+                        };
                     }
                 }
               } else {
@@ -653,7 +673,17 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
 
       } catch (error: any) {
         console.error('[route.ts] Error during non-streaming Anthropic call:', error);
-        return new Response(JSON.stringify({ error: 'Error processing Excel request with AI.', details: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+        const isTimeout = error.message && error.message.includes('timeout');
+        const statusCode = isTimeout ? 504 : 500; // Use proper 504 status code for timeouts
+        const errorMessage = isTimeout 
+          ? 'The AI request timed out. Please try again with a simpler request.' 
+          : 'Error processing Excel request with AI.';
+          
+        return new Response(JSON.stringify({ 
+          error: errorMessage, 
+          details: error.message,
+          isTimeout: isTimeout
+        }), { status: statusCode, headers: { 'Content-Type': 'application/json' } });
       }
 
     } else {
