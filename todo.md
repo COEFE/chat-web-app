@@ -46,8 +46,8 @@
     - [x] Receive user query and document ID (`/api/chat` created).
     - [x] Verify the admin's Firebase auth token.
     - [x] Retrieve document text or summaries from Firestore/Storage.
-    - [x] Forward the query with document context to the Anthropic Claude API.
-    - [x] Return the AI response to the frontend.
+    - [x] Forward the query with document context to the Anthropic Claude API. (Verified with SDK v4)
+    - [x] Return the AI response to the frontend. (Verified streaming with SDK v4)
 - [x] **Document Metadata & Version Management**
   - [x] Create API endpoints for updating document metadata (e.g., after file uploads or edits).
   - [ ] Implement versioning logic: record each new version in Firestore and update Firebase Storage paths. (Partially done: Fixed update logic to prevent duplicates, full history TBD)
@@ -70,12 +70,13 @@
 ## AI Integration (Anthropic Claude API)
 - [ ] **Prompt Design & API Integration**
   - Design prompt templates for document Q&A and editing requests.
-  - [x] Implement API calls from the backend (Next.js API routes) to the Anthropic Claude API.
+  - [x] Implement API calls from the backend (Next.js API routes) to the Anthropic Claude API. (Refactored to SDK v4)
 - [ ] **Multi-Document Context Handling**
   - Create logic to assemble multiple document texts into a single API request.
 - [x] **Structured Response Parsing**
   - [x] Develop parsers to handle structured edit responses (e.g., JSON diff) returned by Claude.
-  
+  - [x] Develop parsers to handle structured edit responses (e.g., JSON diff) returned by Claude. (Verified in onFinish callback)
+
 ## Authentication & Security
 - [x] **Firebase Authentication**
   - Configure Firebase Auth for admin login.
@@ -131,10 +132,10 @@
 - [x] Integrate Firebase for backend services (Firestore, Storage).
 - [x] Implement PDF file upload functionality to Firebase Storage.
 - [x] Set up API route for handling chat interactions.
-- [x] Integrate Anthropic API for generating chat responses.
+- [x] Integrate Anthropic API for generating chat responses. (Fixed with SDK v4)
 - [x] Connect frontend chat interface to the API route.
 - [x] Resolve Firebase Admin SDK initialization issues in Vercel deployment.
-- [x] Ensure chat functionality works with uploaded PDFs (and Excel edits).
+- [x] Ensure chat functionality works with uploaded PDFs (and Excel edits). (Verified basic streaming & history)
 - [ ] Implement document selection/management UI.
 - [ ] Add context awareness (remembering previous messages in a chat session).
 - [ ] Implement UI for displaying chat history.
