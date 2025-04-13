@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 // Vercel AI SDK imports
 import { Message as VercelChatMessage } from "ai";
+import { MessageParam } from '@anthropic-ai/sdk/resources/messages'; // Import MessageParam type
 // Note: If these imports are failing, you may need to install the correct packages
 // npm install ai
 let StreamingTextResponse: any;
@@ -25,19 +26,13 @@ const ChatAnthropic = {};
 const PromptTemplate = {};
 const RunnableSequence = {};
 const BytesOutputParser = {};
-import {
-  initializeFirebaseAdmin,
-  getAdminAuth,
-  getAdminDb,
-  getAdminStorage,
-} from "@/lib/firebaseAdminConfig";
-import * as XLSX from "xlsx";
-import Anthropic from "@anthropic-ai/sdk";
-import { FirebaseError } from "firebase-admin/app";
-// Import the function from the other route
-import { processExcelOperation } from "@/lib/excelUtils";
-// Imports for file/PDF handling
-import { File as GoogleCloudFile } from "@google-cloud/storage";
+import Anthropic from '@anthropic-ai/sdk'; // Import Anthropic here
+import { FirebaseError } from 'firebase-admin/app';
+import { processExcelOperation } from '@/lib/excelUtils'; 
+import { File as GoogleCloudFile } from '@google-cloud/storage'; 
+import { firestore } from 'firebase-admin'; // Import firestore namespace
+import { getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig'; // Import getter functions
+import * as XLSX from 'xlsx';
 import { extractText } from "unpdf";
 
 console.log("--- MODULE LOAD: /api/chat/route.ts ---");
@@ -327,27 +322,27 @@ function createErrorMessage(parsedJson: any, excelResult: any): string {
 
 export async function POST(req: NextRequest) {
   console.log("--- /api/chat POST request received ---");
+
+  // Get Firebase services using getter functions
   const db = getAdminDb();
   const storage = getAdminStorage();
+  const auth = getAdminAuth();
   const bucket = storage.bucket(); // Default bucket
 
   // 1. Authentication
+  const authorizationHeader = req.headers.get("Authorization");
   let userId: string;
-  let authToken: string;
   try {
-    const authResult = await authenticateUser(req);
-    if (!authResult) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
+      return NextResponse.json({ error: "Unauthorized: Missing or invalid Authorization header" }, { status: 401 });
     }
-    userId = authResult.userId;
-    authToken = authResult.token;
-    console.log(`Authenticated user: ${userId}`);
+    const idToken = authorizationHeader.split('Bearer ')[1];
+    const decodedToken = await auth.verifyIdToken(idToken);
+    userId = decodedToken.uid;
+    console.log("User authenticated:", userId);
   } catch (error) {
     console.error("Authentication error:", error);
-    return NextResponse.json(
-      { error: "Authentication failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Unauthorized: Invalid token" }, { status: 401 });
   }
 
   // 2. Parse Request Body
@@ -361,26 +356,33 @@ export async function POST(req: NextRequest) {
   }
 
   // --- Get messages, documentId, currentDocument, activeSheet from body --- 
-  const { messages, documentId, currentDocument, activeSheet } = body;
+  // Explicitly type messages as VercelChatMessage[] upon destructuring
+  // Use firestore.DocumentData for currentDocument
+  const { messages, documentId, currentDocument, activeSheet }: {
+    messages: VercelChatMessage[];
+    documentId?: string;
+    currentDocument?: firestore.DocumentData;
+    activeSheet?: string;
+  } = body;
 
   // Validate required fields
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return NextResponse.json({ error: "Missing 'messages' array in request body" }, { status: 400 });
   }
   if (!documentId) {
-     console.warn("Missing documentId in request body, proceeding without document context.");
-     // Allow proceeding for general chat, but document-specific features won't work
-   }
-   
-   // --- Get the last user message --- 
-   // The useChat hook sends the full history, the last message is the user's current input
-   const lastMessage = messages[messages.length - 1];
-   if (!lastMessage || lastMessage.role !== 'user') {
-     return NextResponse.json({ error: "Last message must be from the user" }, { status: 400 });
-   }
-   const userMessageContent = lastMessage.content;
-   console.log(`Last user message content: "${userMessageContent}"`);
-   console.log(`Active Sheet provided: ${activeSheet}`);
+    console.warn("Missing documentId in request body, proceeding without document context.");
+    // Allow proceeding for general chat, but document-specific features won't work
+  }
+
+  // --- Get the last user message --- 
+  // The useChat hook sends the full history, the last message is the user's current input
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage || lastMessage.role !== 'user') {
+    return NextResponse.json({ error: "Last message must be from the user" }, { status: 400 });
+  }
+  const userMessageContent = lastMessage.content;
+  console.log(`Last user message content: "${userMessageContent}"`);
+  console.log(`Active Sheet provided: ${activeSheet}`);
 
   // 3. Document Context Handling (if documentId provided)
   let fileContent: string | null = null;
@@ -412,8 +414,8 @@ export async function POST(req: NextRequest) {
       if (fileType === 'xlsx') {
         // --- Direct Excel Handling --- 
         const excelDirectResult = await handleExcelOperation(
-          authToken, 
-          userId, 
+          "", // Removed authToken
+          userId,
           userMessageContent, // Use the latest message content
           currentDocument, 
           activeSheet // Pass active sheet
@@ -494,8 +496,8 @@ export async function POST(req: NextRequest) {
       }
     } catch (error) {
       console.error(`Error processing document ${documentId}:`, error);
-      // Check if it's a GCS 'object not found' error
-      if (isFirebaseStorageError(error, 404)) {
+      // Check if it's a GCS 'object not found' error using the helper function
+      if (isFirebaseStorageError(error, 404)) { 
          return NextResponse.json({ error: "Document file not found in storage." }, { status: 404 });
        } else {
          return NextResponse.json({ error: "Failed to process document" }, { status: 500 });
@@ -537,42 +539,59 @@ export async function POST(req: NextRequest) {
     // Use the messages format for Claude 3
     const systemPrompt = "You are a helpful assistant. If asked to modify an Excel file, respond ONLY with the JSON for the required 'excelOperation' function call, following the specified schema. Do not add any introductory text, explanations, or concluding remarks around the JSON. If asked a general question or a question about the document content, answer normally.";
     
-    const aiMessages = [
+    // Log incoming message content types for debugging
+    console.log("Inspecting incoming messages structure before mapping:");
+    messages.forEach((msg: VercelChatMessage, index: number) => {
+      console.log(`Message[${index}] ID: ${msg.id}, Role: ${msg.role}, Content Type: ${typeof msg.content}, IsArray: ${Array.isArray(msg.content)}`);
+    });
+
+    // Explicitly type aiMessages as MessageParam[]
+    const aiMessages: MessageParam[] = messages 
       // Map Vercel messages to Anthropic's format
       // Filter out system messages if included in history, as Anthropic takes one system prompt
-      ...messages.filter((m: VercelChatMessage) => m.role !== 'system').map((message: VercelChatMessage) => ({
-        role: message.role as 'user' | 'assistant', // Cast role
-        content: message.content
-      })),
-      // Add document context as part of the last user message or a separate message?
-      // Let's try adding it to the last user message for simplicity here.
-      // Note: This might exceed token limits. A better approach might be RAG.
-      // Reconstruct the last user message to include context (if applicable)
-      // { 
-      //   role: 'user', 
-      //   content: `Document Context:\n${fileContent ? fileContent.substring(0, 10000) : 'None'}\n\nUser Question: ${userMessageContent}`
-      // }
-    ];
-    
-    // Modify the last message in aiMessages to include the document context
-    // This is a simplified approach; consider RAG for large documents.
-    if (aiMessages.length > 0 && aiMessages[aiMessages.length - 1].role === 'user' && fileContent) {
-        aiMessages[aiMessages.length - 1].content = 
-        `--- Document Context (${fileName || 'current document'}) ---\n${fileContent.substring(0, 20000)} ${fileContent.length > 20000 ? '\n[Content Truncated]' : ''}\n--- End Document Context ---\n\nUser Request: ${userMessageContent}`;
+      .filter((m) => m.role !== 'system') 
+      .map((message) => { 
+        // Defensively handle content
+        const messageContent = Array.isArray(message.content)
+                              ? message.content.join('\n') // Join array elements
+                              : message.content;         // Use string directly
+        return { 
+          role: message.role as 'user' | 'assistant',
+          content: messageContent
+        };
+      });
+ 
+      // Create a final array to send to the API, avoiding in-place modification
+      let finalAiMessagesForApi = [...aiMessages]; 
+ 
+      // Modify the last message in the *new* array if needed
+      if (finalAiMessagesForApi.length > 0 && finalAiMessagesForApi[finalAiMessagesForApi.length - 1].role === 'user' && fileContent) {
+        const lastMessageIndex = finalAiMessagesForApi.length - 1;
+        // Create a new object for the last message with modified content
+        finalAiMessagesForApi[lastMessageIndex] = {
+            ...finalAiMessagesForApi[lastMessageIndex], // Copy existing properties (like role)
+            content: 
+                `--- Document Context (${fileName || 'current document'}) ---
+${fileContent.substring(0, 20000)} ${fileContent.length > 20000 ? '\n[Content Truncated]' : ''}
+--- End Document Context ---
+
+User Request: ${userMessageContent}`
+        };
     } else {
         // If no file content, just use the user message as is
         // Or if the last message wasn't user (shouldn't happen with useChat normally)
         console.log("No document context added to the final user message for AI.");
     }
 
-
-    console.log("Sending messages to Anthropic API:", JSON.stringify(aiMessages, null, 2)); // Log messages being sent
+    console.log("Sending messages to Anthropic API:", JSON.stringify(finalAiMessagesForApi, null, 2)); // Log final messages being sent
 
     const response = await anthropic.messages.create({
       model: 'claude-3-sonnet-20240229', // Or your preferred model
       max_tokens: 1024,
       system: systemPrompt,
-      messages: aiMessages as any, // Cast to any if types mismatch slightly
+      // Using 'as any' as a workaround for persistent IDE lint error (2214a402-da01-43e1-adb9-5fe81fdb9e4d)
+      // The type transformation seems correct, but the linter struggles.
+      messages: finalAiMessagesForApi as any
     });
 
     console.log("Anthropic Response Received:", JSON.stringify(response, null, 2));
@@ -729,7 +748,7 @@ async function authenticateUser(
   let decodedToken;
   let userId: string;
   try {
-    const adminAuth = getAdminAuth(); // Get the initialized auth service
+    const adminAuth = getAdminAuth(); // Get auth instance
     decodedToken = await adminAuth.verifyIdToken(idToken);
     userId = decodedToken.uid;
     console.log("User authenticated:", userId);
