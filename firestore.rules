@@ -15,18 +15,32 @@ service cloud.firestore {
       match /documents/{docId} {
         // Allow all operations if the user is authenticated and matches the userId
         allow read, write: if request.auth != null && request.auth.uid == userId;
+        
+        // Specific rules for messages subcollection (for chat history)
+        match /messages/{messageId} {
+          // Allow read if the user is authenticated and matches the userId
+          allow read: if request.auth != null && request.auth.uid == userId;
+          
+          // Allow create if the user is authenticated, matches userId, and message has required fields
+          allow create: if request.auth != null && 
+                        request.auth.uid == userId && 
+                        request.resource.data.keys().hasAll(['role', 'content', 'createdAt']);
+          
+          // Allow update/delete if user is authenticated and matches userId
+          // Generally messages shouldn't be updated/deleted, but we'll allow it for admin purposes
+          allow update, delete: if request.auth != null && request.auth.uid == userId;
+        }
       }
       
-      // Allow access to all subcollections under a user's document
+      // Allow access to all other subcollections under a user's document
       match /{allSubcollections=**} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
 
-    // For debugging purposes only - remove in production
-    // This allows you to see if documents exist at all
+    // Default deny all other access
     match /{document=**} {
-      allow read: if request.auth != null;
+      allow read, write: if false;
     }
   }
 }

@@ -83,9 +83,9 @@
   - Implement client-side login logic in the Next.js app.
 - [x] **Backend Auth Verification**
   - Verify Firebase ID tokens in API routes using the Firebase Admin SDK.
-- [ ] **Security Rules**
-  - Set Firestore rules to restrict read/write access to authenticated admin users.
-  - Configure Firebase Storage rules similarly.
+- [x] **Security Rules**
+  - [x] Set Firestore rules to restrict read/write access to authenticated admin users.
+  - [x] Configure Firebase Storage rules similarly.
 - [ ] **Environment Security**
   - Securely store and manage environment variables in Vercel and Cloud Run.
 
