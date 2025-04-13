@@ -9,6 +9,13 @@ import { Timestamp } from 'firebase/firestore';
 import { MyDocumentData } from '@/types'; 
 import { useChat } from '@ai-sdk/react';
 import { Message } from 'ai';
+import {
+  getFirestore,
+  collection,
+  query,
+  orderBy,
+  getDocs,
+} from 'firebase/firestore';
 
 interface ChatInterfaceProps {
   documentId: string;
@@ -40,26 +47,27 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
     }
   }, [user]); // Re-run when user changes
 
+  // Initialize useChat hook - provides messages, setMessages, etc.
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages } = useChat({
-    api: '/api/chat', 
-    id: documentId, 
+    api: '/api/chat',
+    id: documentId,
     // Add the headers property conditionally
     headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
     body: {
       documentId: documentId,
-      currentDocument: document, 
-      activeSheet: activeSheet, 
+      currentDocument: document,
+      activeSheet: activeSheet,
     },
     onFinish: (message) => {
       console.log('Chat finished:', message);
       let refreshTriggered = false;
       if (message.role === 'assistant' /* && check for excel success marker/data */) {
           console.log('[ChatInterface] Possible Excel operation completed.');
-          const excelSuccessMarker = '[EXCEL_DOCUMENT_UPDATED]'; 
+          const excelSuccessMarker = '[EXCEL_DOCUMENT_UPDATED]';
           if (message.content.includes(excelSuccessMarker)) {
             console.log('[ChatInterface] Excel update marker detected, triggering refresh.');
             window.dispatchEvent(new Event('excel-document-updated'));
-            window.dispatchEvent(new CustomEvent('document-list-refresh')); 
+            window.dispatchEvent(new CustomEvent('document-list-refresh'));
             refreshTriggered = true;
             
             setMessages(prevMessages => prevMessages.map(msg => 
@@ -74,6 +82,55 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
       console.error("Chat error:", err);
     }
   });
+
+  // Effect to load chat history when documentId or user changes
+  useEffect(() => {
+    const loadChatHistory = async () => {
+      if (!documentId || !user?.uid) {
+        console.log('[ChatInterface] No documentId or user, clearing messages.');
+        setMessages([]); // Clear history if no document or user
+        return;
+      }
+
+      console.log(`[ChatInterface] Attempting to load chat history for document: ${documentId}`);
+      const db = getFirestore();
+      // Assuming messages are stored directly under the document
+      const messagesPath = `users/${user.uid}/documents/${documentId}/messages`;
+
+      try {
+        const messagesQuery = query(collection(db, messagesPath), orderBy('createdAt', 'asc'));
+        const querySnapshot = await getDocs(messagesQuery);
+
+        if (querySnapshot.empty) {
+          console.log('[ChatInterface] No chat history found in Firestore.');
+          setMessages([]); // Ensure messages are empty if none found
+          return;
+        }
+
+        const fetchedMessages: Message[] = querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          const createdAtTimestamp = data.createdAt as Timestamp;
+          // Map Firestore data to the 'Message' type expected by useChat
+          return {
+            id: doc.id,
+            role: data.role as Message['role'], // Cast role to expected type
+            content: data.content as string,
+            createdAt: createdAtTimestamp?.toDate() ?? new Date(), // Convert Timestamp to Date
+          };
+        });
+
+        console.log(`[ChatInterface] Loaded ${fetchedMessages.length} messages from Firestore.`);
+        setMessages(fetchedMessages); // Update the chat state
+
+      } catch (err) {
+        console.error('[ChatInterface] Error loading chat history:', err);
+        setMessages([]); // Clear messages on error
+        // Consider setting an error state to display to the user here
+      }
+    };
+
+    loadChatHistory();
+  }, [documentId, user, setMessages]); // Dependencies for the effect
 
   useEffect(() => {
     if (document?.id) {
@@ -101,13 +158,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
 
   useEffect(() => {
     if (scrollAreaRef.current) {
-      setTimeout(() => {
-        if (scrollAreaRef.current) { 
-          scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
-        }
-      }, 0);
+      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages]); // Scroll to bottom when messages change
 
   return (
     <Card className="flex flex-col h-full w-full">
