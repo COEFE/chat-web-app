@@ -582,18 +582,41 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
               parsedJson = JSON.parse(jsonString);
               console.log("[route.ts] Parsed JSON from non-streaming response:", parsedJson);
 
-              // --- Process Excel Operation --- 
-              if (parsedJson && parsedJson.action === 'createExcelFile' && parsedJson.args) {
-                excelResult = await handleExcelOperation(
-                  '', // authToken seems removed/unused here, pass empty or adjust handleExcelOperation
-                  userId,
-                  JSON.stringify(parsedJson), // Pass the stringified JSON 
-                  currentDocument, // Pass the current document context
-                  activeSheet // Pass active sheet if available
-                );
-                console.log("[route.ts] Excel operation result:", excelResult);
+              // --- Process Excel Operation Directly --- 
+              if (parsedJson && parsedJson.action && parsedJson.args && Array.isArray(parsedJson.args.operations)) {
+                
+                // Determine document ID: null for create, existing for edit
+                const docIdForOperation = parsedJson.action === 'editExcelFile' ? currentDocument?.id : null;
+                
+                if (parsedJson.action === 'editExcelFile' && !docIdForOperation) {
+                    console.error("[route.ts] Cannot perform editExcelFile action without a document ID.");
+                    excelResult = { success: false, message: "Cannot edit Excel file without a document ID." };
+                } else {
+                    console.log(`[route.ts] Calling processExcelOperation directly for action: ${parsedJson.action}`);
+                    try {
+                         // Call processExcelOperation directly with parsed details
+                        // Assuming processExcelOperation is imported and returns a promise with the correct structure
+                        // IMPORTANT: Adjust the result handling based on the actual return type of processExcelOperation
+                        const operationResult = await processExcelOperation(
+                            parsedJson.action,       // 'createExcelFile' or 'editExcelFile'
+                            docIdForOperation,       // null for create, ID for edit
+                            parsedJson.args.operations, // The array of operations
+                            userId                   // The authenticated user ID
+                        );
+
+                        // Assuming operationResult is a NextResponse containing the success/message object
+                        // Parse the JSON body from the response
+                        console.log("[route.ts] processExcelOperation raw response status:", operationResult.status);
+                        excelResult = await operationResult.json(); // Parse the JSON body
+                        console.log("[route.ts] processExcelOperation parsed result:", excelResult);
+                    } catch (opError: any) {
+                        console.error("[route.ts] Error calling or parsing processExcelOperation:", opError);
+                        excelResult = { success: false, message: `Error performing Excel operation: ${opError.message}` };
+                    }
+                }
               } else {
-                 excelResult = { success: false, message: "AI response was not a valid Excel creation JSON." };
+                 console.error("[route.ts] AI response JSON did not match expected structure for Excel operation.");
+                 excelResult = { success: false, message: "AI response was not a valid Excel action JSON." };
               }
 
             } else {
