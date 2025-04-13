@@ -501,7 +501,7 @@ export async function POST(req: NextRequest) {
   // 5. Call AI (Anthropic Example)
   try {
     // --- Build System Prompt (including Document Context if available) ---
-    let finalSystemPrompt = "You are a helpful assistant. If asked to modify an Excel file or create a spreadsheet, respond ONLY with the complete JSON for the required 'excelOperation' function call, following the specified schema. Your JSON response must be complete and not truncated. Do not add any introductory text, explanations, or concluding remarks around the JSON. If asked a general question or a question about the document content, answer normally.";
+    let finalSystemPrompt = "You are a helpful assistant. If asked to modify an Excel file or create a spreadsheet, respond ONLY with the complete JSON in the following format:\n\n{\n  \"action\": \"createExcelFile\", // or 'editExcelFile'\n  \"args\": {\n    // Excel operation details\n    \"operations\": [...]\n  }\n}\n\nYour JSON response must be complete and not truncated. Do not use 'excelOperation' as a key. Always use 'action' and 'args' as the top-level keys. Do not add any introductory text, explanations, or concluding remarks around the JSON. If asked a general question or a question about the document content, answer normally.";
     if (fileContent) {
         // Append document context, truncating if necessary
         const truncatedContent = fileContent.substring(0, 20000); // Limit context size
@@ -563,14 +563,38 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
             try {
               parsedJson = JSON.parse(potentialJson);
               
-              // Validate the Excel operation structure
+              // Validate the Excel operation structure - handle both formats
               if (parsedJson.action && 
                   (parsedJson.action === 'editExcelFile' || parsedJson.action === 'createExcelFile') && 
                   parsedJson.args) {
+                // Standard format with action and args
                 console.log("[route.ts][onFinish] Detected valid Excel operation:", parsedJson.action);
                 isExcelOperation = true;
+              } else if (parsedJson.excelOperation) {
+                // Alternative format with excelOperation as top-level key
+                console.log("[route.ts][onFinish] Detected Excel operation with excelOperation format");
+                
+                // Convert to the expected format
+                const operation = parsedJson.excelOperation.operation || 'createExcelFile';
+                parsedJson = {
+                  action: operation === 'createWorkbook' ? 'createExcelFile' : 'editExcelFile',
+                  args: {
+                    operations: Array.isArray(parsedJson.excelOperation.sheets) 
+                      ? parsedJson.excelOperation.sheets.map((sheet: any) => ({
+                          type: 'createSheet',
+                          name: sheet.name,
+                          data: sheet.data,
+                          formats: sheet.formats,
+                          columnWidths: sheet.columnWidths
+                        }))
+                      : [parsedJson.excelOperation]
+                  }
+                };
+                
+                console.log("[route.ts][onFinish] Converted to standard format:", parsedJson.action);
+                isExcelOperation = true;
               } else {
-                console.log("[route.ts][onFinish] JSON doesn't match expected Excel operation structure:", JSON.stringify(parsedJson).substring(0, 200));
+                console.log("[route.ts][onFinish] JSON doesn't match any expected Excel operation structure:", JSON.stringify(parsedJson).substring(0, 200));
               }
             } catch (error) {
               // Handle JSON parsing errors more specifically
