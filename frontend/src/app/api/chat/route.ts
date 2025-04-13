@@ -619,7 +619,7 @@ User Request: ${userMessageContent}`
     console.log("[route.ts] Payload for Anthropic API:", JSON.stringify(finalAiMessagesForApi, null, 2)); // Log the exact payload
 
     const response = await anthropic.messages.create({
-      model: 'claude-3-sonnet-20240229', // Or your preferred model
+      model: 'claude-3-7-sonnet-20250219', // Updated to Claude 3.7 Sonnet
       max_tokens: 1024,
       system: systemPrompt,
       messages: finalAiMessagesForApi // Remove workaround cast
