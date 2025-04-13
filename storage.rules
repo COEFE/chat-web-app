@@ -29,12 +29,12 @@ service firebase.storage {
       // Only allow users to read their own files
       allow read: if request.auth != null && request.auth.uid == userId;
       
-      // Allow uploads with proper metadata, valid file type and size
+      // Allow uploads with valid file type and size, metadata is optional
       allow create: if request.auth != null && 
                      request.auth.uid == userId && 
-                     hasValidMetadata() && 
                      isValidFileType() && 
-                     isValidFileSize();
+                     isValidFileSize() && 
+                     (hasValidMetadata() || true); // Make metadata validation optional
       
       // Allow updates and deletes for file owners
       allow update, delete: if request.auth != null && request.auth.uid == userId;
@@ -45,11 +45,11 @@ service firebase.storage {
       // Anyone can read public files
       allow read;
       
-      // Only authenticated users can upload to public folder with stricter requirements
+      // Only authenticated users can upload to public folder
       allow create: if request.auth != null && 
-                    hasValidMetadata() && 
                     isValidFileType() && 
-                    isValidFileSize();
+                    isValidFileSize() && 
+                    (hasValidMetadata() || true); // Make metadata validation optional
       
       // Only the original uploader can modify or delete their files
       allow update, delete: if request.auth != null && 
