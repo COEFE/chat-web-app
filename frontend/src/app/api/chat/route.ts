@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import admin from 'firebase-admin'; 
 import { firestore } from 'firebase-admin'; 
 import { FirebaseError } from 'firebase-admin/app'; 
-import { getFirestore as getAdminDb, initializeAdminApp } from '@/lib/firebaseAdmin'; 
+import { getAdminDb, initializeFirebaseAdmin } from '@/lib/firebaseAdminConfig'; 
 import { getStorage as getAdminStorage } from 'firebase-admin/storage'; 
 import { getAuth as getAdminAuth } from 'firebase-admin/auth'; 
 import { processExcelOperation } from '@/lib/excelUtils'; 
@@ -21,7 +21,7 @@ console.log("--- MODULE LOAD: /api/chat/route.ts ---");
 // --- Initialize Firebase Admin SDK ---
 if (!admin.apps.length) {
   try {
-    initializeAdminApp();
+    initializeFirebaseAdmin();
     console.log('[route.ts] Firebase Admin SDK Initialized');
   } catch (error) {
     console.error('[route.ts] Firebase Admin SDK Initialization Error:', error);
@@ -152,179 +152,117 @@ function extractSheetName(message: string): string | null {
 async function handleExcelOperation(
   authToken: string,
   userId: string,
-  message: string,
+  message: string, // Should be the JSON string payload
   currentDocument: any,
   activeSheet?: string
-): Promise<{ success: boolean; response?: object; message?: string }> {
-  console.log(
-    "Handling Excel operation directly for document:",
-    currentDocument?.id
-  );
+): Promise<{ success: boolean; response?: object; message?: string; docId?: string; storagePath?: string }> { // Added docId and storagePath to return type
+  console.log('[handleExcelOperation] Received request:', { userId, message, currentDocument, activeSheet }); // <<< ADDED LOGGING
 
-  // --- Regex and sheet name extraction logic ---
-  // Regex to find cell references like A1, B2, etc., and the value in quotes
-  const editPatterns = [
-    // Pattern 1: set cell to "value"
-    /(?:update|change|set|put)\s+(?:cell\s+)?([A-Z]+[0-9]+)\s+to\s+["']?([^"']+)["']?/i,
-    // Pattern 2: set "value" in cell
-    /(?:update|change|set|put)\s+["']?([^"']+)["']?\s+in\s+(?:cell\s+)?([A-Z]+[0-9]+)/i,
-    // Pattern 3: cell = "value"
-    /([A-Z]+[0-9]+)\s*=\s*["']?([^"']+)["']?/i,
-  ];
-
-  let cellRef: string | null = null;
-  let cellValue: string | null = null;
-  let matched = false;
-
-  for (const pattern of editPatterns) {
-    const match = message.match(pattern);
-    if (match) {
-      // Determine which capture group is the cell and which is the value based on pattern structure
-      if (pattern.source.includes("to\\s+[\"']")) {
-        // Pattern 1
-        cellRef = match[1];
-        cellValue = match[2];
-      } else if (pattern.source.includes("in\\s+(?:cell\\s+)?")) {
-        // Pattern 2
-        cellValue = match[1];
-        cellRef = match[2];
-      } else if (pattern.source.includes("=\\s*[\"']")) {
-        // Pattern 3
-        cellRef = match[1];
-        cellValue = match[2];
-      }
-
-      if (cellRef && cellValue) {
-        matched = true;
-        break; // Found a valid match
-      }
-    }
+  let parsedJson: any;
+  try {
+    parsedJson = JSON.parse(message);
+    console.log('[handleExcelOperation] Parsed JSON payload:', parsedJson); // <<< ADDED LOGGING
+  } catch (error) {
+    console.error('[handleExcelOperation] Failed to parse JSON message:', error);
+    return { success: false, message: 'Invalid JSON format in the request message.' };
   }
 
-  // --- End of Regex Logic ---
-
-  // Check if we found a valid match AND have the necessary document info
-  if (
-    matched &&
-    cellRef &&
-    cellValue &&
-    currentDocument &&
-    currentDocument.id
-  ) {
-    console.log(
-      `Detected cell ${cellRef} and value ${cellValue} for document ${currentDocument.id}`
-    );
-
-    // Create the Excel operation JSON structure needed by processExcelOperation
-    // Try to extract operation parameters via regex or some heuristics
-    const sheetName = extractSheetName(message) || activeSheet || "Sheet1";
-    console.log(
-      `[handleExcelOperation] Using sheet: ${sheetName} (extracted from message: ${extractSheetName(
-        message
-      )}, active sheet: ${activeSheet})`
-    );
-
-    // Default operation: Use current document and create a simple edit
-    // CRITICAL: Always use the current document's ID for editing to prevent duplicates
-    const documentId = currentDocument ? currentDocument.id : null;
-    console.log(`[handleExcelOperation] Using document ID: '${documentId}'`);
-
-    if (!documentId) {
-      return {
-        success: false,
-        message: "No document ID provided for Excel operation.",
+  let { action, args } = parsedJson;
+  // Legacy format handling - Enhanced
+  if (!action && parsedJson.excelOperation && typeof parsedJson.excelOperation === 'object') {
+      console.log('[handleExcelOperation] Detected legacy excelOperation format. Normalizing...'); // <<< ADDED LOGGING
+      const legacyOp = parsedJson.excelOperation;
+      action = legacyOp.actionType; // Assuming 'actionType' field exists
+      args = { // Reconstruct args based on expected legacy structure
+          docId: legacyOp.docId || currentDocument?.id || null,
+          operations: legacyOp.operations || [],
+          fileName: legacyOp.fileName || (legacyOp.docId ? currentDocument?.name : 'Untitled Spreadsheet'),
+          sheetName: activeSheet || extractSheetName(message) || legacyOp.sheetName || 'Sheet1',
       };
-    }
+      // Basic validation for normalized legacy data
+      if (!action || !args.operations || !Array.isArray(args.operations)) {
+          console.error('[handleExcelOperation] Failed to normalize legacy format or missing essential fields.');
+          return { success: false, message: 'Failed to normalize legacy Excel request format or essential fields are missing.' };
+      }
+      console.log('[handleExcelOperation] Normalized legacy data:', { action, args }); // <<< ADDED LOGGING
+  }
 
-    // Create the Excel operation JSON structure needed by processExcelOperation
-    const operationData = [
-      {
-        sheetName: sheetName, // Use the global extractSheetName function
-        cellUpdates: [
-          { cell: cellRef, value: cellValue }, // Explicit property assignment
-        ],
-      },
-    ];
+  console.log('[handleExcelOperation] Determined action and args:', { action, args }); // <<< ADDED LOGGING
 
-    console.log("Calling processExcelOperation directly:", {
-      operation: "edit",
-      documentId: documentId,
-      data: operationData,
-      userId: userId,
-    });
+
+  if (!action || !args) {
+    console.error('[handleExcelOperation] Missing action or args in parsed JSON.');
+    return { success: false, message: 'Missing action or arguments in the parsed request.' };
+  }
+
+  // Ensure args is an object before destructuring
+  if (typeof args !== 'object' || args === null) {
+    console.error('[handleExcelOperation] Invalid args format. Expected an object.');
+    return { success: false, message: 'Invalid args format in the parsed request. Expected an object.' };
+  }
+
+  const docId = args.docId || currentDocument?.id || null;
+  const operations = args.operations;
+  const fileName = args.fileName || (docId ? currentDocument?.name : 'Untitled Spreadsheet'); // Use current doc name if editing
+  const sheetName = args.sheetName || activeSheet || 'Sheet1'; // Prioritize activeSheet
+
+  console.log('[handleExcelOperation] Extracted parameters:', { docId, operations, fileName, sheetName, action }); // <<< ADDED LOGGING
+
+
+  if (!operations || !Array.isArray(operations) || operations.length === 0) {
+      console.error('[handleExcelOperation] Missing or invalid operations array.');
+      return { success: false, message: 'Missing or invalid operations array in the request.' };
+  }
+
+  // Timeout mechanism for the entire Excel operation processing
+  const EXCEL_OPERATION_TIMEOUT = 20000; // 20 seconds
+  let timeoutId: NodeJS.Timeout | null = null;
+
+  const operationPromise = new Promise<{ success: boolean; response?: object; message?: string; docId?: string; storagePath?: string }>(async (resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      console.warn(`[handleExcelOperation] Excel operation timed out after ${EXCEL_OPERATION_TIMEOUT}ms.`);
+      reject(new Error('Excel operation timed out.'));
+    }, EXCEL_OPERATION_TIMEOUT);
 
     try {
-      // Call the imported function directly
-      const excelResponse: NextResponse = await processExcelOperation(
-        "edit", // operation
-        currentDocument.id, // documentId
-        operationData, // data (array of row objects)
-        userId // userId
-      );
+      let result;
+      console.log(`[handleExcelOperation] Calling processExcelOperation with action: ${action}`); // <<< ADDED LOGGING
+      // Ensure all necessary arguments, including fileName and sheetName, are passed
+      result = await processExcelOperation(action, docId, operations, userId, fileName, sheetName); // Args should now match updated signature
+      console.log('[handleExcelOperation] processExcelOperation result:', result); // <<< ADDED LOGGING
 
-      console.log(
-        "processExcelOperation Response Status:",
-        excelResponse.status
-      );
+      clearTimeout(timeoutId!); // Clear timeout if operation completes successfully
+      resolve(result); // Resolve the promise with the plain object result from processExcelOperation
+    } catch (error: any) {
+        console.error('[handleExcelOperation] Error calling processExcelOperation:', error); // <<< ADDED LOGGING
+        clearTimeout(timeoutId!); // Clear timeout on error as well
+        if (error.message === 'Excel operation timed out.') {
+            // Resolve with failure instead of rejecting, as the outer promise expects resolution
+            resolve({ success: false, message: 'The Excel creation/editing process took too long and timed out. Please try a simpler request.' });
+        } else if (isFirebaseStorageError(error, 401) || isFirebaseStorageError(error, 403)) {
+            console.error('[handleExcelOperation] Firebase Storage permission error:', error);
+            resolve({ success: false, message: 'Permission denied. Please ensure you have the correct permissions for Firebase Storage.' });
+        } else if (error instanceof Error) {
+            console.error('[handleExcelOperation] Unexpected error during Excel operation:', error);
+            resolve({ success: false, message: `An unexpected error occurred during the Excel operation: ${error.message}` });
+        } else {
+            console.error('[handleExcelOperation] Unknown error during Excel operation:', error);
+            resolve({ success: false, message: 'An unknown error occurred during the Excel operation.' });
+        }
+    }
+  });
 
-      // Check if the Excel operation was successful by parsing the response
-      const excelResult = await excelResponse.json();
-      console.log("processExcelOperation Response Parsed Body:", excelResult);
-
-      if (excelResult && excelResult.success) {
-        // Create a success message
-        const successMessage = `I've updated ${cellRef} to "${cellValue}" in your Excel file "${
-          currentDocument.name || "document"
-        }".`;
-
-        // Return the success response for the chat
-        return {
-          success: true,
-          response: {
-            id: `ai-${Date.now()}`,
-            role: "ai",
-            content: successMessage,
-            excelOperation: excelResult, // Include the result from the excel processing
-          },
-        };
-      } else {
-        // Create an error message using the message from the result
-        const errorMessage = `I tried to update ${cellRef} to "${cellValue}" in your Excel file, but encountered an error: ${
-          excelResult.message || "Unknown error"
-        }`;
-
-        // Return the error response for the chat
-        return {
-          success: false,
-          response: {
-            id: `ai-${Date.now()}`,
-            role: "ai",
-            content: errorMessage,
-          },
-        };
+  try {
+      const finalResult = await operationPromise;
+      console.log('[handleExcelOperation] Final result after timeout handling:', finalResult); // <<< ADDED LOGGING
+      return finalResult;
+  } catch (error: any) { // Catch timeout error specifically if the promise was rejected (e.g., by the setTimeout directly)
+      console.error('[handleExcelOperation] Caught error from operationPromise:', error); // <<< ADDED LOGGING
+      if (error.message === 'Excel operation timed out.') {
+          return { success: false, message: 'The Excel creation/editing process took too long and timed out. Please try a simpler request.' };
       }
-    } catch (error) {
-      console.error("Error calling/processing processExcelOperation:", error);
-      // Generic error if the call itself fails or JSON parsing fails
-      return {
-        success: false,
-        response: {
-          id: `ai-${Date.now()}`,
-          role: "ai",
-          content: `Sorry, I encountered an internal error while trying to edit the Excel file.`,
-        },
-      };
-    }
-  } else {
-    // Log why it failed if match was found but doc info missing
-    if (matched && (!currentDocument || !currentDocument.id)) {
-      console.log(
-        "Extracted cell/value but missing currentDocument info for direct edit."
-      );
-    } else {
-      console.log("Could not extract cell/value for direct Excel operation.");
-    }
-    return { success: false }; // Indicate direct handling failed
+      // Re-throw other unexpected errors if necessary
+      return { success: false, message: `An unexpected error occurred: ${error.message}` };
   }
 }
 

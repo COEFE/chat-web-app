@@ -447,113 +447,60 @@ export async function processExcelOperation(
   documentId: string | null, // Allow null for create
   data: any[],
   userId: string,
-  isEditOperation?: boolean // New flag to indicate this is an edit operation
-): Promise<NextResponse> { // Return NextResponse for consistency
-  console.log('--- ENTERING processExcelOperation ---');
-  console.log('Arguments:', { 
-    operation, 
-    documentId, 
-    data: data ? 'Present' : 'Absent', 
-    userId,
-    isEditOperation: isEditOperation ? 'true' : 'false'
-  });
-
-  // Firebase instances are initialized at the top of the file, but might be null if initialization failed
+  fileName?: string, // Added fileName
+  sheetName?: string // Added sheetName
+): Promise<{ success: boolean; message?: string; docId?: string; storagePath?: string }> { // Changed return type
+  console.log('[processExcelOperation] Received:', { operation, documentId, dataLength: data?.length, userId, fileName, sheetName });
+ 
+  // Ensure Firebase services are available
   if (!db || !storage || !bucket) {
-    console.log("--- Firebase services not fully initialized, will use dummy implementations ---");
-  } else {
-    console.log("--- Using Firebase and XLSX for Excel operations ---");
+    console.error('[processExcelOperation] Firebase services not initialized.');
+    return { success: false, message: 'Server error: Firebase services not available.' };
   }
-
-  if (!operation || !data || (operation === 'edit' && !documentId)) {
-    console.log('--- ERROR: Missing required fields (operation, data, or documentId for edit) ---');
-    return NextResponse.json({ success: false, message: 'Missing required fields' }, { status: 400 });
-  }
-
+ 
+  let result: { success: boolean; message?: string; documentId?: string; storagePath?: string };
+  let finalDocumentId = documentId; // Use a mutable variable for the ID
+ 
   try {
-    let result;
-    let effectiveDocumentId = documentId; // Start with the ID passed in
-
-    // Basic validation: ensure documentId is present for edit operations
-    if (operation === 'edit' && !effectiveDocumentId) {
-      console.error('[processExcelOperation] Error: Edit operation requires a document ID.');
-      return NextResponse.json({ success: false, message: 'Edit operation requires a document ID' }, { status: 400 });
-    }
-
-    // If it's a create operation and no ID was provided, generate one.
-    if (operation === 'create' && !effectiveDocumentId) {
-      effectiveDocumentId = uuidv4();
-      console.log(`[processExcelOperation] Generated new document ID for create operation: ${effectiveDocumentId}`);
-    }
-
-    // Ensure we have a valid ID before proceeding
-    if (!effectiveDocumentId) {
-      console.error('[processExcelOperation] Error: No valid document ID available.');
-      return NextResponse.json({ success: false, message: 'Invalid or missing document ID' }, { status: 400 });
-    }
-    
-    console.log(`[processExcelOperation] Using Document ID: ${effectiveDocumentId} for operation: ${operation}`);
-
-    // --- Proceed with Operation ---
-    let docToUpdateRef;
-    let finalDocumentId;
-    let finalStoragePath;
-
-    if (db) {
-      docToUpdateRef = db.collection('users').doc(userId).collection('documents').doc(effectiveDocumentId);
-      finalDocumentId = effectiveDocumentId;
-      finalStoragePath = `users/${userId}/${finalDocumentId}.xlsx`;
-    }
-
-    if (operation === 'create') {
-      console.log(`Processing CREATE operation for user ${userId}`);
-      // Pass the actual Firebase instances
-      result = await createExcelFile(
-          db as admin.firestore.Firestore, 
-          storage as admin.storage.Storage, 
-          bucket as Bucket, 
-          userId, 
-          effectiveDocumentId, // Pass the initially determined ID
-          data
-      );
-    } else if (operation === 'edit') {
-      console.log(`Processing EDIT operation for user ${userId}, document ${effectiveDocumentId}`);
-      // Pass the actual Firebase instances
-      result = await editExcelFile(
-          db as admin.firestore.Firestore, 
-          storage as admin.storage.Storage, 
-          bucket as Bucket, 
-          userId, 
-          effectiveDocumentId, // Use the mandatory ID for edit
-          data
-      );
+    if (operation === 'createExcelFile' || (!documentId)) {
+      console.log('[processExcelOperation] Routing to createExcelFile');
+      // Generate a stable UUID for the new document if none provided
+      finalDocumentId = documentId || `doc-${uuidv4()}`;
+      console.log(`[processExcelOperation] Generated/Using documentId for create: ${finalDocumentId}`);
+       
+      // --- Prepare data for createExcelFile --- 
+      // The `data` argument from the AI should already be structured correctly
+      // e.g., [{ sheetName: '...', rows: [...] }] or similar
+      // If structure is different, adapt here.
+      const sheetDataForCreate = data; // Assume data is already in the correct format
+       
+      // Call createExcelFile with the generated/provided ID and prepared data
+      result = await createExcelFile(db, storage, bucket, userId, finalDocumentId, sheetDataForCreate); 
+     
+    } else if (operation === 'editExcelFile' && documentId) {
+      console.log(`[processExcelOperation] Routing to editExcelFile for docId: ${documentId}`);
+      finalDocumentId = documentId; // Use the provided document ID for editing
+       
+      // --- Prepare data for editExcelFile --- 
+      // The `data` argument should be structured for editing, e.g., 
+      // [{ sheetName: '...', cellUpdates: [...], formatCells: [...] }] 
+      // Ensure the structure matches what editExcelFile expects.
+      const sheetDataForEdit = data; // Assume data is already in the correct format
+ 
+      result = await editExcelFile(db, storage, bucket, userId, finalDocumentId, sheetDataForEdit); 
+     
     } else {
-      console.log(`--- ERROR: Invalid operation type: ${operation} ---`);
-      return NextResponse.json({ success: false, message: 'Invalid operation type' }, { status: 400 });
+      console.error('[processExcelOperation] Invalid operation or missing document ID for edit.', { operation, documentId });
+      return { success: false, message: 'Invalid operation type or missing document ID for edit.' };
     }
-
-    console.log("Operation Result:", result);
-    
-    // Log whether this was a real operation or a dummy/fallback operation
-    if (result.message && result.message.includes('Dummy:')) {
-      console.log("Note: This was a dummy/fallback operation. In production, the actual Excel file would be modified.");
-    }
-    // Ensure result has a success flag for consistent handling
-    if (result && typeof result.success === 'boolean') {
-        return NextResponse.json(result);
-    } else {
-        console.error("--- ERROR: Unexpected result format from create/edit function ---", result);
-        return NextResponse.json({ success: false, message: 'Internal processing error: Unexpected result format' }, { status: 500 });
-    }
-
+ 
+    console.log('[processExcelOperation] Result from create/edit function:', result);
+ 
+    // Return the result object directly
+    return result;
+ 
   } catch (error: any) {
-    console.error('--- ERROR in processExcelOperation (Main Try/Catch) ---');
-    console.error('Error Details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name,
-        code: error.code
-    });
-    return NextResponse.json({ success: false, message: 'Internal Server Error during processing' }, { status: 500 });
+    console.error('[processExcelOperation] Unhandled error:', error);
+    return { success: false, message: `Server error during Excel operation: ${error.message}` };
   }
 }
