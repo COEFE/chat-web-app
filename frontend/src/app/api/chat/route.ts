@@ -659,6 +659,14 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
     } else {
       // ---- STREAMING CALL FOR REGULAR CHAT ----
       console.log("[route.ts] Handling as streaming chat request.");
+      // Capture variables needed in onFinish in local constants to ensure they're available in the closure
+      const capturedAuthToken = req.headers.get('Authorization');
+      const capturedUserId = userId;
+      const capturedDocumentId = documentId;
+      const capturedCurrentDocument = currentDocument;
+      const capturedActiveSheet = activeSheet;
+      const capturedMessages = messages;
+      
       const result = await streamText({
         model: vercelAnthropic('claude-3-7-sonnet-20250219'),
         system: finalSystemPrompt, // Use the potentially augmented system prompt
@@ -700,18 +708,18 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
             if (isExcelOperation && parsedJson) {
               console.log(`[route.ts][onFinish] Handling unexpected Excel Op in stream: ${parsedJson.action}`);
               // Check authToken just in case, though it should be defined
-              if (!authToken) { 
+              if (!capturedAuthToken) { 
                 console.error("[route.ts][onFinish] Auth token missing unexpectedly during Excel op handling.");
                 finalAiMessageContent = "Error: Authentication token was missing unexpectedly.";
               } else {
                 // Call handleExcelOperation - ensure arguments are correct
                 const stringifiedJsonPayload = JSON.stringify(parsedJson); // Use the full parsed JSON
                 excelResult = await handleExcelOperation(
-                  authToken, // Pass the correct token (now checked)
-                  userId,
+                  capturedAuthToken, // Pass the captured token (now checked)
+                  capturedUserId,
                   stringifiedJsonPayload,
-                  currentDocument,
-                  activeSheet // Use activeSheet if available
+                  capturedCurrentDocument,
+                  capturedActiveSheet // Use captured activeSheet if available
                 );
                 console.log('[route.ts][onFinish] Unexpected Excel Op Result:', excelResult);
                 // Update final message content based on result
@@ -725,10 +733,10 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
 
             // --- Save Chat History ---
             try { 
-              if (documentId && userId) {
-                const messagesCollectionRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
+              if (capturedDocumentId && capturedUserId) {
+                const messagesCollectionRef = db.collection('users').doc(capturedUserId).collection('documents').doc(capturedDocumentId).collection('messages');
                 // Get the last user message that was actually sent in this request
-                const lastUserMsgForSave = messages.filter(m => m.role === 'user').pop();
+                const lastUserMsgForSave = capturedMessages.filter(m => m.role === 'user').pop();
 
                 // Ensure lastUserMsgForSave exists before accessing its properties
                 if (lastUserMsgForSave) { 
@@ -737,11 +745,9 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
                     content: lastUserMsgForSave.content, // Safe access
                     createdAt: firestore.FieldValue.serverTimestamp(),
                   });
-                  console.log(`[route.ts][onFinish] User message saved (streaming) for document ${documentId}`);
-                } else {
-                  console.warn(`[route.ts][onFinish] Could not find last user message to save for document ${documentId}`);
+                  console.log(`[route.ts][onFinish] User message saved (streaming) for document ${capturedDocumentId}`);
                 }
-
+                
                 // Save assistant message
                 await messagesCollectionRef.add({
                   role: 'assistant',
@@ -749,28 +755,27 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
                   createdAt: firestore.FieldValue.serverTimestamp(),
                   ...(isExcelOperation && excelResult && excelResult.success && excelResult.fileUrl ? { excelFileUrl: excelResult.fileUrl } : {}), // Add URL if applicable
                 });
-                console.log(`[route.ts][onFinish] Assistant message saved (streaming) for document ${documentId}`);
+                console.log(`[route.ts][onFinish] Assistant message saved (streaming) for document ${capturedDocumentId}`);
               } else {
                 console.log("[route.ts][onFinish] Skipping chat history save (streaming) - no documentId or userId.");
               }
-            } catch (saveError) {
-              console.error(`[route.ts][onFinish] Error saving chat messages (streaming) for document ${documentId}:`, saveError);
+            } catch (saveError: any) {
+              console.error(`[route.ts][onFinish] Error saving chat messages (streaming) for document ${capturedDocumentId}:`, saveError);
             }
-            // --- End Save Chat History ---
 
-          } catch (onFinishError) { // Catch errors specifically within the onFinish logic
+          } catch (onFinishError: any) { // Catch errors specifically within the onFinish logic
             console.error('[route.ts][onFinish] Error during onFinish processing:', onFinishError);
             // Potentially append an error message to the stream or log it
             // Note: It's tricky to modify the response *after* the stream has finished
             // Best practice is robust logging here.
-          } // Correctly closed the outer try block within onFinish
+          } 
         }, // End onFinish
       }); // End streamText call
     // Return the stream response
     return result.toDataStreamResponse();
-    // ---- END: Streaming Implementation (Vercel AI SDK v4) ----
-
-  } catch (error: any) {
+  } // End of else block
+} // Closing brace for the main try block
+  catch (error: any) {
     console.error("Error calling Anthropic API:", error);
     // --- SAVE HISTORY EVEN ON ERROR? --- 
     // Decide if you want to save history when the AI call fails.
@@ -816,7 +821,7 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
     console.error(`[route.ts] Returning 500 error: ${apiErrorMessage}`); 
     return NextResponse.json({ error: apiErrorMessage }, { status: 500 });
   }
-}
+}; // End of POST function
 
 // Helper function to authenticate the user - internal to this file
 async function authenticateUser(
