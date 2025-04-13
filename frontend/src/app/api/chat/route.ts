@@ -616,6 +616,8 @@ User Request: ${userMessageContent}`
 
     console.log("Sending messages to Anthropic API:", JSON.stringify(finalAiMessagesForApi, null, 2)); // Log final messages being sent
 
+    console.log("[route.ts] Payload for Anthropic API:", JSON.stringify(finalAiMessagesForApi, null, 2)); // Log the exact payload
+
     const response = await anthropic.messages.create({
       model: 'claude-3-sonnet-20240229', // Or your preferred model
       max_tokens: 1024,
