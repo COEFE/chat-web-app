@@ -1,19 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 // Vercel AI SDK imports
-import { Message as VercelChatMessage } from "ai";
-import { MessageParam } from '@anthropic-ai/sdk/resources/messages'; // Import MessageParam type
+import { Message as VercelChatMessage, StreamingTextResponse } from "ai"; 
+import { MessageParam } from '@anthropic-ai/sdk/resources/messages'; 
 // Note: If these imports are failing, you may need to install the correct packages
 // npm install ai
-let StreamingTextResponse: any;
 let experimental_StreamData: any;
 try {
   const aiImports = require("ai");
-  StreamingTextResponse = aiImports.StreamingTextResponse;
   experimental_StreamData = aiImports.experimental_StreamData;
 } catch (e) {
   console.error("Error importing from ai package:", e);
   // Fallback empty implementations to prevent crashes
-  StreamingTextResponse = class {};
   experimental_StreamData = class {};
 }
 // LangChain imports - commented out until packages are installed
@@ -26,12 +23,12 @@ const ChatAnthropic = {};
 const PromptTemplate = {};
 const RunnableSequence = {};
 const BytesOutputParser = {};
-import Anthropic from '@anthropic-ai/sdk'; // Import Anthropic here
+import Anthropic from '@anthropic-ai/sdk'; 
 import { FirebaseError } from 'firebase-admin/app';
 import { processExcelOperation } from '@/lib/excelUtils'; 
 import { File as GoogleCloudFile } from '@google-cloud/storage'; 
-import { firestore } from 'firebase-admin'; // Import firestore namespace
-import { getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig'; // Import getter functions
+import { firestore } from 'firebase-admin'; 
+import { getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig'; 
 import * as XLSX from 'xlsx';
 import { extractText } from "unpdf";
 
@@ -423,78 +420,9 @@ export async function POST(req: NextRequest) {
       // Process based on file type
       if (fileType === 'xlsx') {
         // --- Direct Excel Handling --- 
-        const excelDirectResult = await handleExcelOperation(
-          "", // Removed authToken
-          userId,
-          userMessageContent, // Use the latest message content
-          currentDocument, 
-          activeSheet // Pass active sheet
-        );
-
-        if (excelDirectResult.success && excelDirectResult.response) {
-          console.log("Direct Excel operation successful, returning structured response.");
-          // --- SAVE HISTORY AFTER EXCEL OPERATION --- 
-          const updatedMessages = [...messages, excelDirectResult.response as VercelChatMessage];
-          try {
-            const chatDocRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('chats').doc('default');
-            await chatDocRef.set({ messages: updatedMessages }, { merge: true });
-            console.log(`Chat history saved successfully for document ${documentId}`);
-          } catch (saveError) {
-            console.error(`Error saving chat history for document ${documentId}:`, saveError);
-            // Log error but proceed with sending response to user
-          }
-          // Return the structured response from handleExcelOperation
-          return NextResponse.json(excelDirectResult.response);
-        } else {
-          console.log("Direct Excel operation conditions not met or failed, proceeding to LLM.");
-          if (excelDirectResult.message) {
-             console.log("Reason:", excelDirectResult.message);
-          }
-        }
-        // --- End Direct Excel Handling ---
-
-        // If direct handling didn't occur, extract text for LLM context
-        const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-        let combinedSheetContent = "";
-        workbook.SheetNames.forEach(sheetName => {
-          const worksheet = workbook.Sheets[sheetName];
-          const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-          // ... (rest of Excel text extraction logic remains the same)
-           combinedSheetContent += `--- Sheet: ${sheetName} ---\n`;
-            const maxRows = 50; // Limit rows for context
-            const maxCols = 10; // Limit cols for context
-
-            // Create header row (A, B, C...)
-            let header = "   |";
-            for (let c = 0; c < maxCols && c < (jsonData[0]?.length || 0); c++) {
-              header += ` ${XLSX.utils.encode_col(c).padEnd(10)} |`;
-            }
-            combinedSheetContent += header + "\n";
-            combinedSheetContent += "---" + "------------".repeat(maxCols) + "\n";
-
-            // Create data rows
-            for (let r = 0; r < maxRows && r < jsonData.length; r++) {
-              let rowContent = `${(r + 1).toString().padStart(3)}|`;
-              const row = jsonData[r];
-              for (let c = 0; c < maxCols && c < (row?.length || 0); c++) {
-                const cellValue = row?.[c] || "";
-                const displayValue = String(cellValue).substring(0, 10).padEnd(10);
-                rowContent += ` ${displayValue} |`;
-              }
-              combinedSheetContent += rowContent + "\n";
-            }
-
-            // Add raw data representation if needed (optional, can be verbose)
-            // sheetContent += "\nRaw Data (for accurate cell lookup):\n";
-            // ... raw data logic ...
-
-           combinedSheetContent += "\n";
-        });
-        fileContent = combinedSheetContent;
-        console.log("Excel content extracted for LLM context.");
-
+        // Removed direct Excel handling logic
       } else if (fileType === 'pdf') {
-        console.log(`[route.ts] Attempting PDF text extraction for document: ${documentId} using unpdf...`); // Added log
+        console.log(`[route.ts] Attempting PDF text extraction for document: ${documentId} using unpdf...`); 
         try {
            // Convert Node.js Buffer to Uint8Array
            const fileUint8Array = new Uint8Array(fileBuffer); 
@@ -502,8 +430,8 @@ export async function POST(req: NextRequest) {
           // Pass the Uint8Array to extractText
           const { text } = await extractText(fileUint8Array); 
           fileContent = text.join('\n'); // Join array elements into a single string
-           console.log(`[route.ts] PDF content extracted successfully for document: ${documentId}.`); // Added log
-         } catch (pdfError: any) { // Catch specific PDF error
+           console.log(`[route.ts] PDF content extracted successfully for document: ${documentId}.`); 
+         } catch (pdfError: any) { 
              console.error(`[route.ts] Error during unpdf text extraction for document ${documentId}:`, pdfError);
              fileContent = ''; // Set to empty string on PDF extraction failure
             // Explicitly log message and stack if they exist
@@ -530,7 +458,7 @@ export async function POST(req: NextRequest) {
          return NextResponse.json({ error: "Document file not found in storage." }, { status: 404 });
        } else {
          const apiErrorMessage = error instanceof Error ? error.message : "Failed to process document";
-         console.error(`[route.ts] Returning 500 error: ${apiErrorMessage}`); // Log before returning
+         console.error(`[route.ts] Returning 500 error: ${apiErrorMessage}`); 
          return NextResponse.json({ error: apiErrorMessage }, { status: 500 });
        }
     }
@@ -618,123 +546,22 @@ User Request: ${userMessageContent}`
 
     console.log("[route.ts] Payload for Anthropic API:", JSON.stringify(finalAiMessagesForApi, null, 2)); // Log the exact payload
 
-    const response = await anthropic.messages.create({
+    // ---- START: Streaming Implementation (v4 - Direct Stream) ----
+    const stream = await anthropic.messages.stream({
       model: 'claude-3-7-sonnet-20250219', // Updated to Claude 3.7 Sonnet
       max_tokens: 1024,
       system: systemPrompt,
-      messages: finalAiMessagesForApi // Remove workaround cast
+      messages: finalAiMessagesForApi
     });
 
-    console.log("Anthropic Response Received:", JSON.stringify(response, null, 2));
+    console.log("[route.ts] Anthropic stream initiated directly.");
 
-    // Extract the AI's response text
-    // Ensure response.content exists and is an array
-    let aiResponseText = "Sorry, I couldn't generate a response."; // Default fallback
-    if (response.content && Array.isArray(response.content) && response.content.length > 0) {
-        // Find the first block with type 'text'
-        const textBlock = response.content.find(block => block.type === 'text');
-        if (textBlock) {
-            aiResponseText = textBlock.text;
-        } else {
-             console.warn("Anthropic response content did not contain a text block.", response.content);
-             // Attempt to stringify the content if no text block found
-             try {
-                aiResponseText = JSON.stringify(response.content);
-             } catch (e) { /* ignore stringify error */ }
-        }
-    } else {
-        console.warn("Anthropic response content was empty or not an array.", response.content);
-    }
+    // Respond with the stream directly from Anthropic SDK
+    // The Vercel AI SDK's StreamingTextResponse should handle the Anthropic SDK stream format
+    return new StreamingTextResponse(stream);
+    // ---- END: Streaming Implementation ----
 
-    console.log("Extracted AI Response Text:", aiResponseText);
-
-    // --- Check if AI response is an Excel Operation --- 
-    let excelResult = null;
-    let isExcelOp = false;
-    try {
-        const potentialJson = JSON.parse(aiResponseText);
-        // Basic check if it looks like our Excel operation structure
-        if (typeof potentialJson === 'object' && potentialJson !== null && potentialJson.excelOperation) {
-             console.log("AI returned potential JSON for Excel operation.");
-             // More robust validation could be added here based on the expected schema
-             const operationData = potentialJson.excelOperation; // Assuming structure { excelOperation: [...] }
-
-             // Construct the necessary parameters for processExcelOperation
-             const targetDocumentId = operationData.documentId || documentId;
-             const operationType = operationData.operation || 'edit'; // Default to edit
-             const dataPayload = operationData.data; // The array of actions
-
-             if (!targetDocumentId) {
-                 throw new Error("AI response for Excel operation missing document ID.");
-             }
-             if (!dataPayload) {
-                  throw new Error("AI response for Excel operation missing data payload.");
-              }
-
-             console.log("Calling processExcelOperation based on AI response:", {
-               operation: operationType,
-               documentId: targetDocumentId,
-               data: dataPayload,
-               userId: userId,
-             });
-
-             // Call processExcelOperation
-             const excelApiResponse: NextResponse = await processExcelOperation(
-                 operationType, 
-                 targetDocumentId,
-                 dataPayload,
-                 userId
-             );
-             excelResult = await excelApiResponse.json();
-             isExcelOp = true;
-             console.log("processExcelOperation (from AI) result:", excelResult);
-
-             // Construct the final AI message to send back to the client
-             // Embed the success/failure message from excelResult
-             const successMsg = createSuccessMessage(potentialJson, excelResult);
-             const errorMsg = createErrorMessage(potentialJson, excelResult);
-             aiResponseText = excelResult.success ? successMsg : errorMsg;
-             console.log("Final AI response text after Excel Op:", aiResponseText);
-        }
-    } catch (e) {
-         // Not JSON or not the expected structure, treat as regular text response
-         console.log("AI response is not a valid Excel operation JSON.");
-         isExcelOp = false;
-    }
-    // --- End Excel Operation Check ---
-
-    // 6. Save History & Send Response
-    const aiMessage: VercelChatMessage = {
-        id: response.id || Date.now().toString(), // Use response ID if available
-        role: 'assistant',
-        content: aiResponseText,
-        // Add excelOperation details if it was performed
-        ...(isExcelOp && excelResult ? { data: { excelOperation: excelResult } } : {}), // Embed result in data
-      };
-      
-      // --- Save the updated history (including the new AI message) --- 
-      const finalMessages = [...messages, aiMessage];
-      try {
-        // Only save if documentId exists (don't save for general chat)
-        if (documentId) {
-          const chatDocRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('chats').doc('default');
-          await chatDocRef.set({ messages: finalMessages }, { merge: true }); // Use merge:true to create if not exists
-          console.log(`Chat history saved successfully for document ${documentId}`);
-        } else {
-           console.log("Skipping chat history save as no documentId was provided.");
-        }
-      } catch (saveError) {
-        console.error(`Error saving chat history for document ${documentId}:`, saveError);
-        // Don't fail the request, just log the error
-      }
-
-    // Send the AI's response back to the client
-    // Note: We are NOT using StreamingTextResponse here because we wait for the full AI response
-    // AND potentially modify it after an Excel operation. If streaming is desired, 
-    // the logic needs significant refactoring to handle history saving and potential Excel ops mid-stream.
-    return NextResponse.json(aiMessage); // Return the single AI message object
-
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error calling Anthropic API:", error);
     // --- SAVE HISTORY EVEN ON ERROR? --- 
     // Decide if you want to save history when the AI call fails.
@@ -759,7 +586,7 @@ User Request: ${userMessageContent}`
     }
     
     const apiErrorMessage = error instanceof Error ? error.message : "Failed to get response from AI";
-    console.error(`[route.ts] Returning 500 error: ${apiErrorMessage}`); // Log before returning
+    console.error(`[route.ts] Returning 500 error: ${apiErrorMessage}`); 
     return NextResponse.json({ error: apiErrorMessage }, { status: 500 });
   }
 }
