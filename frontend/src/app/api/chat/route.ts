@@ -532,7 +532,7 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
       model: anthropic('claude-3-7-sonnet-20250219'),
       system: finalSystemPrompt, // Use the potentially augmented system prompt
       messages: messagesForStreamText, // Pass the full conversation history
-      maxTokens: 1024,
+      maxTokens: 4096, // Increased from 1024 to handle complex Excel operations
 
       // --- onFinish replaces onCompletion for post-stream processing --- 
       async onFinish({ text, toolCalls, toolResults, usage, finishReason, logprobs }) {
@@ -545,15 +545,48 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
 
         try {
           const potentialJson = aiResponseText.trim();
+          
+          // Check if the response looks like JSON
           if (potentialJson.startsWith('{') && potentialJson.endsWith('}')) {
-            parsedJson = JSON.parse(potentialJson);
-            if (parsedJson.action && (parsedJson.action === 'editExcelFile' || parsedJson.action === 'createExcelFile') && parsedJson.args) {
-              console.log("[route.ts][onFinish] Detected potential Excel operation:", parsedJson.action);
-              isExcelOperation = true;
+            try {
+              parsedJson = JSON.parse(potentialJson);
+              
+              // Validate the Excel operation structure
+              if (parsedJson.action && 
+                  (parsedJson.action === 'editExcelFile' || parsedJson.action === 'createExcelFile') && 
+                  parsedJson.args) {
+                console.log("[route.ts][onFinish] Detected valid Excel operation:", parsedJson.action);
+                isExcelOperation = true;
+              } else {
+                console.log("[route.ts][onFinish] JSON doesn't match expected Excel operation structure:", JSON.stringify(parsedJson).substring(0, 200));
+              }
+            } catch (error) {
+              // Handle JSON parsing errors more specifically
+              const jsonParseError = error as Error;
+              console.error("[route.ts][onFinish] JSON parse error:", jsonParseError.message);
+              console.log("[route.ts][onFinish] Attempted to parse:", potentialJson.length > 200 ? 
+                potentialJson.substring(0, 100) + '...' + potentialJson.substring(potentialJson.length - 100) : potentialJson);
+              
+              // Try to recover from truncated JSON
+              if (potentialJson.length > 500 && !potentialJson.endsWith('}}')) {
+                console.log("[route.ts][onFinish] Attempting to recover from possibly truncated JSON");
+                // Add closing brackets if they appear to be missing
+                const fixedJson = potentialJson + (potentialJson.endsWith('}') ? '' : '}');
+                try {
+                  parsedJson = JSON.parse(fixedJson);
+                  console.log("[route.ts][onFinish] Successfully recovered truncated JSON");
+                  isExcelOperation = true;
+                } catch (error) {
+                  const recoveryError = error as Error;
+                  console.error("[route.ts][onFinish] Recovery attempt failed:", recoveryError.message);
+                }
+              }
             }
+          } else {
+            console.log("[route.ts][onFinish] Response doesn't appear to be JSON");
           }
         } catch (parseError) {
-          console.log("[route.ts][onFinish] AI response is not a valid Excel operation JSON.");
+          console.error("[route.ts][onFinish] Error processing AI response:", parseError);
           isExcelOperation = false;
         }
 
