@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 // Vercel AI SDK imports
-import { Message as VercelChatMessage, StreamingTextResponse } from "ai"; 
+import { Message as VercelChatMessage, streamText, CoreMessage } from "ai"; 
 import { MessageParam } from '@anthropic-ai/sdk/resources/messages'; 
 // Note: If these imports are failing, you may need to install the correct packages
 // npm install ai
+import { anthropic } from '@ai-sdk/anthropic'; 
 let experimental_StreamData: any;
 try {
   const aiImports = require("ai");
@@ -493,8 +494,6 @@ export async function POST(req: NextRequest) {
 
   // 5. Call AI (Anthropic Example)
   try {
-    const anthropic = new Anthropic(); // Assumes ANTHROPIC_API_KEY is set
-
     // Use the messages format for Claude 3
     const systemPrompt = "You are a helpful assistant. If asked to modify an Excel file, respond ONLY with the JSON for the required 'excelOperation' function call, following the specified schema. Do not add any introductory text, explanations, or concluding remarks around the JSON. If asked a general question or a question about the document content, answer normally.";
     
@@ -546,20 +545,92 @@ User Request: ${userMessageContent}`
 
     console.log("[route.ts] Payload for Anthropic API:", JSON.stringify(finalAiMessagesForApi, null, 2)); // Log the exact payload
 
-    // ---- START: Streaming Implementation (v4 - Direct Stream) ----
-    const stream = await anthropic.messages.stream({
-      model: 'claude-3-7-sonnet-20250219', // Updated to Claude 3.7 Sonnet
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: finalAiMessagesForApi
-    });
+    // ---- START: Streaming Implementation (Vercel AI SDK v4) ----
+    const result = await streamText({
+       model: anthropic('claude-3-7-sonnet-20250219'),
+       system: systemPrompt,
+       messages: finalAiMessagesForApi as CoreMessage[], // Cast to CoreMessage[] as required by streamText
+       maxTokens: 1024,
 
-    console.log("[route.ts] Anthropic stream initiated directly.");
+       // --- onFinish replaces onCompletion for post-stream processing --- 
+       async onFinish({ text, toolCalls, toolResults, usage, finishReason, logprobs }) {
+         console.log(`[route.ts][onFinish] Stream finished. Reason: ${finishReason}. Final text length: ${text.length}`);
 
-    // Respond with the stream directly from Anthropic SDK
-    // The Vercel AI SDK's StreamingTextResponse should handle the Anthropic SDK stream format
-    return new StreamingTextResponse(stream);
-    // ---- END: Streaming Implementation ----
+         // --- Re-integrated Excel/History Logic --- 
+         const aiResponseText = text; // Use the final text from the stream
+         let isExcelOperation = false;
+         let parsedJson: any = null;
+
+         try {
+           const potentialJson = aiResponseText.trim();
+           if (potentialJson.startsWith('{') && potentialJson.endsWith('}')) {
+             parsedJson = JSON.parse(potentialJson);
+             if (parsedJson.action && (parsedJson.action === 'editExcelFile' || parsedJson.action === 'createExcelFile') && parsedJson.args) {
+               console.log("[route.ts][onFinish] Detected potential Excel operation:", parsedJson.action);
+               isExcelOperation = true;
+             }
+           }
+         } catch (parseError) {
+           console.log("[route.ts][onFinish] AI response is not a valid Excel operation JSON.");
+           isExcelOperation = false;
+         }
+
+         let finalAiMessageContent = aiResponseText; // Default to the raw completion
+         let excelResult: any = null; // Store excel result if applicable
+
+         if (isExcelOperation && parsedJson) {
+             console.log(`[route.ts][onFinish] Handling Excel Operation: ${parsedJson.action}`);
+             const { action, args } = parsedJson;
+             const sheetName = extractSheetName(lastMessage.content as string); // Use lastMessage from outer scope
+             
+             excelResult = await handleExcelOperation(
+                 '', // authToken seems removed/unused here, pass empty or adjust handleExcelOperation
+                 userId,
+                 lastMessage.content as string, // Use lastMessage from outer scope
+                 currentDocument, // Pass the current document context if available
+                 sheetName || undefined
+             );
+
+             console.log('[route.ts][onFinish] Excel Operation Result:', excelResult);
+             
+             // Use helpers to create appropriate message based on Excel result
+             if (excelResult.success) {
+                 finalAiMessageContent = createSuccessMessage(parsedJson, excelResult);
+             } else {
+                 finalAiMessageContent = createErrorMessage(parsedJson, excelResult);
+             }
+             console.log('[route.ts][onFinish] Final message after Excel op:', finalAiMessageContent);
+         }
+
+         // --- Save the final chat history --- 
+         const aiMessage: VercelChatMessage = {
+             id: Date.now().toString(), // Generate ID 
+             role: 'assistant',
+             content: finalAiMessageContent,
+             // Include Excel result details if it was an Excel operation
+             ...(isExcelOperation && excelResult ? { data: { excelOperationResult: excelResult } } : {}),
+         };
+         
+         const finalMessages = [...messages, aiMessage]; // Include the AI message
+
+         try {
+             if (documentId) {
+              const chatDocRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('chats').doc('default');
+              await chatDocRef.set({ messages: finalMessages }, { merge: true });
+              console.log(`[route.ts][onFinish] Chat history saved successfully for document ${documentId}`);
+            } else {
+              console.log("[route.ts][onFinish] Skipping chat history save as no documentId was provided.");
+            }
+         } catch (saveError) {
+          console.error(`[route.ts][onFinish] Error saving chat history for document ${documentId}:`, saveError);
+         }
+         // --- End Re-integrated Logic --- 
+       },
+   });
+
+   // Return the stream response
+   return result.toDataStreamResponse();
+   // ---- END: Streaming Implementation (Vercel AI SDK v4) ----
 
   } catch (error: any) {
     console.error("Error calling Anthropic API:", error);
