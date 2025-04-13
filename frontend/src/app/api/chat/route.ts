@@ -342,6 +342,16 @@ export async function POST(req: NextRequest) {
     console.log("User authenticated:", userId);
   } catch (error) {
     console.error("Authentication error:", error);
+    // Explicitly log message and stack if available
+    if (error instanceof Error) {
+      const authErrorMessage = error.message;
+      if (error.stack) {
+        console.error(`[authenticateUser] Auth Error Stack: ${error.stack}`);
+      }
+      console.error(`[authenticateUser] Auth Error Message: ${authErrorMessage}`);
+    } else {
+      console.error('Non-standard error object received during authentication.');
+    }
     return NextResponse.json({ error: "Unauthorized: Invalid token" }, { status: 401 });
   }
 
@@ -484,23 +494,39 @@ export async function POST(req: NextRequest) {
         console.log("Excel content extracted for LLM context.");
 
       } else if (fileType === 'pdf') {
-        const { text } = await extractText(fileBuffer);
-        fileContent = text.join('\n'); // Join array elements into a single string
-        console.log("PDF content extracted.");
-      } else if (['txt', 'md', 'csv', 'json', 'html', 'xml', 'js', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rb', 'php'].includes(fileType || '')) {
-        fileContent = fileBuffer.toString('utf-8');
-        console.log("Plain text content extracted.");
-      } else {
-        console.warn(`Unsupported file type for content extraction: ${fileType}`);
-        fileContent = `Cannot display content for file type: ${fileType}`;
-      }
+        console.log(`[route.ts] Attempting PDF text extraction for document: ${documentId} using unpdf...`); // Added log
+        try {
+           const { text } = await extractText(fileBuffer);
+           fileContent = text.join('\n'); // Join array elements into a single string
+           console.log(`[route.ts] PDF content extracted successfully for document: ${documentId}.`); // Added log
+        } catch (pdfError: any) { // Catch specific PDF error
+            console.error(`[route.ts] Error during unpdf text extraction for document ${documentId}:`, pdfError);
+            // Explicitly log message and stack if they exist
+            if (pdfError.message) {
+              console.error(`[route.ts] unpdf Error Message: ${pdfError.message}`);
+            }
+            if (pdfError.stack) {
+              console.error(`[route.ts] unpdf Error Stack: ${pdfError.stack}`);
+            }
+            // Re-throw the error to be caught by the outer catch block
+            throw new Error(`unpdf extraction failed: ${pdfError.message || 'Unknown PDF processing error'}`);
+        }
+       } else if (['txt', 'md', 'csv', 'json', 'html', 'xml', 'js', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rb', 'php'].includes(fileType || '')) {
+         fileContent = fileBuffer.toString('utf-8');
+         console.log("Plain text content extracted.");
+       } else {
+         console.warn(`Unsupported file type for content extraction: ${fileType}`);
+         fileContent = `Cannot display content for file type: ${fileType}`;
+       }
     } catch (error) {
       console.error(`Error processing document ${documentId}:`, error);
       // Check if it's a GCS 'object not found' error using the helper function
       if (isFirebaseStorageError(error, 404)) { 
          return NextResponse.json({ error: "Document file not found in storage." }, { status: 404 });
        } else {
-         return NextResponse.json({ error: "Failed to process document" }, { status: 500 });
+         const apiErrorMessage = error instanceof Error ? error.message : "Failed to process document";
+         console.error(`[route.ts] Returning 500 error: ${apiErrorMessage}`); // Log before returning
+         return NextResponse.json({ error: apiErrorMessage }, { status: 500 });
        }
     }
   }
@@ -725,10 +751,9 @@ User Request: ${userMessageContent}`
          console.error(`Error saving chat history (on error) for document ${documentId}:`, saveError);
     }
     
-    return NextResponse.json(
-      { error: "Failed to get response from AI" },
-      { status: 500 }
-    );
+    const apiErrorMessage = error instanceof Error ? error.message : "Failed to get response from AI";
+    console.error(`[route.ts] Returning 500 error: ${apiErrorMessage}`); // Log before returning
+    return NextResponse.json({ error: apiErrorMessage }, { status: 500 });
   }
 }
 
