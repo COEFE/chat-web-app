@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.2.9",
+    "@ai-sdk/react": "^1.2.8",
     "@anthropic-ai/sdk": "^0.39.0",
     "@handsontable/react": "^15.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.6",
