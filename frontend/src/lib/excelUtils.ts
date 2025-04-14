@@ -193,6 +193,8 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
             success: false, 
             message: errorMessage, 
             documentId: documentId, // Return the original ID
+            storagePath: undefined,
+            fileUrl: undefined,
             executionTime: errorTime
         };
     }
@@ -474,14 +476,24 @@ function normalizeTimestampedPath(storagePath: string, filename: string): { stor
 }
 
 // --- Exported Function for Excel Operations ---
+/**
+ * Process Excel operations (create or edit)
+ * @param operation - The operation type ('createExcelFile' or 'editExcelFile')
+ * @param documentId - The document ID (null for create)
+ * @param data - The operations data
+ * @param userId - The user ID
+ * @param fileName - Optional filename
+ * @param sheetName - Optional sheet name
+ * @returns Promise with operation result
+ */
 export async function processExcelOperation(
   operation: string,
   documentId: string | null, // Allow null for create
   data: any[],
   userId: string,
-  fileName?: string, // Added fileName
-  sheetName?: string // Added sheetName
-): Promise<{ success: boolean; message?: string; docId?: string; storagePath?: string }> { // Changed return type
+  fileName?: string,
+  sheetName?: string
+): Promise<{ success: boolean; message?: string; documentId?: string; storagePath?: string; fileUrl?: string; executionTime?: number }> {
   const startTime = Date.now();
   console.log('[processExcelOperation] Starting execution at:', new Date().toISOString());
   console.log('[processExcelOperation] Received:', { operation, documentId, dataLength: data?.length, userId, fileName, sheetName });
@@ -489,10 +501,10 @@ export async function processExcelOperation(
   // Ensure Firebase services are available
   if (!db || !storage || !bucket) {
     console.error('[processExcelOperation] Firebase services not initialized.');
-    return { success: false, message: 'Server error: Firebase services not available.' };
+    return { success: false, message: 'Server error: Firebase services not available.', documentId: undefined };
   }
  
-  let result: { success: boolean; message?: string; documentId?: string; storagePath?: string };
+  let result: { success: boolean; message?: string; documentId?: string; storagePath?: string; fileUrl?: string; executionTime?: number };
   let finalDocumentId = documentId; // Use a mutable variable for the ID
  
   try {

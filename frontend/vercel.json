@@ -1,17 +1,6 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    }
-  ],
-  "outputDirectory": ".next",
   "functions": {
-    "api/chat": {
-      "maxDuration": 60
-    },
-    "api/excel-process": {
+    "api/**/*.js": {
       "maxDuration": 60
     }
   }

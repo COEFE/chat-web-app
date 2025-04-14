@@ -579,7 +579,7 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
                         // operationResult is now a plain object, not a NextResponse
                         console.log("[route.ts] processExcelOperation result:", operationResult);
                         // Add type assertion to ensure it matches the expected excelResult type
-                        excelResult = operationResult as { success: boolean; message?: string; fileUrl?: string };
+                        excelResult = operationResult as { success: boolean; message?: string; documentId?: string; storagePath?: string; fileUrl?: string; executionTime?: number };
                         console.log("[route.ts] Excel operation result assigned to excelResult");
                     } catch (opError: any) {
                         console.error("[route.ts] Error calling or parsing processExcelOperation:", opError);
