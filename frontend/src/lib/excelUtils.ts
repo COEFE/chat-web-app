@@ -209,7 +209,7 @@ export async function processExcelOperation(
     console.log('[processExcelOperation] Finished processing operations.');
 
     // === Save and Upload ===
-    const finalDocumentId = documentId || `doc-${uuidv4()}`; // Use existing or generate new
+    const finalDocumentId = (operation === 'editExcelFile' && existingDocData) ? existingDocData.id : `doc-${uuidv4()}`;
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     // Use baseFilename determined earlier (either requested, default, or from existing doc)
     const finalFilename = `${baseFilename.replace(/\.[^/.]+$/, "")} (${timestamp}).xlsx`; 
