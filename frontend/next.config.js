@@ -5,16 +5,14 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   
-  // Configure the output directory for Vercel
-  output: 'standalone',
+  // Use the standard output format for Vercel
+  // This is the default and works best with Vercel
   
   // Ensure compatibility with Vercel deployment
   distDir: '.next',
 
-  // Configure serverless functions for extended timeouts
-  experimental: {
-    serverComponentsExternalPackages: ['xlsx'],
-  },
+  // Use the updated configuration for external packages
+  serverExternalPackages: ['xlsx'],
   
   // Configure Vercel serverless function settings
   serverRuntimeConfig: {
