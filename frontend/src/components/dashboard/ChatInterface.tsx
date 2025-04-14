@@ -174,13 +174,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
             <div
               key={message.id} 
               className={cn(
-                'mb-4 flex',
+                'mb-4 flex w-full',
                 message.role === 'user' ? 'justify-end' : 'justify-start'
               )}
             >
               <div
                 className={cn(
-                  'rounded-lg px-4 py-2 max-w-[80%] break-words whitespace-pre-wrap w-fit overflow-x-auto',
+                  'rounded-lg px-4 py-2 max-w-[80%] break-all text-wrap text-pretty overflow-hidden',
                   message.role === 'user'
                     ? 'bg-white text-black'
                     : 'bg-muted'
