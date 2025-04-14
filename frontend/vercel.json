@@ -8,10 +8,10 @@
   ],
   "outputDirectory": ".next",
   "functions": {
-    "src/app/api/chat/route.ts": {
+    "api/chat": {
       "maxDuration": 60
     },
-    "src/app/api/excel-process/route.ts": {
+    "api/excel-process": {
       "maxDuration": 60
     }
   }
