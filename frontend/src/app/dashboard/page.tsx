@@ -171,7 +171,11 @@ function DocumentTable({
                         onOpenChange={(open) => setOpenDropdown(open ? item.id : null)}
                       >
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
+                          <Button 
+                            variant="ghost" 
+                            className="h-8 w-8 p-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <span className="sr-only">Open folder menu</span>
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
@@ -201,7 +205,11 @@ function DocumentTable({
               } else {
                 const doc = item;
                 return (
-                  <TableRow key={doc.id}>
+                  <TableRow 
+                    key={doc.id} 
+                    className="cursor-pointer hover:bg-muted/50" 
+                    onClick={() => onSelectItem(doc)}
+                  >
                     <TableCell>
                       <FileText className="h-4 w-4 text-gray-500" />
                     </TableCell>
@@ -216,7 +224,11 @@ function DocumentTable({
                         onOpenChange={(open) => setOpenDropdown(open ? doc.id : null)}
                       >
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
+                          <Button 
+                            variant="ghost" 
+                            className="h-8 w-8 p-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <span className="sr-only">Open menu</span>
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
