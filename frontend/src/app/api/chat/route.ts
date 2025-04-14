@@ -517,119 +517,82 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
 
         console.log("[route.ts] Non-streaming Anthropic response received:", response);
 
+        let excelResult: { success: boolean; message?: string; fileUrl?: string } = { 
+          success: false, 
+          message: "Initialization error before processing AI response."
+        };
+
         if (response.content && response.content.length > 0 && response.content[0].type === 'text') {
           const aiResponseText = response.content[0].text;
           console.log("[route.ts] Extracted text from non-streaming response:", aiResponseText);
 
           // Attempt to parse the response as JSON
           let parsedJson;
-          let excelResult: { success: boolean; message?: string; fileUrl?: string } = { success: false, message: "Failed to parse AI response."};
           try {
-            // Find the start and end of the JSON block
-            const jsonStart = aiResponseText.indexOf('{');
-            const jsonEnd = aiResponseText.lastIndexOf('}') + 1;
-            if (jsonStart !== -1 && jsonEnd > jsonStart) {
-              const jsonString = aiResponseText.substring(jsonStart, jsonEnd);
-              console.log("[route.ts] Extracted JSON string:", jsonString);
-              parsedJson = JSON.parse(jsonString);
-              console.log("[route.ts] Parsed JSON from non-streaming response:", parsedJson);
+            console.log('[route.ts] Attempting to parse AI response JSON content. Length:', aiResponseText.length); // Log length
+            // console.log('[route.ts] Raw JSON content:', aiResponseText); // Optionally log raw content if needed for debugging, but be mindful of log size
+            parsedJson = JSON.parse(aiResponseText);
+            console.log('[route.ts] Successfully parsed AI JSON.');
+            console.log('[route.ts] Parsed JSON from non-streaming response:', parsedJson);
 
-              // --- Process Excel Operation Directly --- 
-              if (parsedJson && parsedJson.action && parsedJson.args && Array.isArray(parsedJson.args.operations)) {
-                
-                // Determine document ID: null for create, existing for edit
-                const docIdForOperation = parsedJson.action === 'editExcelFile' ? currentDocument?.id : null;
-                
-                if (parsedJson.action === 'editExcelFile' && !docIdForOperation) {
-                    console.error("[route.ts] Cannot perform editExcelFile action without a document ID.");
-                    excelResult = { success: false, message: "Cannot edit Excel file without a document ID." };
-                } else {
-                    console.log(`[route.ts] Calling processExcelOperation directly for action: ${parsedJson.action}`);
-                    try {
-                        // Create a timeout promise for Excel operations using the constant
-                        const excelOpTimeoutPromise = new Promise((_, reject) => {
-                            setTimeout(() => reject(new Error(`Excel operation timed out after ${EXCEL_OPERATION_TIMEOUT_MS/1000} seconds`)), EXCEL_OPERATION_TIMEOUT_MS);
-                        });
-                        
-                        // Extract additional parameters from the request if available
-                        const fileName = parsedJson.args.fileName || 'Untitled Spreadsheet';
-                        const sheetName = parsedJson.args.sheetName || 'Sheet1';
-                        
-                        console.log("[route.ts] Calling processExcelOperation with parameters:", {
-                            action: parsedJson.action,
-                            docId: docIdForOperation,
-                            operations: Array.isArray(parsedJson.args.operations) ? `Array(${parsedJson.args.operations.length})` : 'Invalid',
-                            userId,
-                            fileName,
-                            sheetName
-                        });
-                        
-                        // Call processExcelOperation with timeout protection and all required arguments
-                        const operationResult = await Promise.race([
-                            processExcelOperation(
-                                parsedJson.action,       // 'createExcelFile' or 'editExcelFile'
-                                docIdForOperation,       // null for create, ID for edit
-                                parsedJson.args.operations, // The array of operations
-                                userId,                  // The authenticated user ID
-                                fileName,                // The filename (new parameter)
-                                sheetName                // The sheet name (new parameter)
-                            ),
-                            excelOpTimeoutPromise
-                        ]);
+            // Check for the presence of excelOperation and necessary fields
+            if (parsedJson && parsedJson.action && parsedJson.args && Array.isArray(parsedJson.args.operations)) {
+              console.log('[route.ts] AI JSON structure is valid for Excel operation. Preparing to call handleExcelOperation.');
+              // Pass necessary data to the background task
+              const operationData = parsedJson.args.operations; // Use operations
+              const operationType = parsedJson.action;
+              const documentIdToUse = currentDocument?.id || null; // Pass existing doc ID if available
 
-                        // operationResult is now a plain object, not a NextResponse
-                        console.log("[route.ts] processExcelOperation result:", operationResult);
-                        // Add type assertion to ensure it matches the expected excelResult type
-                        excelResult = operationResult as { success: boolean; message?: string; documentId?: string; storagePath?: string; fileUrl?: string; executionTime?: number };
-                        console.log("[route.ts] Excel operation result assigned to excelResult");
-                    } catch (opError: any) {
-                        console.error("[route.ts] Error calling or parsing processExcelOperation:", opError);
-                        console.error("[route.ts] Full error object:", JSON.stringify(opError, Object.getOwnPropertyNames(opError)));
-                        const isTimeout = opError.message && opError.message.includes('timeout');
-                        excelResult = { 
-                          success: false, 
-                          message: isTimeout 
-                            ? `The Excel operation timed out. Please try again with a simpler request or fewer operations.` 
-                            : `Error performing Excel operation: ${opError.message || 'Unknown error'}` 
-                        };
-                    }
-                }
-              } else {
-                 console.error("[route.ts] AI response JSON did not match expected structure for Excel operation.");
-                 excelResult = { success: false, message: "AI response was not a valid Excel action JSON." };
+              console.log(`[route.ts] Calling handleExcelOperation with: operation=${operationType}, docId=${documentIdToUse}, data length=${Array.isArray(operationData) ? operationData.length : 'N/A'}`);
+              
+              // Await the promise returned by handleExcelOperation
+              try {
+                  // Use the existing handleExcelOperation which now contains detailed logging
+                  const operationResult = await handleExcelOperation(operationType, documentIdToUse, operationData, userId);
+                  console.log('[route.ts] handleExcelOperation result:', operationResult);
+                  excelResult = operationResult as { success: boolean; message?: string; fileUrl?: string; documentId?: string; storagePath?: string; executionTime?: number };
+              } catch (opError: any) {
+                  console.error("[route.ts] Error calling or parsing processExcelOperation:", opError);
+                  console.error("[route.ts] Full error object:", JSON.stringify(opError, Object.getOwnPropertyNames(opError)));
+                  const isTimeout = opError.message && opError.message.includes('timeout');
+                  excelResult = { 
+                    success: false, 
+                    message: isTimeout 
+                      ? `The Excel operation timed out. Please try again with a simpler request or fewer operations.` 
+                      : `Error performing Excel operation: ${opError.message || 'Unknown error'}` 
+                  };
               }
-
             } else {
-              console.error("[route.ts] Could not find JSON structure in non-streaming response.");
-              excelResult = { success: false, message: "Could not find JSON structure in AI response." };
+               console.error("[route.ts] AI response JSON did not match expected structure for Excel operation. Parsed JSON:", parsedJson);
+               excelResult = { success: false, message: "AI response was not a valid Excel action JSON." };
             }
           } catch (parseError: any) {
-            console.error("[route.ts] Failed to parse non-streaming JSON response:", parseError);
-            excelResult = { success: false, message: `Failed to parse AI response: ${parseError.message}` };
-            // Optionally, add recovery logic here if needed
+            console.error("[route.ts] Error parsing JSON from AI response:", parseError);
+            console.error("[route.ts] Full JSON parse error object:", JSON.stringify(parseError, Object.getOwnPropertyNames(parseError)));
+            console.error("[route.ts] Raw content that failed parsing:", aiResponseText); // Log the raw content on error
+            excelResult = { success: false, message: `Error parsing AI response: ${parseError.message}` };
           }
-          
-          // Construct a VercelChatMessage-like response to send back to the client
-          const responseMessage: VercelChatMessage = {
-              id: response.id || `excel-response-${Date.now()}`,
-              role: 'assistant',
-              content: excelResult.success 
-                ? excelResult.message || 'Excel operation successful.'
-                : excelResult.message || 'Excel operation failed.',
-              // Include fileUrl if available and operation was successful
-              ...(excelResult.success && excelResult.fileUrl && { excelFileUrl: excelResult.fileUrl })
-          };
-
-          // Send the single message back as the response body
-          // Note: The client needs to handle this non-streamed response
-          return new Response(JSON.stringify(responseMessage), {
-            headers: { 'Content-Type': 'application/json' },
-          });
-
         } else {
-           console.error("[route.ts] Non-streaming response format unexpected:", response);
-           return new Response(JSON.stringify({ error: 'Unexpected response format from AI for Excel request.' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+           console.error("[route.ts] Could not find message content in non-streaming AI response.");
+           excelResult = { success: false, message: "Could not find message content in AI response." };
         }
+
+        // Construct a VercelChatMessage-like response to send back to the client
+        const responseMessage: VercelChatMessage = {
+            id: response.id || `excel-response-${Date.now()}`,
+            role: 'assistant',
+            content: excelResult.success 
+              ? excelResult.message || 'Excel operation successful.'
+              : excelResult.message || 'Excel operation failed.',
+            // Include fileUrl if available and operation was successful
+            ...(excelResult.success && excelResult.fileUrl && { excelFileUrl: excelResult.fileUrl })
+        };
+
+        // Send the single message back as the response body
+        // Note: The client needs to handle this non-streamed response
+        return new Response(JSON.stringify(responseMessage), {
+          headers: { 'Content-Type': 'application/json' },
+        });
 
       } catch (error: any) {
         console.error('[route.ts] Error during non-streaming Anthropic call:', error);
@@ -677,7 +640,12 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
             try { // Inner try for JSON parsing
               const potentialJson = aiResponseText.trim();
               if (potentialJson.startsWith('{') && potentialJson.endsWith('}')) {
+                console.log('[route.ts][onFinish] Attempting to parse AI response JSON content. Length:', potentialJson.length); // Log length
+                // console.log('[route.ts][onFinish] Raw JSON content:', potentialJson); // Optionally log raw content if needed for debugging, but be mindful of log size
                 parsedJson = JSON.parse(potentialJson);
+                console.log('[route.ts][onFinish] Successfully parsed AI JSON.');
+                console.log('[route.ts][onFinish] Parsed JSON from stream:', parsedJson);
+
                 // Check if it IS an excel operation (this shouldn't happen if isExcelRequest was false, but check anyway)
                 if (parsedJson.action && (parsedJson.action === 'editExcelFile' || parsedJson.action === 'createExcelFile') && parsedJson.args) {
                   console.warn("[route.ts][onFinish] Detected Excel JSON in non-Excel request stream!");
