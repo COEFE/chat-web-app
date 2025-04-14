@@ -1,9 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { MessageParam } from '@anthropic-ai/sdk/resources/messages';
-import { CoreMessage, streamText, StreamData, Message as VercelChatMessage } from 'ai';
-import { 
-    anthropic as vercelAnthropic 
-} from '@ai-sdk/anthropic';
+import { CoreMessage, streamText, StreamData, Message as VercelChatMessage, ToolCallPart, ToolResultPart } from 'ai';
+import { z } from 'zod'; // Import Zod
+import { anthropic as vercelAnthropic } from '@ai-sdk/anthropic';
 import { NextRequest, NextResponse } from 'next/server';
 import admin from 'firebase-admin'; 
 import { firestore } from 'firebase-admin'; 
@@ -11,7 +10,8 @@ import { FirebaseError } from 'firebase-admin/app';
 import { getAdminDb, initializeFirebaseAdmin } from '@/lib/firebaseAdminConfig'; 
 import { getStorage as getAdminStorage } from 'firebase-admin/storage'; 
 import { getAuth as getAdminAuth } from 'firebase-admin/auth'; 
-import { processExcelOperation } from '@/lib/excelUtils'; 
+import { processExcelOperation } from '@/lib/excelUtils';
+import { extractBaseFilename } from '@/lib/utils';
 import { File as GoogleCloudFile } from '@google-cloud/storage'; 
 import * as XLSX from 'xlsx'; 
 import { extractText } from 'unpdf'; 
@@ -324,10 +324,27 @@ export async function POST(req: NextRequest) {
   console.log("Total Prompt Approx Length:", finalPromptContent.length);
   console.log("---------------------------------------------------------------------");
 
+  // --- Zod Schema for Excel Tool --- 
+  const excelOperationSchema = z.object({
+    action: z.enum(['createExcelFile', 'editExcelFile']),
+    args: z.object({
+      operations: z.array(z.any()).describe('Array of operation objects (e.g., { type: "createSheet", name: "Sheet1" }, { type: "addRow", row: ["A", "B"] })'),
+      fileName: z.string().optional().describe('Optional desired filename for the new Excel file.'),
+      sheetName: z.string().optional().describe('Optional target sheet name (often handled by createSheet operation).')
+    })
+  });
+
+  // Type alias for convenience
+  type ExcelOperationArgs = z.infer<typeof excelOperationSchema>;
+
   // 5. Call AI (Anthropic Example)
   try {
-    // --- Build System Prompt (including Document Context if available) ---
-    let finalSystemPrompt = "You are a helpful assistant. If asked to modify an Excel file or create a spreadsheet, respond ONLY with the complete JSON in the following format:\n\n{\n  \"action\": \"createExcelFile\",\n  \"args\": {\n    \"operations\": [\n      {\n        \"type\": \"createSheet\",\n        \"name\": \"Sheet1\"\n      },\n      {\n        \"type\": \"addRow\",\n        \"row\": [\"Column A\", \"Column B\", \"Column C\"]\n      },\n      {\n        \"type\": \"formatCell\",\n        \"cell\": \"A1\",\n        \"format\": {\n          \"bold\": true,\n          \"fontSize\": 14\n        }\n      },\n      {\n        \"type\": \"setColumnWidth\",\n        \"column\": \"A\",\n        \"width\": 200\n      }\n    ]\n  }\n}\n\nYour JSON response must be complete and not truncated. Do not use 'excelOperation' as a key. Always use 'action' and 'args' as the top-level keys. Do not add any introductory text, explanations, or concluding remarks around the JSON. If asked a general question or a question about the document content, answer normally.";
+    // --- Build System Prompt (Instructing AI to use the tool) ---
+    let finalSystemPrompt = `You are a helpful assistant.
+If asked to modify an Excel file or create a spreadsheet, call the 'excelOperation' tool with the required arguments ('action', 'args.operations', optional 'args.fileName', optional 'args.sheetName').
+Do not output raw JSON. Use the tool.
+If asked a general question or a question about the document content, answer normally.`;
+
     if (fileContent) {
         // Append document context, truncating if necessary
         const truncatedContent = fileContent.substring(0, 20000); // Limit context size
@@ -366,128 +383,135 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
       system: finalSystemPrompt, // Use the potentially augmented system prompt
       messages: messagesForStreamText, // Pass the full conversation history
       maxTokens: 4096, // Use the constant for regular chat
+      // --- Define the Tool --- 
+      tools: {
+        excelOperation: {
+          description: 'Performs operations on Excel files (create or edit).',
+          parameters: excelOperationSchema,
+        },
+      },
       onFinish: async ({ text, toolCalls, toolResults, usage, finishReason, logprobs }) => {
-        console.log(`[route.ts][onFinish] Stream finished. Reason: ${finishReason}. Final text length: ${text.length}`);
+        console.log(`[route.ts][onFinish] Stream finished. Reason: ${finishReason}. Text length: ${text?.length ?? 0}. Tool calls: ${toolCalls?.length ?? 0}`);
 
-        // Wrap ALL onFinish logic in its own try/catch for better error isolation
         try {
-          const aiResponseText = text; // Final text from stream
-          let isExcelOperation = false; // Reset for this context
-          let parsedJson: any = null;
-          let finalAiMessageContent = aiResponseText; // Default to raw text
-          let excelResult: any = null; // Store potential Excel result
+          let finalAiMessageContent = text || ''; // Default to any text response
+          let excelResult: any = null;
+          let isExcelOperation = false;
 
-          // --- Try parsing potential JSON (Excel or otherwise) ---
-          try { // Inner try for JSON parsing
-            const potentialJson = aiResponseText.trim();
-            if (potentialJson.startsWith('{') && potentialJson.endsWith('}')) {
-              console.log('[route.ts][onFinish] Attempting to parse AI response JSON content. Length:', potentialJson.length); // Log length
-              // console.log('[route.ts][onFinish] Raw JSON content:', potentialJson); // Optionally log raw content if needed for debugging, but be mindful of log size
-              parsedJson = JSON.parse(potentialJson);
-              console.log('[route.ts][onFinish] Successfully parsed AI JSON.');
-              console.log('[route.ts][onFinish] Parsed JSON from stream:', parsedJson);
+          // Check if the Excel tool was called
+          const excelToolCall = toolCalls?.find(call => call.toolName === 'excelOperation');
 
-              // Check if it IS an excel operation (this shouldn't happen if isExcelRequest was false, but check anyway)
-              if (parsedJson.action && (parsedJson.action === 'editExcelFile' || parsedJson.action === 'createExcelFile') && parsedJson.args) {
-                console.warn("[route.ts][onFinish] Detected Excel JSON in non-Excel request stream!");
-                isExcelOperation = true; // Flag it, handle below
-              } else if (parsedJson.excelOperation) {
-                console.warn("[route.ts][onFinish] Detected legacy Excel JSON in non-Excel request stream!");
-                // Convert legacy format if needed (logic omitted for brevity, should be same as before)
-                isExcelOperation = true; // Flag it, handle below
-              }
-            }
-          } catch (processError) {
-            console.error("[route.ts][onFinish] Error processing potential JSON in stream:", processError);
-          }
-          // --- End JSON Parsing ---
+          if (excelToolCall) {
+            isExcelOperation = true;
+            console.log(`[route.ts][onFinish] Detected 'excelOperation' tool call.`);
 
-
-          // --- Handle Excel Operation (if unexpectedly detected) ---
-          if (isExcelOperation && parsedJson) {
-            console.log(`[route.ts][onFinish] Handling unexpected Excel Op in stream: ${parsedJson.action}`);
-            // Check authToken just in case, though it should be defined
-            if (!capturedAuthToken) { 
-              console.error("[route.ts][onFinish] Auth token missing unexpectedly during Excel op handling.");
+            // Check auth token
+            if (!capturedAuthToken) {
+              console.error("[route.ts][onFinish] Auth token missing for Excel tool call.");
               finalAiMessageContent = "Error: Authentication token was missing unexpectedly.";
+              excelResult = { success: false, message: finalAiMessageContent }; // Set error state
             } else {
-              // Call processExcelOperation directly with the parsed operations data, filename, and sheetname
-              const operationData = parsedJson.args.operations; // This IS the array of arrays
-              const operationType = parsedJson.action; // e.g., 'createExcelFile' or 'editExcelFile'
-              const documentIdToUse = capturedCurrentDocument?.id || null;
-              const fileName = parsedJson.args.fileName; // Optional filename from AI
-              const sheetName = parsedJson.args.sheetName; // Optional sheetname from AI
-
-              console.log(`[route.ts][onFinish] Calling processExcelOperation with: operation=${operationType}, docId=${documentIdToUse}, data length=${operationData.length}, fileName=${fileName}, sheetName=${sheetName}`);
-                
-              // Await the promise returned by processExcelOperation DIRECTLY
               try {
-                  const operationResult = await processExcelOperation(
-                      operationType,
-                      documentIdToUse,
-                      operationData, // Pass the actual array of arrays
-                      capturedUserId,
-                      fileName,      // Pass optional filename
-                      sheetName      // Pass optional sheetname
-                  );
-                  console.log('[route.ts][onFinish] processExcelOperation result:', operationResult);
-                  excelResult = operationResult; // Assign the result directly
+                // Extract validated arguments from the tool call
+                // SDK automatically parses args based on schema if valid
+                const { action, args } = excelToolCall.args as { action: 'createExcelFile' | 'editExcelFile', args: { operations: any[], fileName?: string, sheetName?: string } };
+                const { operations, fileName, sheetName } = args;
+                const documentIdToUse = capturedCurrentDocument?.id || null;
+
+                // Basic check for required args
+                if (!action || !operations) {
+                  throw new Error("Missing required arguments ('action', 'args.operations') in tool call.");
+                }
+
+                console.log(`[route.ts][onFinish] Calling processExcelOperation via tool: action=${action}, docId=${documentIdToUse}, ops=${operations.length}, file=${fileName}, sheet=${sheetName}`);
+
+                // Call processExcelOperation
+                excelResult = await processExcelOperation(
+                  action,
+                  documentIdToUse,
+                  operations,
+                  capturedUserId,
+                  fileName,
+                  sheetName
+                );
+
+                console.log('[route.ts][onFinish] processExcelOperation result:', excelResult);
+
+                // Set the final message based on the result
+                if (excelResult.success) {
+                  finalAiMessageContent = excelResult.message || (action === 'editExcelFile' ? 'Excel file updated.' : 'Excel file created.');
+                  // Optionally include file URL if available and successful
+                  if (excelResult.fileUrl) {
+                    // Append a markdown link or similar - adjust formatting as needed
+                    // Attempting to get filename from result, fallback to generic
+                    const displayFileName = excelResult.name || (fileName ? extractBaseFilename(fileName).baseName + '.xlsx' : 'Excel File');
+                    finalAiMessageContent += `\n\n[Download ${displayFileName}](${excelResult.fileUrl})`;
+                  }
+                } else {
+                  finalAiMessageContent = excelResult.message || 'An error occurred during the Excel operation.';
+                }
+
               } catch (opError: any) {
-                  console.error("[route.ts][onFinish] Error calling processExcelOperation:", opError);
-                  console.error("[route.ts][onFinish] Full error object from processExcelOperation:", JSON.stringify(opError, Object.getOwnPropertyNames(opError)));
-                  const isTimeout = opError.message && opError.message.includes('timeout'); // Check if it's a timeout error
-                  excelResult = { 
-                    success: false, 
-                    message: isTimeout 
-                      ? `The Excel operation timed out. Please try again with a simpler request or fewer operations.` 
-                      : `Error performing Excel operation: ${opError.message || 'Unknown error'}` 
-                  };
+                console.error("[route.ts][onFinish] Error during processExcelOperation call (tool):", opError);
+                const isTimeout = opError.message && opError.message.includes('timeout');
+                finalAiMessageContent = isTimeout
+                  ? `The Excel operation timed out. Please try again with a simpler request.`
+                  : `Error performing Excel operation: ${opError.message || 'Unknown error'}`;
+                excelResult = { success: false, message: finalAiMessageContent }; // Ensure excelResult reflects the error
               }
             }
+          } else if (text) {
+            // Handle regular text responses if no tool was called
+            console.log('[route.ts][onFinish] No Excel tool call detected, using text response.');
+            finalAiMessageContent = text;
+          } else {
+            // Handle cases where there's neither text nor a relevant tool call
+            console.warn('[route.ts][onFinish] Stream finished with no text and no relevant tool call.');
+            finalAiMessageContent = ''; // Or some default message like "Processing complete."
           }
-          // --- End Unexpected Excel Handling ---
-
 
           // --- Save Chat History ---
-          try { 
-            if (capturedDocumentId && capturedUserId) {
-              const messagesCollectionRef = db.collection('users').doc(capturedUserId).collection('documents').doc(capturedDocumentId).collection('messages');
-              // Get the last user message that was actually sent in this request
-              const lastUserMsgForSave = capturedMessages.filter(m => m.role === 'user').pop();
+          // Important: Only save if there's meaningful content or an operation occurred
+          if ((finalAiMessageContent && finalAiMessageContent.trim()) || isExcelOperation) {
+            try {
+              if (capturedDocumentId && capturedUserId) {
+                const messagesCollectionRef = db.collection('users').doc(capturedUserId).collection('documents').doc(capturedDocumentId).collection('messages');
+                const lastUserMsgForSave = capturedMessages.filter(m => m.role === 'user').pop();
 
-              // Ensure lastUserMsgForSave exists before accessing its properties
-              if (lastUserMsgForSave) { 
+                if (lastUserMsgForSave) {
+                  await messagesCollectionRef.add({
+                    role: lastUserMsgForSave.role,
+                    content: lastUserMsgForSave.content,
+                    createdAt: firestore.FieldValue.serverTimestamp(),
+                  });
+                  console.log(`[route.ts][onFinish] User message saved (tool/text) for document ${capturedDocumentId}`);
+                }
+
+                // Save assistant message (could be text response or Excel result message)
                 await messagesCollectionRef.add({
-                  role: lastUserMsgForSave.role, // Safe access
-                  content: lastUserMsgForSave.content, // Safe access
+                  role: 'assistant',
+                  content: finalAiMessageContent, // This now holds the correct message
                   createdAt: firestore.FieldValue.serverTimestamp(),
+                  // Add excelFileUrl only if the operation was successful and resulted in a file
+                  ...(isExcelOperation && excelResult?.success && excelResult?.fileUrl ? { excelFileUrl: excelResult.fileUrl } : {}),
                 });
-                console.log(`[route.ts][onFinish] User message saved (streaming) for document ${capturedDocumentId}`);
+                console.log(`[route.ts][onFinish] Assistant message saved (tool/text) for document ${capturedDocumentId}`);
+              } else {
+                console.log("[route.ts][onFinish] Skipping chat history save (tool/text) - no documentId or userId.");
               }
-              
-              // Save assistant message
-              await messagesCollectionRef.add({
-                role: 'assistant',
-                content: finalAiMessageContent, // Use the final content after potential Excel handling
-                createdAt: firestore.FieldValue.serverTimestamp(),
-                ...(isExcelOperation && excelResult && excelResult.success && excelResult.fileUrl ? { excelFileUrl: excelResult.fileUrl } : {}), // Add URL if applicable
-              });
-              console.log(`[route.ts][onFinish] Assistant message saved (streaming) for document ${capturedDocumentId}`);
-            } else {
-              console.log("[route.ts][onFinish] Skipping chat history save (streaming) - no documentId or userId.");
+            } catch (saveError: any) {
+              console.error(`[route.ts][onFinish] Error saving chat messages (tool/text) for document ${capturedDocumentId}:`, saveError);
             }
-          } catch (saveError: any) {
-            console.error(`[route.ts][onFinish] Error saving chat messages (streaming) for document ${capturedDocumentId}:`, saveError);
+          } else {
+            console.log("[route.ts][onFinish] Skipping chat history save - no content and no operation.");
           }
 
-        } catch (onFinishError: any) { // Catch errors specifically within the onFinish logic
+        } catch (onFinishError: any) {
           console.error('[route.ts][onFinish] Error during onFinish processing:', onFinishError);
-          // Potentially append an error message to the stream or log it
-          // Note: It's tricky to modify the response *after* the stream has finished
-          // Best practice is robust logging here.
-        } 
+        }
       }, // End onFinish
     }); // End streamText call
+
     // Return the stream response
     return result.toDataStreamResponse();
   } // End of try block
