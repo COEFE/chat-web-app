@@ -513,34 +513,31 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
             messages: finalAiMessagesForApi,
           }),
           timeoutPromise
-        ]) as any; // Cast to any since we know the response structure
+        ]) as { choices?: { message: { content: string } }[], id?: string }; // Correct type assertion for the non-streaming Anthropic response structure
 
-        console.log("[route.ts] Non-streaming Anthropic response received:", response);
+        console.log("[route.ts] Non-streaming Anthropic response received:", JSON.stringify(response)); // Log the received structure
 
         let excelResult: { success: boolean; message?: string; fileUrl?: string } = { 
           success: false, 
           message: "Initialization error before processing AI response."
         };
-
-        if (response.content && response.content.length > 0 && response.content[0].type === 'text') {
-          const aiResponseText = response.content[0].text;
-          console.log("[route.ts] Extracted text from non-streaming response:", aiResponseText);
-
-          // Attempt to parse the response as JSON
-          let parsedJson;
+        
+        // Adjust the condition to check the correct path for message content
+        if (response.choices && response.choices.length > 0 && response.choices[0].message && response.choices[0].message.content) {
+          const jsonContent = response.choices[0].message.content;
+          console.log('[route.ts] Attempting to parse AI response JSON content. Length:', jsonContent.length); // Log length
+          // console.log('[route.ts] Raw JSON content:', jsonContent); // Optionally log raw content if needed for debugging, but be mindful of log size
           try {
-            console.log('[route.ts] Attempting to parse AI response JSON content. Length:', aiResponseText.length); // Log length
-            // console.log('[route.ts] Raw JSON content:', aiResponseText); // Optionally log raw content if needed for debugging, but be mindful of log size
-            parsedJson = JSON.parse(aiResponseText);
+            const aiJson = JSON.parse(jsonContent);
             console.log('[route.ts] Successfully parsed AI JSON.');
-            console.log('[route.ts] Parsed JSON from non-streaming response:', parsedJson);
+            console.log('[route.ts] Parsed JSON from non-streaming response:', aiJson);
 
             // Check for the presence of excelOperation and necessary fields
-            if (parsedJson && parsedJson.action && parsedJson.args && Array.isArray(parsedJson.args.operations)) {
+            if (aiJson && aiJson.action && aiJson.args && Array.isArray(aiJson.args.operations)) {
               console.log('[route.ts] AI JSON structure is valid for Excel operation. Preparing to call handleExcelOperation.');
               // Pass necessary data to the background task
-              const operationData = parsedJson.args.operations; // Use operations
-              const operationType = parsedJson.action;
+              const operationData = aiJson.args.operations; // Use operations
+              const operationType = aiJson.action;
               const documentIdToUse = currentDocument?.id || null; // Pass existing doc ID if available
 
               console.log(`[route.ts] Calling handleExcelOperation with: operation=${operationType}, docId=${documentIdToUse}, data length=${Array.isArray(operationData) ? operationData.length : 'N/A'}`);
@@ -548,7 +545,7 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
               // Await the promise returned by handleExcelOperation
               try {
                   // Use the existing handleExcelOperation which now contains detailed logging
-                  const operationResult = await handleExcelOperation(operationType, documentIdToUse, operationData, userId);
+                  const operationResult = await handleExcelOperation(operationType, documentIdToUse, JSON.stringify(aiJson), userId);
                   console.log('[route.ts] handleExcelOperation result:', operationResult);
                   excelResult = operationResult as { success: boolean; message?: string; fileUrl?: string; documentId?: string; storagePath?: string; executionTime?: number };
               } catch (opError: any) {
@@ -563,18 +560,18 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
                   };
               }
             } else {
-               console.error("[route.ts] AI response JSON did not match expected structure for Excel operation. Parsed JSON:", parsedJson);
+               console.error("[route.ts] AI response JSON did not match expected structure for Excel operation. Parsed JSON:", aiJson);
                excelResult = { success: false, message: "AI response was not a valid Excel action JSON." };
             }
           } catch (parseError: any) {
             console.error("[route.ts] Error parsing JSON from AI response:", parseError);
             console.error("[route.ts] Full JSON parse error object:", JSON.stringify(parseError, Object.getOwnPropertyNames(parseError)));
-            console.error("[route.ts] Raw content that failed parsing:", aiResponseText); // Log the raw content on error
+            console.error("[route.ts] Raw content that failed parsing:", jsonContent); // Log the raw content on error
             excelResult = { success: false, message: `Error parsing AI response: ${parseError.message}` };
           }
         } else {
-           console.error("[route.ts] Could not find message content in non-streaming AI response.");
-           excelResult = { success: false, message: "Could not find message content in AI response." };
+           console.error("[route.ts] Could not find message content in non-streaming AI response structure.", JSON.stringify(response)); // Log the structure that failed
+           excelResult = { success: false, message: "Could not find message content in AI response." }; // Assign to excelResult
         }
 
         // Construct a VercelChatMessage-like response to send back to the client
