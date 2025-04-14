@@ -238,6 +238,7 @@ async function handleExcelOperation(
       resolve(result); // Resolve the promise with the plain object result from processExcelOperation
     } catch (error: any) {
         console.error('[handleExcelOperation] Error calling processExcelOperation:', error); // <<< ADDED LOGGING
+        console.error('[handleExcelOperation] Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error))); // <<< ADDED LOGGING
         clearTimeout(timeoutId!); // Clear timeout on error as well
         if (error.message === 'Excel operation timed out.') {
             // Resolve with failure instead of rejecting, as the outer promise expects resolution
@@ -583,12 +584,13 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
                         console.log("[route.ts] Excel operation result assigned to excelResult");
                     } catch (opError: any) {
                         console.error("[route.ts] Error calling or parsing processExcelOperation:", opError);
+                        console.error("[route.ts] Full error object:", JSON.stringify(opError, Object.getOwnPropertyNames(opError)));
                         const isTimeout = opError.message && opError.message.includes('timeout');
                         excelResult = { 
                           success: false, 
                           message: isTimeout 
                             ? `The Excel operation timed out. Please try again with a simpler request or fewer operations.` 
-                            : `Error performing Excel operation: ${opError.message}` 
+                            : `Error performing Excel operation: ${opError.message || 'Unknown error'}` 
                         };
                     }
                 }

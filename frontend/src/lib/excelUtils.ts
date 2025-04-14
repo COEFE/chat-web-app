@@ -42,6 +42,7 @@ try {
 export async function createExcelFile(db: admin.firestore.Firestore, storage: admin.storage.Storage, bucket: Bucket, userId: string, documentId: string, data: any[]) {
     const startTime = Date.now();
     console.log(`[createExcelFile] Starting create/update for user: ${userId}, initial documentId: ${documentId} at ${new Date().toISOString()}`);
+    console.log('[createExcelFile] Vercel Env Check:', process.env.VERCEL ? 'Running on Vercel' : 'Not on Vercel');
     
     if (!db || !storage || !bucket) {
         console.log("Firebase services not available, using dummy implementation");
@@ -54,6 +55,7 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
     }
     
     try {
+        console.log('[createExcelFile] Entered try block.');
         // Use the document ID passed from processExcelOperation directly
         // It's already been normalized or generated there.
         const finalDocumentId = documentId;
@@ -69,8 +71,10 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
         
         // Check if document already exists with this ID
         // Use the same collection path as in editExcelFile
+        console.log(`[createExcelFile] Preparing to access Firestore: users/${userId}/documents/${finalDocumentId}`);
         const docRef = db.collection('users').doc(userId).collection('documents').doc(finalDocumentId);
         const existingDoc = await docRef.get();
+        console.log(`[createExcelFile] Firestore docRef.get() completed. Exists: ${existingDoc.exists}`);
         
         // Flag to track if we're updating an existing document
         const isUpdate = existingDoc.exists;
@@ -88,6 +92,7 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
             console.log(`[createExcelFile] No document exists with ID: ${finalDocumentId}. Will create new.`);
         }
 
+        console.log('[createExcelFile] Preparing to create workbook in memory.');
         // Create a new workbook
         const workbook = XLSX.utils.book_new();
         
@@ -104,13 +109,15 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
         
         // Convert workbook to buffer
         const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        console.log(`[createExcelFile] Workbook buffer created, size: ${excelBuffer.length} bytes.`);
         
         // Upload to Firebase Storage using the canonical path - with performance tracking
-        console.log(`[createExcelFile] Starting file upload to Firebase Storage at ${new Date().toISOString()}, file size: ${excelBuffer.length} bytes`);
+        console.log(`[createExcelFile] Preparing to upload to Firebase Storage: ${canonicalStoragePath}`);
         const uploadStartTime = Date.now();
         const file = bucket.file(canonicalStoragePath);
         
         // Upload the file
+        console.log('[createExcelFile] Calling file.save()');
         await file.save(excelBuffer, {
             metadata: {
                 contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -121,7 +128,7 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
         console.log(`[createExcelFile] Successfully uploaded Excel file to: ${canonicalStoragePath} in ${uploadDuration}ms`);
         
         // Get a signed URL for the file - with performance tracking
-        console.log(`[createExcelFile] Getting signed URL at ${new Date().toISOString()}`);
+        console.log(`[createExcelFile] Preparing to get signed URL.`);
         const urlStartTime = Date.now();
         const [downloadURL] = await file.getSignedUrl({
             action: 'read',
@@ -131,6 +138,7 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
         console.log(`[createExcelFile] Got signed URL in ${urlDuration}ms`);
         
         // Create document data object
+        console.log('[createExcelFile] Preparing Firestore document data.');
         const docData: any = {
             userId: userId,
             name: canonicalFilename,
@@ -153,6 +161,7 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
             docData.createdAt = admin.firestore.FieldValue.serverTimestamp();
         }
         
+        console.log(`[createExcelFile] Preparing to call Firestore docRef.set() with merge:true`);
         // CRITICAL: Use set with merge:true to ensure we're updating the existing document
         // rather than creating a new one if it exists
         await docRef.set(docData, { merge: true });
@@ -495,69 +504,63 @@ export async function processExcelOperation(
   sheetName?: string
 ): Promise<{ success: boolean; message?: string; documentId?: string; storagePath?: string; fileUrl?: string; executionTime?: number }> {
   const startTime = Date.now();
-  console.log('[processExcelOperation] Starting execution at:', new Date().toISOString());
-  console.log('[processExcelOperation] Received:', { operation, documentId, dataLength: data?.length, userId, fileName, sheetName });
- 
+  console.log(`[processExcelOperation] Received request: operation=${operation}, docId=${documentId}, userId=${userId}, fileName=${fileName}, sheetName=${sheetName}`);
+  console.log('[processExcelOperation] Vercel Env Check:', process.env.VERCEL ? 'Running on Vercel' : 'Not on Vercel');
+
   // Ensure Firebase services are available
   if (!db || !storage || !bucket) {
     console.error('[processExcelOperation] Firebase services not initialized.');
     return { success: false, message: 'Server error: Firebase services not available.', documentId: undefined };
   }
  
-  let result: { success: boolean; message?: string; documentId?: string; storagePath?: string; fileUrl?: string; executionTime?: number };
-  let finalDocumentId = documentId; // Use a mutable variable for the ID
- 
+  let finalDocumentId: string;
+  let isExistingDocument = false;
+
+  console.log('[processExcelOperation] Entering document ID handling logic.');
+
+  // --- Document ID Handling Logic ---
+  if (documentId) {
+    console.log(`[processExcelOperation] Document ID provided: ${documentId}`);
+    finalDocumentId = documentId;
+    isExistingDocument = true;
+  } else {
+    console.log('[processExcelOperation] No document ID provided, generating a new one.');
+    finalDocumentId = `doc-${uuidv4()}`;
+    isExistingDocument = false;
+  }
+
+  console.log(`[processExcelOperation] Final Document ID determined: ${finalDocumentId}, Is existing: ${isExistingDocument}`);
+
+  // --- Call Appropriate Function ---
   try {
-    if (operation === 'createExcelFile' || (!documentId)) {
-      console.log('[processExcelOperation] Routing to createExcelFile');
-      // Generate a stable UUID for the new document if none provided
-      finalDocumentId = documentId || `doc-${uuidv4()}`;
-      console.log(`[processExcelOperation] Generated/Using documentId for create: ${finalDocumentId}`);
-       
-      // --- Prepare data for createExcelFile --- 
-      // The `data` argument from the AI should already be structured correctly
-      // e.g., [{ sheetName: '...', rows: [...] }] or similar
-      // If structure is different, adapt here.
-      const sheetDataForCreate = data; // Assume data is already in the correct format
-       
-      // Call createExcelFile with the generated/provided ID and prepared data
-      result = await createExcelFile(db, storage, bucket, userId, finalDocumentId, sheetDataForCreate); 
-     
-    } else if (operation === 'editExcelFile' && documentId) {
-      console.log(`[processExcelOperation] Routing to editExcelFile for docId: ${documentId}`);
-      finalDocumentId = documentId; // Use the provided document ID for editing
-       
-      // --- Prepare data for editExcelFile --- 
-      // The `data` argument should be structured for editing, e.g., 
-      // [{ sheetName: '...', cellUpdates: [...], formatCells: [...] }] 
-      // Ensure the structure matches what editExcelFile expects.
-      const sheetDataForEdit = data; // Assume data is already in the correct format
- 
-      result = await editExcelFile(db, storage, bucket, userId, finalDocumentId, sheetDataForEdit); 
-     
+    console.log(`[processExcelOperation] Calling ${operation === 'createExcelFile' ? 'createExcelFile' : 'editExcelFile'} with docId: ${finalDocumentId}`);
+    let result;
+    if (operation === 'createExcelFile') {
+      // Always use createExcelFile, as it handles both creation and updates
+      result = await createExcelFile(db, storage, bucket, userId, finalDocumentId, data);
+    } else if (operation === 'editExcelFile') {
+      // Ensure we have a valid document ID for editing
+      if (!finalDocumentId) {
+        throw new Error("Cannot edit file without a valid document ID.");
+      }
+      // Note: editExcelFile might need similar internal logging as createExcelFile
+      result = await editExcelFile(db, storage, bucket, userId, finalDocumentId, data);
     } else {
-      console.error('[processExcelOperation] Invalid operation or missing document ID for edit.', { operation, documentId });
-      return { success: false, message: 'Invalid operation type or missing document ID for edit.' };
+      throw new Error(`Unsupported Excel operation: ${operation}`);
     }
- 
-    console.log('[processExcelOperation] Result from create/edit function:', result);
     
-    // Log execution time
-    const endTime = Date.now();
-    const executionTime = endTime - startTime;
-    console.log(`[processExcelOperation] Execution completed in ${executionTime}ms`);
-    
-    // Return the result object directly
+    console.log(`[processExcelOperation] ${operation} completed. Success: ${result.success}, Message: ${result.message}`);
     return result;
- 
+
   } catch (error: any) {
-    console.error('[processExcelOperation] Unhandled error:', error);
-    
-    // Log execution time even in error case
-    const endTime = Date.now();
-    const executionTime = endTime - startTime;
-    console.log(`[processExcelOperation] Failed execution completed in ${executionTime}ms`);
-    
-    return { success: false, message: `Server error during Excel operation: ${error.message}` };
+    const errorTime = Date.now() - startTime;
+    console.error(`[processExcelOperation] Error during ${operation} for docId ${finalDocumentId} after ${errorTime}ms:`, error);
+    console.error("[processExcelOperation] Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    return { 
+      success: false, 
+      message: `Error processing Excel operation: ${error.message || 'Unknown internal error'}`, 
+      documentId: finalDocumentId, 
+      executionTime: errorTime 
+    };
   }
 }
