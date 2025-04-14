@@ -180,11 +180,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
             >
               <div
                 className={cn(
-                  'rounded-lg px-4 py-2 max-w-[80%] break-words text-wrap text-pretty overflow-hidden',
+                  'rounded-lg px-4 py-2 max-w-[80%] overflow-hidden',
                   message.role === 'user'
                     ? 'bg-white text-black'
                     : 'bg-muted'
                 )}
+                style={{ wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'pre-wrap' }}
               >
                 {message.content.split('\n').map((line, index) => (
                   <React.Fragment key={index}>
