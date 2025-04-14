@@ -21,6 +21,12 @@ const nextConfig = {
     // This will be available on the server side
     PROJECT_ROOT: __dirname,
   },
+
+  // This is the key configuration for Vercel function timeouts
+  // It will be picked up by Vercel during deployment
+  env: {
+    VERCEL_FUNCTIONS_TIMEOUT: '60',
+  },
 }
 
 module.exports = nextConfig
