@@ -36,7 +36,12 @@ try {
 }
 
 // Helper function to extract base filename without timestamp
-function extractBaseFilename(filename: string | undefined | null): { baseName: string; isTimestamped: boolean } {
+/**
+ * Extracts the base filename without timestamp from a given filename.
+ * @param filename - The filename to extract the base from.
+ * @returns Object with base name and whether it was timestamped.
+ */
+export function extractBaseFilename(filename: string | undefined | null): { baseName: string; isTimestamped: boolean } {
     if (!filename) {
         return { baseName: 'Untitled', isTimestamped: false };
     }
