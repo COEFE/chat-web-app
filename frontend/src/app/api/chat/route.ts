@@ -513,7 +513,7 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
             messages: finalAiMessagesForApi,
           }),
           timeoutPromise
-        ]) as { choices?: { message: { content: string } }[], id?: string }; // Correct type assertion for the non-streaming Anthropic response structure
+        ]) as { id: string; type: string; role: string; content: { type: string; text: string }[]; stop_reason: string; stop_sequence: string | null; usage: { input_tokens: number; output_tokens: number } }; // Correct type assertion for the actual response structure
 
         console.log("[route.ts] Non-streaming Anthropic response received:", JSON.stringify(response)); // Log the received structure
 
@@ -523,8 +523,9 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
         };
         
         // Adjust the condition to check the correct path for message content
-        if (response.choices && response.choices.length > 0 && response.choices[0].message && response.choices[0].message.content) {
-          const jsonContent = response.choices[0].message.content;
+        // Check if content array exists, has at least one element, and that element has a text property
+        if (response.content && response.content.length > 0 && response.content[0].text) {
+          const jsonContent = response.content[0].text; // Correct path to text content
           console.log('[route.ts] Attempting to parse AI response JSON content. Length:', jsonContent.length); // Log length
           // console.log('[route.ts] Raw JSON content:', jsonContent); // Optionally log raw content if needed for debugging, but be mindful of log size
           try {
