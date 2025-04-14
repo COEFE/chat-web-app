@@ -1,6 +1,6 @@
 'use client';
 
-import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff, Folder, FolderPlus, Move, Pencil } from 'lucide-react';
+import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff, Folder, FolderPlus, Move, Pencil, FileSearch } from 'lucide-react';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Skeleton from 'react-loading-skeleton'; 
 import 'react-loading-skeleton/dist/skeleton.css'; 
@@ -28,6 +28,7 @@ import {
 import DocumentViewer from '@/components/dashboard/DocumentViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
 import { FileUpload } from '@/components/dashboard/FileUpload';
+import QuickPreview from '@/components/dashboard/QuickPreview';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Breadcrumbs, { BreadcrumbItem } from '@/components/dashboard/Breadcrumbs'; // Import Breadcrumbs
 import {
@@ -77,6 +78,7 @@ function DocumentTable({
   const [isDeleting, setIsDeleting] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [itemToDelete, setItemToDelete] = useState<FilesystemItem | null>(null); // State for confirmation dialog
+  const [previewDocument, setPreviewDocument] = useState<MyDocumentData | null>(null); // State for quick preview
   const { toast } = useToast();
 
   const formatDate = (timestamp: any): string => {
@@ -238,6 +240,14 @@ function DocumentTable({
                             <Eye className="mr-2 h-4 w-4" />
                             View
                           </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => {
+                            e.preventDefault();
+                            setOpenDropdown(null);
+                            setPreviewDocument(doc as MyDocumentData);
+                          }}>
+                            <FileSearch className="mr-2 h-4 w-4" />
+                            Quick Preview
+                          </DropdownMenuItem>
                           <DropdownMenuItem 
                             onSelect={(event) => {
                               event.preventDefault(); // Prevent default selection behavior if any
@@ -284,41 +294,25 @@ function DocumentTable({
                 </div>
               </TableCell>
             </TableRow>
-          )}
-        </TableBody>
-      </Table>
 
-      {/* Decoupled Delete Confirmation Dialog */}
-      <AlertDialog open={itemToDelete !== null} onOpenChange={(isOpen) => !isOpen && setItemToDelete(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the {itemToDelete?.type === 'folder' ? 'folder' : 'document'}
-              {' '}
-              <span className="font-medium">'{itemToDelete?.name}'</span>.
-              {itemToDelete?.type === 'folder' && ' All contents within this folder will also be deleted.'} {/* Add warning for folder deletion */}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setItemToDelete(null)} disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => {
-              if (!itemToDelete) return;
-
-              setDeletingId(itemToDelete.id);
-              setIsDeleting(true);
-
-              if (itemToDelete.type === 'document') {
-                // Simply call the onDeleteDocument function and let it handle the UI updates
-                onDeleteDocument(itemToDelete.id)
-                  .catch((error: unknown) => {
-                    console.error(`Error deleting document ${itemToDelete.id}:`, error);
-                    const message = error instanceof Error ? error.message : 'An unknown error occurred.';
-                    toast({ variant: "destructive", title: "Error", description: `Failed to delete document '${itemToDelete.name}'. ${message}` });
-                  })
-                  .finally(() => {
-                    setIsDeleting(false);
-                    setItemToDelete(null); // This closes the dialog
+// Add a preview button to the document dropdown menu
+<DropdownMenuContent align="end">
+  <DropdownMenuItem onClick={() => onSelectItem(doc)}>
+    <Eye className="mr-2 h-4 w-4" />
+    View
+  </DropdownMenuItem>
+  <DropdownMenuItem onClick={(e) => {
+    e.preventDefault();
+    setOpenDropdown(null);
+    setPreviewDocument(doc as MyDocumentData);
+  }}>
+    <FileSearch className="mr-2 h-4 w-4" />
+    Quick Preview
+  </DropdownMenuItem>
+  <DropdownMenuItem 
+    onSelect={(event) => {
+      event.preventDefault(); // Prevent default selection behavior if any
+      setOpenDropdown(null); // Close dropdown first
                   });
               } else if (itemToDelete.type === 'folder') {
                 const deleteFolderFunction = httpsCallable(functionsInstance, 'deleteFolder');
@@ -351,6 +345,13 @@ function DocumentTable({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      
+      {/* Quick Preview Dialog */}
+      <QuickPreview 
+        document={previewDocument} 
+        isOpen={!!previewDocument} 
+        onClose={() => setPreviewDocument(null)} 
+      />
     </div>
   );
 }
