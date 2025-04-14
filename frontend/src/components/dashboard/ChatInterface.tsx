@@ -182,7 +182,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
                 className={cn(
                   'rounded-lg px-4 py-2',
                   message.role === 'user'
-                    ? 'bg-primary text-primary-foreground'
+                    ? 'bg-white text-black' // Temporary high-contrast style
                     : 'bg-muted'
                 )}
               >
