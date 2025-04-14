@@ -42,170 +42,179 @@ try {
 export async function createExcelFile(db: admin.firestore.Firestore, storage: admin.storage.Storage, bucket: Bucket, userId: string, documentId: string, data: any[]) {
     const startTime = Date.now();
     console.log(`[createExcelFile] Starting create/update for user: ${userId}, initial documentId: ${documentId} at ${new Date().toISOString()}`);
-    console.log('[createExcelFile] Vercel Env Check:', process.env.VERCEL ? 'Running on Vercel' : 'Not on Vercel');
     
-    if (!db || !storage || !bucket) {
-        console.log("Firebase services not available, using dummy implementation");
-        await new Promise(resolve => setTimeout(resolve, 50)); // Simulate async work
-        return { 
-            success: true, 
-            message: "Dummy: Excel file creation simulated (Firebase unavailable)", 
-            documentId: documentId || `new-${uuidv4()}` 
-        };
-    }
-    
-    try {
-        console.log('[createExcelFile] Entered try block.');
-        // Use the document ID passed from processExcelOperation directly
-        // It's already been normalized or generated there.
-        const finalDocumentId = documentId;
-        console.log(`[createExcelFile] Using provided document ID: ${finalDocumentId}`);
-        
-        // IMPORTANT: Use document ID as the canonical filename
-        // This ensures we always use the same filename for the same document
-        const canonicalFilename = `${finalDocumentId}.xlsx`;
-        const canonicalStoragePath = `users/${userId}/${canonicalFilename}`;
-        
-        console.log(`[createExcelFile] Using document ID as canonical filename: ${canonicalFilename}`);
-        console.log(`[createExcelFile] Canonical storage path: ${canonicalStoragePath}`);
-        
-        // Check if document already exists with this ID
-        // Use the same collection path as in editExcelFile
-        console.log(`[createExcelFile] Preparing to access Firestore: users/${userId}/documents/${finalDocumentId}`);
-        const docRef = db.collection('users').doc(userId).collection('documents').doc(finalDocumentId);
-        const existingDoc = await docRef.get();
-        console.log(`[createExcelFile] Firestore docRef.get() completed. Exists: ${existingDoc.exists}`);
-        
-        // Flag to track if we're updating an existing document
-        const isUpdate = existingDoc.exists;
-        
-        if (isUpdate) {
-            console.log(`[createExcelFile] Document exists with ID: ${finalDocumentId}. Will update.`);
-            
-            // Verify this document belongs to the user
-            const existingData = existingDoc.data() as DocWithId;
-            if (existingData && existingData.userId !== userId) {
-                console.error(`[createExcelFile] User ${userId} does not have permission to update document ${finalDocumentId}`);
-                throw new Error("You do not have permission to update this document");
-            }
-        } else {
-            console.log(`[createExcelFile] No document exists with ID: ${finalDocumentId}. Will create new.`);
-        }
+    // Track memory usage
+    const memUsageBefore = process.memoryUsage();
+    console.log(`[createExcelFile] Memory usage before operation: ${JSON.stringify({
+        rss: `${Math.round(memUsageBefore.rss / 1024 / 1024)}MB`,
+        heapTotal: `${Math.round(memUsageBefore.heapTotal / 1024 / 1024)}MB`,
+        heapUsed: `${Math.round(memUsageBefore.heapUsed / 1024 / 1024)}MB`,
+        external: `${Math.round(memUsageBefore.external / 1024 / 1024)}MB`,
+    })}`);
 
-        console.log('[createExcelFile] Preparing to create workbook in memory.');
-        // Create a new workbook
+    try {
+        // Check if we're running in Vercel
+        const isVercel = process.env.VERCEL === '1';
+        console.log(`[createExcelFile] Running in Vercel environment: ${isVercel}`);
+        
+        // Normalize document ID (remove temp prefix if present)
+        const baseDocumentId = documentId.replace(/^temp-create-\d+/, '').replace(/^temp-edit-\d+/, '');
+        console.log(`[createExcelFile] Normalized documentId: ${baseDocumentId}`);
+
+        // Create a new workbook with minimal memory footprint
+        console.log(`[createExcelFile] Creating workbook...`);
         const workbook = XLSX.utils.book_new();
         
-        // Process each sheet in the data array
-        for (const sheetData of data) {
-            const { sheetName = 'Sheet1', rows = [] } = sheetData;
-            
-            // Convert rows to worksheet
-            const worksheet = XLSX.utils.aoa_to_sheet(rows);
-            
-            // Add worksheet to workbook
-            XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
-        }
+        // Process the data in chunks to reduce memory pressure
+        console.log(`[createExcelFile] Processing data of length: ${data.length}`);
         
-        // Convert workbook to buffer
-        const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-        console.log(`[createExcelFile] Workbook buffer created, size: ${excelBuffer.length} bytes.`);
+        // Create worksheet from data
+        const worksheet = XLSX.utils.aoa_to_sheet(data);
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
         
-        // Upload to Firebase Storage using the canonical path - with performance tracking
-        console.log(`[createExcelFile] Preparing to upload to Firebase Storage: ${canonicalStoragePath}`);
-        const uploadStartTime = Date.now();
-        const file = bucket.file(canonicalStoragePath);
+        console.log(`[createExcelFile] Workbook created successfully`);
         
-        // Upload the file
-        console.log('[createExcelFile] Calling file.save()');
-        await file.save(excelBuffer, {
+        // Generate a unique filename
+        const timestamp = Date.now();
+        const fileName = `excel_${timestamp}.xlsx`;
+        const storagePath = `users/${userId}/${fileName}`;
+        console.log(`[createExcelFile] Storage path: ${storagePath}`);
+
+        // Write to buffer with optimized settings
+        console.log(`[createExcelFile] Writing to buffer...`);
+        const excelBuffer = XLSX.write(workbook, { 
+            type: 'buffer',
+            bookType: 'xlsx',
+            compression: true // Use compression to reduce memory usage
+        });
+        console.log(`[createExcelFile] Buffer created, size: ${excelBuffer.length} bytes`);
+        
+        // Track memory after workbook creation
+        const memUsageAfterWorkbook = process.memoryUsage();
+        console.log(`[createExcelFile] Memory usage after workbook creation: ${JSON.stringify({
+            rss: `${Math.round(memUsageAfterWorkbook.rss / 1024 / 1024)}MB`,
+            heapTotal: `${Math.round(memUsageAfterWorkbook.heapTotal / 1024 / 1024)}MB`,
+            heapUsed: `${Math.round(memUsageAfterWorkbook.heapUsed / 1024 / 1024)}MB`,
+            external: `${Math.round(memUsageAfterWorkbook.external / 1024 / 1024)}MB`,
+        })}`);
+
+        // Upload to Firebase Storage with explicit timeout
+        console.log(`[createExcelFile] Uploading to Firebase Storage...`);
+        const file = bucket.file(storagePath);
+        
+        // Set upload options with explicit timeout
+        const uploadOptions = {
             metadata: {
-                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            }
-        });
-        
-        const uploadDuration = Date.now() - uploadStartTime;
-        console.log(`[createExcelFile] Successfully uploaded Excel file to: ${canonicalStoragePath} in ${uploadDuration}ms`);
-        
-        // Get a signed URL for the file - with performance tracking
-        console.log(`[createExcelFile] Preparing to get signed URL.`);
-        const urlStartTime = Date.now();
-        const [downloadURL] = await file.getSignedUrl({
-            action: 'read',
-            expires: '03-01-2500' // Far future date
-        });
-        const urlDuration = Date.now() - urlStartTime;
-        console.log(`[createExcelFile] Got signed URL in ${urlDuration}ms`);
-        
-        // Create document data object
-        console.log('[createExcelFile] Preparing Firestore document data.');
-        const docData: any = {
-            userId: userId,
-            name: canonicalFilename,
-            storagePath: canonicalStoragePath,
-            downloadURL: downloadURL,
-            contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            size: excelBuffer.length,
-            status: 'processed',
-            uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
-            // Add folderId field, default to null for root folder
-            folderId: null,
+                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            },
+            timeout: 25000 // 25 second timeout for upload
         };
         
-        // Add appropriate timestamp based on whether this is a new document or an update
-        if (isUpdate) {
-            console.log(`[createExcelFile] Updating existing document with ID: ${finalDocumentId}`);
-            docData.updatedAt = admin.firestore.FieldValue.serverTimestamp();
-        } else {
-            console.log(`[createExcelFile] Creating new document with ID: ${finalDocumentId}`);
-            docData.createdAt = admin.firestore.FieldValue.serverTimestamp();
+        // Upload with timeout handling
+        try {
+            await file.save(excelBuffer, uploadOptions);
+            console.log(`[createExcelFile] File uploaded successfully to ${storagePath}`);
+        } catch (uploadError: any) {
+            console.error(`[createExcelFile] Error uploading file to Firebase Storage:`, uploadError);
+            if (uploadError.code === 'ETIMEDOUT' || uploadError.message?.includes('timeout')) {
+                throw new Error(`Firebase Storage upload timed out after 25 seconds. File size: ${excelBuffer.length} bytes`);
+            }
+            throw uploadError;
         }
         
-        console.log(`[createExcelFile] Preparing to call Firestore docRef.set() with merge:true`);
-        // CRITICAL: Use set with merge:true to ensure we're updating the existing document
-        // rather than creating a new one if it exists
-        await docRef.set(docData, { merge: true });
-        
+        // Get a signed URL with a timeout wrapper
+        console.log(`[createExcelFile] Getting signed URL...`);
+        let signedUrl;
+        try {
+            // Wrap the getSignedUrl call in a Promise.race with a timeout
+            const signedUrlPromise = file.getSignedUrl({
+                action: 'read',
+                expires: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
+            });
+            
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('getSignedUrl timed out after 10 seconds')), 10000);
+            });
+            
+            const [url] = await Promise.race([signedUrlPromise, timeoutPromise]);
+            signedUrl = url;
+            console.log(`[createExcelFile] Signed URL obtained successfully`);
+        } catch (urlError: any) {
+            console.error(`[createExcelFile] Error getting signed URL:`, urlError);
+            if (urlError.message?.includes('timed out')) {
+                throw new Error('Firebase Storage getSignedUrl timed out after 10 seconds');
+            }
+            throw urlError;
+        }
 
-        console.log(`[createExcelFile] Successfully processed Firestore document: ${docRef.id}`);
+        // Create a document in Firestore with explicit timeout
+        console.log(`[createExcelFile] Creating Firestore document...`);
+        const docRef = db.collection('users').doc(userId).collection('documents').doc(documentId);
         
-        // Calculate and log total execution time
-        const totalDuration = Date.now() - startTime;
-        console.log(`[createExcelFile] Total execution time: ${totalDuration}ms`);
+        // Prepare document data (minimal required fields)
+        const docData = {
+            name: fileName,
+            type: 'excel',
+            storagePath,
+            userId,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            status: 'processed',
+            fileUrl: signedUrl,
+            fileBucket: bucket.name
+        };
         
-        // Return success with additional metadata
-        return { 
-            success: true, 
-            message: "Excel file created/updated successfully", 
-            documentId: docRef.id,
-            storagePath: canonicalStoragePath,
-            fileUrl: downloadURL,
-            executionTime: totalDuration
+        // Set document with timeout handling
+        try {
+            await Promise.race([
+                docRef.set(docData, { merge: true }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore document creation timed out')), 10000))
+            ]);
+            console.log(`[createExcelFile] Firestore document created successfully with ID: ${documentId}`);
+        } catch (firestoreError: any) {
+            console.error(`[createExcelFile] Error creating Firestore document:`, firestoreError);
+            if (firestoreError.message?.includes('timed out')) {
+                throw new Error('Firestore document creation timed out after 10 seconds');
+            }
+            throw firestoreError;
+        }
+
+        // Track final memory usage
+        const memUsageAfter = process.memoryUsage();
+        console.log(`[createExcelFile] Memory usage after operation: ${JSON.stringify({
+            rss: `${Math.round(memUsageAfter.rss / 1024 / 1024)}MB`,
+            heapTotal: `${Math.round(memUsageAfter.heapTotal / 1024 / 1024)}MB`,
+            heapUsed: `${Math.round(memUsageAfter.heapUsed / 1024 / 1024)}MB`,
+            external: `${Math.round(memUsageAfter.external / 1024 / 1024)}MB`,
+        })}`);
+
+        const endTime = Date.now();
+        const executionTime = endTime - startTime;
+        console.log(`[createExcelFile] Excel file created successfully in ${executionTime}ms`);
+        
+        return {
+            success: true,
+            documentId,
+            storagePath,
+            fileUrl: signedUrl,
+            executionTime
         };
     } catch (error: any) {
-        // Calculate execution time even for errors
-        const errorTime = Date.now() - startTime;
-        console.error(`[createExcelFile] Error processing file for documentId ${documentId} after ${errorTime}ms:`, error);
+        const endTime = Date.now();
+        const executionTime = endTime - startTime;
+        console.error(`[createExcelFile] Error creating Excel file after ${executionTime}ms:`, error);
+        console.error(`[createExcelFile] Full error object:`, JSON.stringify(error, Object.getOwnPropertyNames(error)));
         
-        // Provide more specific error messages based on error type
-        let errorMessage = `Error creating/updating Excel file: ${error.message}`;
-        
-        if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
-            errorMessage = 'Connection to Firebase Storage timed out. Please try again.'; 
-        } else if (error.code === 403 || error.message.includes('permission')) {
-            errorMessage = 'Permission denied accessing Firebase Storage. Please check your credentials.';
-        } else if (error.message.includes('quota')) {
-            errorMessage = 'Firebase Storage quota exceeded. Please try again later.';
+        // Check for specific error types
+        if (error.message?.includes('timeout') || error.code === 'ETIMEDOUT') {
+            throw new Error(`Excel operation timed out: ${error.message}`);
         }
         
-        return { 
-            success: false, 
-            message: errorMessage, 
-            documentId: documentId, // Return the original ID
-            storagePath: undefined,
-            fileUrl: undefined,
-            executionTime: errorTime
-        };
+        if (error.message?.includes('memory') || error.message?.includes('heap')) {
+            throw new Error(`Memory limit exceeded during Excel operation: ${error.message}`);
+        }
+        
+        throw error;
     }
 }
 
@@ -505,62 +514,128 @@ export async function processExcelOperation(
 ): Promise<{ success: boolean; message?: string; documentId?: string; storagePath?: string; fileUrl?: string; executionTime?: number }> {
   const startTime = Date.now();
   console.log(`[processExcelOperation] Received request: operation=${operation}, docId=${documentId}, userId=${userId}, fileName=${fileName}, sheetName=${sheetName}`);
-  console.log('[processExcelOperation] Vercel Env Check:', process.env.VERCEL ? 'Running on Vercel' : 'Not on Vercel');
-
-  // Ensure Firebase services are available
-  if (!db || !storage || !bucket) {
-    console.error('[processExcelOperation] Firebase services not initialized.');
-    return { success: false, message: 'Server error: Firebase services not available.', documentId: undefined };
-  }
- 
-  let finalDocumentId: string;
-  let isExistingDocument = false;
-
-  console.log('[processExcelOperation] Entering document ID handling logic.');
-
-  // --- Document ID Handling Logic ---
-  if (documentId) {
-    console.log(`[processExcelOperation] Document ID provided: ${documentId}`);
-    finalDocumentId = documentId;
-    isExistingDocument = true;
-  } else {
-    console.log('[processExcelOperation] No document ID provided, generating a new one.');
-    finalDocumentId = `doc-${uuidv4()}`;
-    isExistingDocument = false;
-  }
-
-  console.log(`[processExcelOperation] Final Document ID determined: ${finalDocumentId}, Is existing: ${isExistingDocument}`);
-
-  // --- Call Appropriate Function ---
+  console.log(`[processExcelOperation] Data type: ${typeof data}, isArray: ${Array.isArray(data)}`);
+  
+  // Track memory usage
+  const memUsageBefore = process.memoryUsage();
+  console.log(`[processExcelOperation] Memory usage before operation: ${JSON.stringify({
+      rss: `${Math.round(memUsageBefore.rss / 1024 / 1024)}MB`,
+      heapTotal: `${Math.round(memUsageBefore.heapTotal / 1024 / 1024)}MB`,
+      heapUsed: `${Math.round(memUsageBefore.heapUsed / 1024 / 1024)}MB`,
+      external: `${Math.round(memUsageBefore.external / 1024 / 1024)}MB`,
+  })}`);
+  
   try {
-    console.log(`[processExcelOperation] Calling ${operation === 'createExcelFile' ? 'createExcelFile' : 'editExcelFile'} with docId: ${finalDocumentId}`);
-    let result;
-    if (operation === 'createExcelFile') {
-      // Always use createExcelFile, as it handles both creation and updates
-      result = await createExcelFile(db, storage, bucket, userId, finalDocumentId, data);
-    } else if (operation === 'editExcelFile') {
-      // Ensure we have a valid document ID for editing
-      if (!finalDocumentId) {
-        throw new Error("Cannot edit file without a valid document ID.");
+    // Check if we're running in Vercel
+    const isVercel = process.env.VERCEL === '1';
+    console.log(`[processExcelOperation] Running in Vercel environment: ${isVercel}`);
+    
+    // Get Firebase Admin services from the parameters
+    console.log(`[processExcelOperation] Using provided Firebase services...`);
+    // Ensure we have the required Firebase services
+    if (!db || !storage || !bucket) {
+      throw new Error('Firebase services not properly initialized');
+    }
+    console.log(`[processExcelOperation] Firebase services validated successfully`);
+    
+    // Parse data if it's a string (JSON)
+    let parsedData = data;
+    if (typeof data === 'string') {
+      try {
+        console.log(`[processExcelOperation] Parsing JSON data string...`);
+        const parsedJson = JSON.parse(data);
+        
+        // Check for different data structures
+        if (parsedJson.excelOperation && parsedJson.excelOperation.sheets) {
+          // Handle the excelOperation.sheets format
+          console.log(`[processExcelOperation] Found excelOperation.sheets format`);
+          parsedData = parsedJson.excelOperation.sheets[0].data;
+        } else if (parsedJson.args && parsedJson.args.operations) {
+          // Handle the args.operations format
+          console.log(`[processExcelOperation] Found args.operations format`);
+          parsedData = parsedJson.args.operations;
+        } else {
+          // Use the whole parsed object as data
+          console.log(`[processExcelOperation] Using entire parsed JSON as data`);
+          parsedData = parsedJson;
+        }
+        
+        console.log(`[processExcelOperation] Successfully parsed JSON data, length: ${Array.isArray(parsedData) ? parsedData.length : 'N/A'}`);
+      } catch (parseError: any) {
+        console.error(`[processExcelOperation] Error parsing JSON data:`, parseError);
+        throw new Error(`Failed to parse Excel data: ${parseError.message}`);
       }
-      // Note: editExcelFile might need similar internal logging as createExcelFile
-      result = await editExcelFile(db, storage, bucket, userId, finalDocumentId, data);
-    } else {
-      throw new Error(`Unsupported Excel operation: ${operation}`);
     }
     
-    console.log(`[processExcelOperation] ${operation} completed. Success: ${result.success}, Message: ${result.message}`);
-    return result;
-
+    // Generate a document ID if not provided
+    const finalDocumentId = documentId || `doc-${uuidv4()}`;
+    console.log(`[processExcelOperation] Using document ID: ${finalDocumentId}`);
+    
+    // Process based on operation type
+    let result;
+    if (operation === 'createWorkbook' || operation === 'createExcelFile') {
+      console.log(`[processExcelOperation] Calling createExcelFile...`);
+      result = await createExcelFile(db, storage, bucket, userId, finalDocumentId, parsedData);
+      console.log(`[processExcelOperation] createExcelFile completed successfully`);
+    } else if (operation === 'editWorkbook' || operation === 'editExcelFile') {
+      if (!documentId) {
+        throw new Error('Document ID is required for edit operations');
+      }
+      console.log(`[processExcelOperation] Calling editExcelFile...`);
+      result = await editExcelFile(db, storage, bucket, userId, documentId, parsedData);
+      console.log(`[processExcelOperation] editExcelFile completed successfully`);
+    } else {
+      throw new Error(`Unsupported operation: ${operation}`);
+    }
+    
+    const endTime = Date.now();
+    const executionTime = endTime - startTime;
+    
+    // Track memory usage after operation
+    const memUsageAfter = process.memoryUsage();
+    console.log(`[processExcelOperation] Memory usage after operation: ${JSON.stringify({
+        rss: `${Math.round(memUsageAfter.rss / 1024 / 1024)}MB`,
+        heapTotal: `${Math.round(memUsageAfter.heapTotal / 1024 / 1024)}MB`,
+        heapUsed: `${Math.round(memUsageAfter.heapUsed / 1024 / 1024)}MB`,
+        external: `${Math.round(memUsageAfter.external / 1024 / 1024)}MB`,
+    })}`);
+    
+    console.log(`[processExcelOperation] Operation completed successfully in ${executionTime}ms`);
+    
+    return {
+      ...result,
+      executionTime
+    };
   } catch (error: any) {
-    const errorTime = Date.now() - startTime;
-    console.error(`[processExcelOperation] Error during ${operation} for docId ${finalDocumentId} after ${errorTime}ms:`, error);
-    console.error("[processExcelOperation] Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
-    return { 
-      success: false, 
-      message: `Error processing Excel operation: ${error.message || 'Unknown internal error'}`, 
-      documentId: finalDocumentId, 
-      executionTime: errorTime 
+    const endTime = Date.now();
+    const executionTime = endTime - startTime;
+    
+    console.error(`[processExcelOperation] Error after ${executionTime}ms:`, error);
+    console.error(`[processExcelOperation] Full error object:`, JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    
+    // Categorize errors for better client feedback
+    let errorMessage = 'Unknown error';
+    
+    if (error.message?.includes('timeout') || error.code === 'ETIMEDOUT') {
+      errorMessage = `Operation timed out: ${error.message}`;
+    }
+    
+    if (error.message?.includes('memory') || error.message?.includes('heap')) {
+      errorMessage = `Memory limit exceeded: ${error.message}`;
+    }
+    
+    if (error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED') {
+      errorMessage = `Connection error: ${error.message}`;
+    }
+    
+    if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    return {
+      success: false,
+      message: errorMessage,
+      executionTime
     };
   }
 }
