@@ -33,6 +33,9 @@ if (!admin.apps.length) {
 const MODEL_NAME = 'claude-3-5-sonnet-20240620'; 
 const MAX_TOKENS = 4000; 
 const EXCEL_MAX_TOKENS = 4000; 
+// Timeout constants optimized for Vercel Pro plan (60s limit)
+const ANTHROPIC_TIMEOUT_MS = 30000; // 30 seconds for Anthropic API calls
+const EXCEL_OPERATION_TIMEOUT_MS = 25000; // 25 seconds for Excel operations
 const DEFAULT_SYSTEM_PROMPT = `You are Claude, a helpful AI assistant integrated into a web chat application. Provide concise and accurate responses. If the user asks you to interact with an Excel file, format your response strictly as a JSON object containing 'action' ('createExcelFile' or 'editExcelFile') and 'args' (specific arguments for the action, including operations like 'createSheet', 'updateCells', 'formatCells'). Do not include any explanatory text outside the JSON object when performing Excel actions. For example:
 {
   "action": "editExcelFile",
@@ -215,14 +218,14 @@ async function handleExcelOperation(
   }
 
   // Timeout mechanism for the entire Excel operation processing
-  const EXCEL_OPERATION_TIMEOUT = 20000; // 20 seconds
+  // Using the global constant for consistent timeout handling
   let timeoutId: NodeJS.Timeout | null = null;
 
   const operationPromise = new Promise<{ success: boolean; response?: object; message?: string; docId?: string; storagePath?: string }>(async (resolve, reject) => {
     timeoutId = setTimeout(() => {
-      console.warn(`[handleExcelOperation] Excel operation timed out after ${EXCEL_OPERATION_TIMEOUT}ms.`);
+      console.warn(`[handleExcelOperation] Excel operation timed out after ${EXCEL_OPERATION_TIMEOUT_MS}ms.`);
       reject(new Error('Excel operation timed out.'));
-    }, EXCEL_OPERATION_TIMEOUT);
+    }, EXCEL_OPERATION_TIMEOUT_MS);
 
     try {
       let result;
@@ -493,9 +496,11 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
             content: msg.content as string, // Content is expected to be string
           }));
 
-        // Add timeout to prevent function invocation timeout
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('AI request timeout')), 25000); // 25 second timeout
+        // Create a timeout promise for the Anthropic API call using the constant
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(`Anthropic API call timed out after ${ANTHROPIC_TIMEOUT_MS/1000} seconds.`));
+          }, ANTHROPIC_TIMEOUT_MS);
         });
         
         // Make the non-streaming API call using the initialized 'anthropic' client from @anthropic-ai/sdk
@@ -540,9 +545,9 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
                 } else {
                     console.log(`[route.ts] Calling processExcelOperation directly for action: ${parsedJson.action}`);
                     try {
-                        // Create a timeout promise for Excel operations
+                        // Create a timeout promise for Excel operations using the constant
                         const excelOpTimeoutPromise = new Promise((_, reject) => {
-                            setTimeout(() => reject(new Error('Excel operation timeout')), 20000); // 20 second timeout
+                            setTimeout(() => reject(new Error(`Excel operation timed out after ${EXCEL_OPERATION_TIMEOUT_MS/1000} seconds`)), EXCEL_OPERATION_TIMEOUT_MS);
                         });
                         
                         // Call processExcelOperation with timeout protection

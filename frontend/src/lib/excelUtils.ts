@@ -450,6 +450,8 @@ export async function processExcelOperation(
   fileName?: string, // Added fileName
   sheetName?: string // Added sheetName
 ): Promise<{ success: boolean; message?: string; docId?: string; storagePath?: string }> { // Changed return type
+  const startTime = Date.now();
+  console.log('[processExcelOperation] Starting execution at:', new Date().toISOString());
   console.log('[processExcelOperation] Received:', { operation, documentId, dataLength: data?.length, userId, fileName, sheetName });
  
   // Ensure Firebase services are available
@@ -495,12 +497,23 @@ export async function processExcelOperation(
     }
  
     console.log('[processExcelOperation] Result from create/edit function:', result);
- 
+    
+    // Log execution time
+    const endTime = Date.now();
+    const executionTime = endTime - startTime;
+    console.log(`[processExcelOperation] Execution completed in ${executionTime}ms`);
+    
     // Return the result object directly
     return result;
  
   } catch (error: any) {
     console.error('[processExcelOperation] Unhandled error:', error);
+    
+    // Log execution time even in error case
+    const endTime = Date.now();
+    const executionTime = endTime - startTime;
+    console.log(`[processExcelOperation] Failed execution completed in ${executionTime}ms`);
+    
     return { success: false, message: `Server error during Excel operation: ${error.message}` };
   }
 }
