@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "functions": {
+    "frontend/src/app/api/**/*": {
+      "maxDuration": 60
+    }
+  },
+  "buildCommand": "cd frontend && npm run build",
+  "outputDirectory": "frontend/.next"
+}

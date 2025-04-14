@@ -10,6 +10,17 @@ const nextConfig = {
   
   // Ensure compatibility with Vercel deployment
   distDir: '.next',
+
+  // Configure serverless functions for extended timeouts
+  experimental: {
+    serverComponentsExternalPackages: ['xlsx'],
+  },
+  
+  // Configure Vercel serverless function settings
+  serverRuntimeConfig: {
+    // This will be available on the server side
+    PROJECT_ROOT: __dirname,
+  },
 }
 
 module.exports = nextConfig
