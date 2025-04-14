@@ -6,7 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils'; 
 import { useAuth } from '@/context/AuthContext'; 
 import { Timestamp } from 'firebase/firestore'; 
-import { MyDocumentData } from '@/types'; 
+import { MyDocumentData } from '@/types/documents'; 
 import { useChat } from '@ai-sdk/react';
 import { Message } from 'ai';
 import {

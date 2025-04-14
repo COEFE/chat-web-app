@@ -366,6 +366,8 @@ function DashboardPage() {
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [folderPath, setFolderPath] = useState<BreadcrumbItem[]>([]); // State for breadcrumbs
   const [selectedDocument, setSelectedDocument] = useState<MyDocumentData | null>(null);
+  // State for quick preview feature
+  const [previewDocument, setPreviewDocument] = useState<MyDocumentData | null>(null);
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [docsError, setDocsError] = useState<string | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);

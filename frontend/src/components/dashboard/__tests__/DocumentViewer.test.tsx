@@ -9,7 +9,7 @@ import {
 } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import DocumentViewer from '../DocumentViewer'; // Adjust path if needed
-import { MyDocumentData } from '@/types';
+import { MyDocumentData } from '@/types/documents';
 import { useAuth } from '@/context/AuthContext';
 import { doc, getDoc, Timestamp } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
@@ -181,6 +181,8 @@ describe('DocumentViewer Refresh Logic', () => {
       updatedAt: Timestamp.fromDate(new Date()), // Add updatedAt
       status: 'complete', // Add status
       createdAt: Timestamp.fromDate(new Date()), // Add createdAt
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      url: 'https://example.com/doc-1.xlsx',
     }} />);
 
     // Wait for initial content to load
