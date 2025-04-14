@@ -180,7 +180,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
             >
               <div
                 className={cn(
-                  'rounded-lg px-4 py-2 break-words whitespace-pre-wrap',
+                  'rounded-lg px-4 py-2 break-words whitespace-pre-wrap max-w-[80%]',
                   message.role === 'user'
                     ? 'bg-white text-black' // Temporary high-contrast style
                     : 'bg-muted'
