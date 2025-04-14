@@ -43,7 +43,7 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
     const startTime = Date.now();
     console.log(`[createExcelFile] Starting create/update for user: ${userId}, initial documentId: ${documentId} at ${new Date().toISOString()}`);
     
-    // Track memory usage
+    // Track memory usage - Pro plan still has 1024MB limit
     const memUsageBefore = process.memoryUsage();
     console.log(`[createExcelFile] Memory usage before operation: ${JSON.stringify({
         rss: `${Math.round(memUsageBefore.rss / 1024 / 1024)}MB`,
@@ -51,12 +51,14 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
         heapUsed: `${Math.round(memUsageBefore.heapUsed / 1024 / 1024)}MB`,
         external: `${Math.round(memUsageBefore.external / 1024 / 1024)}MB`,
     })}`);
-
+    
+    // Check if we're running in Vercel and determine plan type
+    const isVercel = process.env.VERCEL === '1';
+    // We'll assume Pro plan based on user confirmation
+    const isPro = true;
+    console.log(`[createExcelFile] Running in Vercel environment: ${isVercel}, Pro plan: ${isPro}`);
+    
     try {
-        // Check if we're running in Vercel
-        const isVercel = process.env.VERCEL === '1';
-        console.log(`[createExcelFile] Running in Vercel environment: ${isVercel}`);
-        
         // Normalize document ID (remove temp prefix if present)
         const baseDocumentId = documentId.replace(/^temp-create-\d+/, '').replace(/^temp-edit-\d+/, '');
         console.log(`[createExcelFile] Normalized documentId: ${baseDocumentId}`);
@@ -102,12 +104,12 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
         console.log(`[createExcelFile] Uploading to Firebase Storage...`);
         const file = bucket.file(storagePath);
         
-        // Set upload options with explicit timeout
+        // Set upload options with explicit timeout - increased for Pro plan
         const uploadOptions = {
             metadata: {
                 contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             },
-            timeout: 25000 // 25 second timeout for upload
+            timeout: 45000 // 45 second timeout for upload (Pro plan allows up to 60s total execution)
         };
         
         // Upload with timeout handling
@@ -133,7 +135,7 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
             });
             
             const timeoutPromise = new Promise<never>((_, reject) => {
-                setTimeout(() => reject(new Error('getSignedUrl timed out after 10 seconds')), 10000);
+                setTimeout(() => reject(new Error('getSignedUrl timed out after 20 seconds')), 20000);
             });
             
             const [url] = await Promise.race([signedUrlPromise, timeoutPromise]);
@@ -142,7 +144,7 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
         } catch (urlError: any) {
             console.error(`[createExcelFile] Error getting signed URL:`, urlError);
             if (urlError.message?.includes('timed out')) {
-                throw new Error('Firebase Storage getSignedUrl timed out after 10 seconds');
+                throw new Error('Firebase Storage getSignedUrl timed out after 20 seconds');
             }
             throw urlError;
         }
@@ -168,13 +170,13 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
         try {
             await Promise.race([
                 docRef.set(docData, { merge: true }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore document creation timed out')), 10000))
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore document creation timed out')), 20000))
             ]);
             console.log(`[createExcelFile] Firestore document created successfully with ID: ${documentId}`);
         } catch (firestoreError: any) {
             console.error(`[createExcelFile] Error creating Firestore document:`, firestoreError);
             if (firestoreError.message?.includes('timed out')) {
-                throw new Error('Firestore document creation timed out after 10 seconds');
+                throw new Error('Firestore document creation timed out after 20 seconds');
             }
             throw firestoreError;
         }
@@ -526,9 +528,7 @@ export async function processExcelOperation(
   })}`);
   
   try {
-    // Check if we're running in Vercel
-    const isVercel = process.env.VERCEL === '1';
-    console.log(`[processExcelOperation] Running in Vercel environment: ${isVercel}`);
+    // Already checked Vercel environment above
     
     // Get Firebase Admin services from the parameters
     console.log(`[processExcelOperation] Using provided Firebase services...`);
