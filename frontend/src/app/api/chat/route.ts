@@ -377,6 +377,28 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
     const capturedActiveSheet = activeSheet;
     const capturedMessages = messages;
       
+    // --- Save User's Latest Message BEFORE Calling AI --- 
+    try {
+      if (documentId && userId) {
+        const messagesCollectionRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
+        const lastUserMsg = messages[messages.length - 1]; // Get the actual last message from the input
+        if (lastUserMsg && lastUserMsg.role === 'user') { 
+          await messagesCollectionRef.add({ 
+            role: lastUserMsg.role,
+            content: lastUserMsg.content,
+            createdAt: firestore.FieldValue.serverTimestamp(),
+          });
+          console.log(`[route.ts] User message saved BEFORE AI call for document ${documentId}`);
+        } else {
+          console.warn(`[route.ts] Did not save user message before AI call - last message not from user.`);
+        }
+      } else {
+        console.log("[route.ts] Skipping user message save before AI call - no documentId or userId.");
+      }
+    } catch (saveError: any) {
+      console.error(`[route.ts] Error saving user message before AI call for document ${documentId}:`, saveError);
+    }
+
     const result = await streamText({
       model: vercelAnthropic('claude-3-7-sonnet-20250219'),
       system: finalSystemPrompt, // Use the potentially augmented system prompt
@@ -469,40 +491,20 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
             finalAiMessageContent = ''; // Or some default message like "Processing complete."
           }
 
-          // --- Save Chat History ---
-          // Important: Only save if there's meaningful content or an operation occurred
-          if ((finalAiMessageContent && finalAiMessageContent.trim()) || isExcelOperation) {
-            try {
-              if (capturedDocumentId && capturedUserId) {
-                const messagesCollectionRef = db.collection('users').doc(capturedUserId).collection('documents').doc(capturedDocumentId).collection('messages');
-                const lastUserMsgForSave = capturedMessages.filter(m => m.role === 'user').pop();
-
-                if (lastUserMsgForSave) {
-                  await messagesCollectionRef.add({
-                    role: lastUserMsgForSave.role,
-                    content: lastUserMsgForSave.content,
-                    createdAt: firestore.FieldValue.serverTimestamp(),
-                  });
-                  console.log(`[route.ts][onFinish] User message saved (tool/text) for document ${capturedDocumentId}`);
-                }
-
-                // Save assistant message (could be text response or Excel result message)
-                await messagesCollectionRef.add({
-                  role: 'assistant',
-                  content: finalAiMessageContent, // This now holds the correct message
-                  createdAt: firestore.FieldValue.serverTimestamp(),
-                  // Add excelFileUrl only if the operation was successful and resulted in a file
-                  ...(isExcelOperation && excelResult?.success && excelResult?.fileUrl ? { excelFileUrl: excelResult.fileUrl } : {}),
-                });
-                console.log(`[route.ts][onFinish] Assistant message saved (tool/text) for document ${capturedDocumentId}`);
-              } else {
-                console.log("[route.ts][onFinish] Skipping chat history save (tool/text) - no documentId or userId.");
-              }
-            } catch (saveError: any) {
-              console.error(`[route.ts][onFinish] Error saving chat messages (tool/text) for document ${capturedDocumentId}:`, saveError);
-            }
+          // --- Save Assistant's Final Message in onFinish --- 
+          if (capturedDocumentId && capturedUserId) { 
+            const messagesCollectionRef = db.collection('users').doc(capturedUserId).collection('documents').doc(capturedDocumentId).collection('messages');
+            // Save assistant message (could be text response or Excel result message)
+            await messagesCollectionRef.add({
+              role: 'assistant',
+              content: finalAiMessageContent, // This now holds the correct message
+              createdAt: firestore.FieldValue.serverTimestamp(),
+              // Add excelFileUrl only if the operation was successful and resulted in a file
+              ...(isExcelOperation && excelResult?.success && excelResult?.fileUrl ? { excelFileUrl: excelResult.fileUrl } : {}),
+            });
+            console.log(`[route.ts][onFinish] Assistant message saved (tool/text) for document ${capturedDocumentId}`);
           } else {
-            console.log("[route.ts][onFinish] Skipping chat history save - no content and no operation.");
+            console.log("[route.ts][onFinish] Skipping assistant message save - no documentId or userId.");
           }
 
         } catch (onFinishError: any) {
