@@ -51,6 +51,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages } = useChat({
     api: '/api/chat',
     id: documentId,
+    initialMessages: [], // Explicitly start with empty messages
     // Add the headers property conditionally
     headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
     body: {
