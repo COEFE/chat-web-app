@@ -40,7 +40,8 @@ try {
  * Uses document ID as the source of truth for file naming.
  */
 export async function createExcelFile(db: admin.firestore.Firestore, storage: admin.storage.Storage, bucket: Bucket, userId: string, documentId: string, data: any[]) {
-    console.log(`[createExcelFile] Starting create/update for user: ${userId}, initial documentId: ${documentId}`);
+    const startTime = Date.now();
+    console.log(`[createExcelFile] Starting create/update for user: ${userId}, initial documentId: ${documentId} at ${new Date().toISOString()}`);
     
     if (!db || !storage || !bucket) {
         console.log("Firebase services not available, using dummy implementation");
@@ -104,21 +105,30 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
         // Convert workbook to buffer
         const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
         
-        // Upload to Firebase Storage using the canonical path
+        // Upload to Firebase Storage using the canonical path - with performance tracking
+        console.log(`[createExcelFile] Starting file upload to Firebase Storage at ${new Date().toISOString()}, file size: ${excelBuffer.length} bytes`);
+        const uploadStartTime = Date.now();
         const file = bucket.file(canonicalStoragePath);
+        
+        // Upload the file
         await file.save(excelBuffer, {
             metadata: {
                 contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             }
         });
         
-        console.log(`[createExcelFile] Successfully uploaded Excel file to: ${canonicalStoragePath}`);
+        const uploadDuration = Date.now() - uploadStartTime;
+        console.log(`[createExcelFile] Successfully uploaded Excel file to: ${canonicalStoragePath} in ${uploadDuration}ms`);
         
-        // Get a signed URL for the file
+        // Get a signed URL for the file - with performance tracking
+        console.log(`[createExcelFile] Getting signed URL at ${new Date().toISOString()}`);
+        const urlStartTime = Date.now();
         const [downloadURL] = await file.getSignedUrl({
             action: 'read',
             expires: '03-01-2500' // Far future date
         });
+        const urlDuration = Date.now() - urlStartTime;
+        console.log(`[createExcelFile] Got signed URL in ${urlDuration}ms`);
         
         // Create document data object
         const docData: any = {
@@ -150,18 +160,40 @@ export async function createExcelFile(db: admin.firestore.Firestore, storage: ad
 
         console.log(`[createExcelFile] Successfully processed Firestore document: ${docRef.id}`);
         
-        // Return success within the try block
+        // Calculate and log total execution time
+        const totalDuration = Date.now() - startTime;
+        console.log(`[createExcelFile] Total execution time: ${totalDuration}ms`);
+        
+        // Return success with additional metadata
         return { 
             success: true, 
             message: "Excel file created/updated successfully", 
-            documentId: docRef.id 
+            documentId: docRef.id,
+            storagePath: canonicalStoragePath,
+            fileUrl: downloadURL,
+            executionTime: totalDuration
         };
     } catch (error: any) {
-        console.error(`[createExcelFile] Error processing file for documentId ${documentId}:`, error);
+        // Calculate execution time even for errors
+        const errorTime = Date.now() - startTime;
+        console.error(`[createExcelFile] Error processing file for documentId ${documentId} after ${errorTime}ms:`, error);
+        
+        // Provide more specific error messages based on error type
+        let errorMessage = `Error creating/updating Excel file: ${error.message}`;
+        
+        if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+            errorMessage = 'Connection to Firebase Storage timed out. Please try again.'; 
+        } else if (error.code === 403 || error.message.includes('permission')) {
+            errorMessage = 'Permission denied accessing Firebase Storage. Please check your credentials.';
+        } else if (error.message.includes('quota')) {
+            errorMessage = 'Firebase Storage quota exceeded. Please try again later.';
+        }
+        
         return { 
             success: false, 
-            message: `Error creating/updating Excel file: ${error.message}`, 
-            documentId: documentId // Return the original ID
+            message: errorMessage, 
+            documentId: documentId, // Return the original ID
+            executionTime: errorTime
         };
     }
 }

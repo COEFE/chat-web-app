@@ -550,22 +550,37 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
                             setTimeout(() => reject(new Error(`Excel operation timed out after ${EXCEL_OPERATION_TIMEOUT_MS/1000} seconds`)), EXCEL_OPERATION_TIMEOUT_MS);
                         });
                         
-                        // Call processExcelOperation with timeout protection
+                        // Extract additional parameters from the request if available
+                        const fileName = parsedJson.args.fileName || 'Untitled Spreadsheet';
+                        const sheetName = parsedJson.args.sheetName || 'Sheet1';
+                        
+                        console.log("[route.ts] Calling processExcelOperation with parameters:", {
+                            action: parsedJson.action,
+                            docId: docIdForOperation,
+                            operations: Array.isArray(parsedJson.args.operations) ? `Array(${parsedJson.args.operations.length})` : 'Invalid',
+                            userId,
+                            fileName,
+                            sheetName
+                        });
+                        
+                        // Call processExcelOperation with timeout protection and all required arguments
                         const operationResult = await Promise.race([
                             processExcelOperation(
                                 parsedJson.action,       // 'createExcelFile' or 'editExcelFile'
                                 docIdForOperation,       // null for create, ID for edit
                                 parsedJson.args.operations, // The array of operations
-                                userId                   // The authenticated user ID
+                                userId,                  // The authenticated user ID
+                                fileName,                // The filename (new parameter)
+                                sheetName                // The sheet name (new parameter)
                             ),
                             excelOpTimeoutPromise
-                        ]) as NextResponse;
+                        ]);
 
-                        // Assuming operationResult is a NextResponse containing the success/message object
-                        // Parse the JSON body from the response
-                        console.log("[route.ts] processExcelOperation raw response status:", operationResult.status);
-                        excelResult = await operationResult.json(); // Parse the JSON body
-                        console.log("[route.ts] processExcelOperation parsed result:", excelResult);
+                        // operationResult is now a plain object, not a NextResponse
+                        console.log("[route.ts] processExcelOperation result:", operationResult);
+                        // Add type assertion to ensure it matches the expected excelResult type
+                        excelResult = operationResult as { success: boolean; message?: string; fileUrl?: string };
+                        console.log("[route.ts] Excel operation result assigned to excelResult");
                     } catch (opError: any) {
                         console.error("[route.ts] Error calling or parsing processExcelOperation:", opError);
                         const isTimeout = opError.message && opError.message.includes('timeout');
