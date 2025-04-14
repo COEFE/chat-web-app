@@ -150,126 +150,6 @@ function extractSheetName(message: string): string | null {
   return null;
 }
 
-// Helper function to handle Excel operations directly
-// Return type specifies the expected structure
-async function handleExcelOperation(
-  authToken: string,
-  userId: string,
-  message: string, // Should be the JSON string payload
-  currentDocument: any,
-  activeSheet?: string
-): Promise<{ success: boolean; response?: object; message?: string; docId?: string; storagePath?: string }> { // Added docId and storagePath to return type
-  console.log('[handleExcelOperation] Received request:', { userId, message, currentDocument, activeSheet }); // <<< ADDED LOGGING
-
-  let parsedJson: any;
-  try {
-    parsedJson = JSON.parse(message);
-    console.log('[handleExcelOperation] Parsed JSON payload:', parsedJson); // <<< ADDED LOGGING
-  } catch (error) {
-    console.error('[handleExcelOperation] Failed to parse JSON message:', error);
-    return { success: false, message: 'Invalid JSON format in the request message.' };
-  }
-
-  let { action, args } = parsedJson;
-  // Legacy format handling - Enhanced
-  if (!action && parsedJson.excelOperation && typeof parsedJson.excelOperation === 'object') {
-      console.log('[handleExcelOperation] Detected legacy excelOperation format. Normalizing...'); // <<< ADDED LOGGING
-      const legacyOp = parsedJson.excelOperation;
-      action = legacyOp.actionType; // Assuming 'actionType' field exists
-      args = { // Reconstruct args based on expected legacy structure
-          docId: legacyOp.docId || currentDocument?.id || null,
-          operations: legacyOp.operations || [],
-          fileName: legacyOp.fileName || (legacyOp.docId ? currentDocument?.name : 'Untitled Spreadsheet'),
-          sheetName: activeSheet || extractSheetName(message) || legacyOp.sheetName || 'Sheet1',
-      };
-      // Basic validation for normalized legacy data
-      if (!action || !args.operations || !Array.isArray(args.operations)) {
-          console.error('[handleExcelOperation] Failed to normalize legacy format or missing essential fields.');
-          return { success: false, message: 'Failed to normalize legacy Excel request format or essential fields are missing.' };
-      }
-      console.log('[handleExcelOperation] Normalized legacy data:', { action, args }); // <<< ADDED LOGGING
-  }
-
-  console.log('[handleExcelOperation] Determined action and args:', { action, args }); // <<< ADDED LOGGING
-
-
-  if (!action || !args) {
-    console.error('[handleExcelOperation] Missing action or args in parsed JSON.');
-    return { success: false, message: 'Missing action or arguments in the parsed request.' };
-  }
-
-  // Ensure args is an object before destructuring
-  if (typeof args !== 'object' || args === null) {
-    console.error('[handleExcelOperation] Invalid args format. Expected an object.');
-    return { success: false, message: 'Invalid args format in the parsed request. Expected an object.' };
-  }
-
-  const docId = args.docId || currentDocument?.id || null;
-  const operations = args.operations;
-  const fileName = args.fileName || (docId ? currentDocument?.name : 'Untitled Spreadsheet'); // Use current doc name if editing
-  const sheetName = args.sheetName || activeSheet || 'Sheet1'; // Prioritize activeSheet
-
-  console.log('[handleExcelOperation] Extracted parameters:', { docId, operations, fileName, sheetName, action }); // <<< ADDED LOGGING
-
-
-  if (!operations || !Array.isArray(operations) || operations.length === 0) {
-      console.error('[handleExcelOperation] Missing or invalid operations array.');
-      return { success: false, message: 'Missing or invalid operations array in the request.' };
-  }
-
-  // Timeout mechanism for the entire Excel operation processing
-  // Using the global constant for consistent timeout handling
-  let timeoutId: NodeJS.Timeout | null = null;
-
-  const operationPromise = new Promise<{ success: boolean; response?: object; message?: string; docId?: string; storagePath?: string }>(async (resolve, reject) => {
-    timeoutId = setTimeout(() => {
-      console.warn(`[handleExcelOperation] Excel operation timed out after ${EXCEL_OPERATION_TIMEOUT_MS}ms.`);
-      reject(new Error('Excel operation timed out.'));
-    }, EXCEL_OPERATION_TIMEOUT_MS);
-
-    try {
-      let result;
-      console.log(`[handleExcelOperation] Calling processExcelOperation with action: ${action}`); // <<< ADDED LOGGING
-      // Ensure all necessary arguments, including fileName and sheetName, are passed
-      result = await processExcelOperation(action, docId, operations, userId, fileName, sheetName); // Args should now match updated signature
-      console.log('[handleExcelOperation] processExcelOperation result:', result); // <<< ADDED LOGGING
-
-      clearTimeout(timeoutId!); // Clear timeout if operation completes successfully
-      resolve(result); // Resolve the promise with the plain object result from processExcelOperation
-    } catch (error: any) {
-        console.error('[handleExcelOperation] Error calling processExcelOperation:', error); // <<< ADDED LOGGING
-        console.error('[handleExcelOperation] Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error))); // <<< ADDED LOGGING
-        clearTimeout(timeoutId!); // Clear timeout on error as well
-        if (error.message === 'Excel operation timed out.') {
-            // Resolve with failure instead of rejecting, as the outer promise expects resolution
-            resolve({ success: false, message: 'The Excel creation/editing process took too long and timed out. Please try a simpler request.' });
-        } else if (isFirebaseStorageError(error, 401) || isFirebaseStorageError(error, 403)) {
-            console.error('[handleExcelOperation] Firebase Storage permission error:', error);
-            resolve({ success: false, message: 'Permission denied. Please ensure you have the correct permissions for Firebase Storage.' });
-        } else if (error instanceof Error) {
-            console.error('[handleExcelOperation] Unexpected error during Excel operation:', error);
-            resolve({ success: false, message: `An unexpected error occurred during the Excel operation: ${error.message}` });
-        } else {
-            console.error('[handleExcelOperation] Unknown error during Excel operation:', error);
-            resolve({ success: false, message: 'An unknown error occurred during the Excel operation.' });
-        }
-    }
-  });
-
-  try {
-      const finalResult = await operationPromise;
-      console.log('[handleExcelOperation] Final result after timeout handling:', finalResult); // <<< ADDED LOGGING
-      return finalResult;
-  } catch (error: any) { // Catch timeout error specifically if the promise was rejected (e.g., by the setTimeout directly)
-      console.error('[handleExcelOperation] Caught error from operationPromise:', error); // <<< ADDED LOGGING
-      if (error.message === 'Excel operation timed out.') {
-          return { success: false, message: 'The Excel creation/editing process took too long and timed out. Please try a simpler request.' };
-      }
-      // Re-throw other unexpected errors if necessary
-      return { success: false, message: `An unexpected error occurred: ${error.message}` };
-  }
-}
-
 export async function POST(req: NextRequest) {
   console.log("--- /api/chat POST request received ---");
 
@@ -533,26 +413,34 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
             console.log('[route.ts] Successfully parsed AI JSON.');
             console.log('[route.ts] Parsed JSON from non-streaming response:', aiJson);
 
-            // Check for the presence of excelOperation and necessary fields
+            // Check for the presence of action and args.operations
             if (aiJson && aiJson.action && aiJson.args && Array.isArray(aiJson.args.operations)) {
-              console.log('[route.ts] AI JSON structure is valid for Excel operation. Preparing to call handleExcelOperation.');
-              // Pass necessary data to the background task
-              const operationData = aiJson.args.operations; // Use operations
-              const operationType = aiJson.action;
-              const documentIdToUse = currentDocument?.id || null; // Pass existing doc ID if available
-
-              console.log(`[route.ts] Calling handleExcelOperation with: operation=${operationType}, docId=${documentIdToUse}, data length=${Array.isArray(operationData) ? operationData.length : 'N/A'}`);
+              console.log('[route.ts] AI JSON structure is valid for Excel operation. Preparing to call processExcelOperation.');
               
-              // Await the promise returned by handleExcelOperation
+              const operationData = aiJson.args.operations; // This IS the array of arrays
+              const operationType = aiJson.action; // e.g., 'createExcelFile' or 'editExcelFile'
+              const documentIdToUse = currentDocument?.id || null;
+              const fileName = aiJson.args.fileName; // Optional filename from AI
+              const sheetName = aiJson.args.sheetName; // Optional sheetname from AI
+
+              console.log(`[route.ts] Calling processExcelOperation with: operation=${operationType}, docId=${documentIdToUse}, data length=${operationData.length}, fileName=${fileName}, sheetName=${sheetName}`);
+              
+              // Await the promise returned by processExcelOperation DIRECTLY
               try {
-                  // Use the existing handleExcelOperation which now contains detailed logging
-                  const operationResult = await handleExcelOperation(operationType, documentIdToUse, JSON.stringify(aiJson), userId);
-                  console.log('[route.ts] handleExcelOperation result:', operationResult);
-                  excelResult = operationResult as { success: boolean; message?: string; fileUrl?: string; documentId?: string; storagePath?: string; executionTime?: number };
+                  const operationResult = await processExcelOperation(
+                      operationType,
+                      documentIdToUse,
+                      operationData, // Pass the actual array of arrays
+                      userId,
+                      fileName,      // Pass optional filename
+                      sheetName      // Pass optional sheetname
+                  );
+                  console.log('[route.ts] processExcelOperation result:', operationResult);
+                  excelResult = operationResult; // Assign the result directly
               } catch (opError: any) {
-                  console.error("[route.ts] Error calling or parsing processExcelOperation:", opError);
-                  console.error("[route.ts] Full error object:", JSON.stringify(opError, Object.getOwnPropertyNames(opError)));
-                  const isTimeout = opError.message && opError.message.includes('timeout');
+                  console.error("[route.ts] Error calling processExcelOperation:", opError);
+                  console.error("[route.ts] Full error object from processExcelOperation:", JSON.stringify(opError, Object.getOwnPropertyNames(opError)));
+                  const isTimeout = opError.message && opError.message.includes('timeout'); // Check if it's a timeout error
                   excelResult = { 
                     success: false, 
                     message: isTimeout 
@@ -668,20 +556,38 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
                 console.error("[route.ts][onFinish] Auth token missing unexpectedly during Excel op handling.");
                 finalAiMessageContent = "Error: Authentication token was missing unexpectedly.";
               } else {
-                // Call handleExcelOperation - ensure arguments are correct
-                const stringifiedJsonPayload = JSON.stringify(parsedJson); // Use the full parsed JSON
-                excelResult = await handleExcelOperation(
-                  capturedAuthToken, // Pass the captured token (now checked)
-                  capturedUserId,
-                  stringifiedJsonPayload,
-                  capturedCurrentDocument,
-                  capturedActiveSheet // Use captured activeSheet if available
-                );
-                console.log('[route.ts][onFinish] Unexpected Excel Op Result:', excelResult);
-                // Update final message content based on result
-                finalAiMessageContent = excelResult.success
-                  ? createSuccessMessage(parsedJson, excelResult)
-                  : createErrorMessage(parsedJson, excelResult);
+                // Call processExcelOperation directly with the parsed operations data, filename, and sheetname
+                const operationData = parsedJson.args.operations; // This IS the array of arrays
+                const operationType = parsedJson.action; // e.g., 'createExcelFile' or 'editExcelFile'
+                const documentIdToUse = capturedCurrentDocument?.id || null;
+                const fileName = parsedJson.args.fileName; // Optional filename from AI
+                const sheetName = parsedJson.args.sheetName; // Optional sheetname from AI
+
+                console.log(`[route.ts][onFinish] Calling processExcelOperation with: operation=${operationType}, docId=${documentIdToUse}, data length=${operationData.length}, fileName=${fileName}, sheetName=${sheetName}`);
+                
+                // Await the promise returned by processExcelOperation DIRECTLY
+                try {
+                    const operationResult = await processExcelOperation(
+                        operationType,
+                        documentIdToUse,
+                        operationData, // Pass the actual array of arrays
+                        capturedUserId,
+                        fileName,      // Pass optional filename
+                        sheetName      // Pass optional sheetname
+                    );
+                    console.log('[route.ts][onFinish] processExcelOperation result:', operationResult);
+                    excelResult = operationResult; // Assign the result directly
+                } catch (opError: any) {
+                    console.error("[route.ts][onFinish] Error calling processExcelOperation:", opError);
+                    console.error("[route.ts][onFinish] Full error object from processExcelOperation:", JSON.stringify(opError, Object.getOwnPropertyNames(opError)));
+                    const isTimeout = opError.message && opError.message.includes('timeout'); // Check if it's a timeout error
+                    excelResult = { 
+                      success: false, 
+                      message: isTimeout 
+                        ? `The Excel operation timed out. Please try again with a simpler request or fewer operations.` 
+                        : `Error performing Excel operation: ${opError.message || 'Unknown error'}` 
+                    };
+                }
               }
             }
             // --- End Unexpected Excel Handling ---
