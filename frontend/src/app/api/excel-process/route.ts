@@ -29,5 +29,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { operation, documentId, data } = body;
 
   // Call the core processing function
-  return processExcelOperation(operation, documentId, data, dummyUserId);
+  try {
+    const result = await processExcelOperation(operation, documentId, data, dummyUserId);
+    const status = result.success ? 200 : 500; // Use 500 for generic failure, adjust if more specific codes are needed
+    console.log(`[excel-process] Returning status ${status} with result:`, result);
+    return NextResponse.json(result, { status });
+  } catch (error: any) {
+    // Catch any unexpected errors from processExcelOperation itself (though it should handle its own errors)
+    console.error('[excel-process] Unexpected error calling processExcelOperation:', error);
+    return NextResponse.json({ success: false, message: `Internal server error: ${error.message}` }, { status: 500 });
+  }
 }
