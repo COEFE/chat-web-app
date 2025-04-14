@@ -1,7 +1,7 @@
 import React from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { MyDocumentData } from '@/types';
-import { FileText, FileSpreadsheet, File } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { MyDocumentData } from '@/types/documents';
+import { FileQuestion, FileText, FileSpreadsheet, File } from 'lucide-react';
 import PDFViewer from './PDFViewer';
 import Image from 'next/image';
 
@@ -16,102 +16,81 @@ interface QuickPreviewProps {
  * Shows a simplified preview based on document type
  */
 const QuickPreview: React.FC<QuickPreviewProps> = ({ document, isOpen, onClose }) => {
-  if (!document) return null;
-
-  const getFileIcon = () => {
-    if (!document.contentType) return <File className="h-16 w-16 text-gray-400" />;
-    
-    if (document.contentType.includes('pdf')) {
-      return <FileText className="h-16 w-16 text-red-500" />;
-    } else if (document.contentType.includes('spreadsheet') || document.contentType.includes('excel') || document.contentType.includes('xlsx')) {
-      return <FileSpreadsheet className="h-16 w-16 text-green-500" />;
-    } else if (document.contentType.includes('image')) {
-      return null; // Will show the actual image
-    }
-    
-    return <File className="h-16 w-16 text-gray-400" />;
-  };
+  if (!document || !isOpen) return null;
 
   const renderPreviewContent = () => {
-    if (!document.contentType) {
+    if (!document.url) {
+      return <p className="text-center text-muted-foreground">Preview URL is missing.</p>;
+    }
+
+    const fileType = document.type || ''; // Use 'type' instead of 'contentType'
+
+    // PDF Preview
+    if (fileType === 'application/pdf') {
+      return <PDFViewer documentUrl={document.url} />; // Use documentUrl prop
+    }
+
+    // Image Preview
+    if (fileType.startsWith('image/')) {
       return (
-        <div className="flex flex-col items-center justify-center p-10">
-          {getFileIcon()}
-          <p className="mt-4 text-gray-500">Preview not available</p>
+        <div className="relative w-full h-96"> {/* Adjust height as needed */} 
+          <Image
+            src={document.url} // Use 'url' instead of 'downloadURL'
+            alt={document.name || 'Image preview'}
+            layout="fill"
+            objectFit="contain"
+            unoptimized // If using external URLs directly, might need this depending on Next.js config
+          />
         </div>
       );
     }
-
-    if (document.contentType.includes('pdf')) {
-      return (
-        <div className="w-full h-[400px]">
-          {document.downloadURL ? (
-            <div className="w-full h-full">
-              <PDFViewer documentUrl={document.downloadURL} />
-            </div>
-          ) : (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-gray-500">PDF preview unavailable</p>
-            </div>
-          )}
-        </div>
-      );
-    } else if (document.contentType.includes('image')) {
-      return (
-        <div className="flex justify-center p-4">
-          {document.downloadURL ? (
-            <Image 
-              src={document.downloadURL}
-              alt={document.name || 'Document preview'}
-              width={400}
-              height={400}
-              style={{ objectFit: 'contain', maxHeight: '400px' }}
-            />
-          ) : (
-            <div className="flex items-center justify-center h-[200px] w-full">
-              <p className="text-gray-500">Image preview unavailable</p>
-            </div>
-          )}
-        </div>
-      );
-    } else if (
-      document.contentType.includes('spreadsheet') || 
-      document.contentType.includes('excel') || 
-      document.contentType.includes('xlsx')
-    ) {
-      // Simple spreadsheet preview - in a real implementation, 
-      // you might want to use a library to render a preview
-      return (
-        <div className="flex flex-col items-center justify-center p-10">
-          <FileSpreadsheet className="h-16 w-16 text-green-500" />
-          <p className="mt-4">Excel document - full preview available in document view</p>
-        </div>
-      );
+    
+    // Add previews for other common types if needed (e.g., text, video)
+    if (fileType.startsWith('text/')) {
+         // Basic text preview (consider fetching content if URL is just a download link)
+         // This assumes the URL directly serves text or you have a way to fetch it.
+         // For simplicity, showing a placeholder.
+        return <p className="text-center text-muted-foreground">Text document preview not implemented yet. <a href={document.url} target="_blank" rel="noopener noreferrer" className="underline">Open file</a></p>;
     }
 
-    // Default preview for other file types
+    // Fallback for unsupported types
     return (
-      <div className="flex flex-col items-center justify-center p-10">
-        {getFileIcon()}
-        <p className="mt-4 text-gray-500">Preview not available for this file type</p>
-        <p className="text-sm text-gray-400">{document.contentType}</p>
+      <div className="text-center p-4">
+        <FileQuestion className="mx-auto h-12 w-12 text-muted-foreground mb-2" />
+        <p className="text-muted-foreground">Preview not available for this file type ({fileType || 'unknown'}).</p>
+        <p className="text-sm text-muted-foreground mt-1">
+            You can try to <a href={document.url} target="_blank" rel="noopener noreferrer" className="underline">open or download the file</a>.
+        </p>
       </div>
     );
   };
 
+  const formatBytes = (bytes: number, decimals = 2) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+  };
+
+  const format = (date: Date, format: string) => {
+    // Implement date formatting logic here
+    // For simplicity, just return the date in a basic format
+    return date.toLocaleString();
+  };
+
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[600px]">
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[80%] md:max-w-[60%] lg:max-w-[50%] h-[70vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>{document.name}</DialogTitle>
+          <DialogTitle>{document.name || 'File Preview'}</DialogTitle>
+          <DialogDescription>
+             Type: {document.type || 'Unknown'} | Size: {document.size ? formatBytes(document.size) : 'N/A'} | Modified: {document.createdAt ? format(new Date(document.createdAt), 'PPp') : 'N/A'} {/* Use createdAt */}
+          </DialogDescription>
         </DialogHeader>
-        <div className="py-4">
+        <div className="flex-grow overflow-auto p-1 border rounded-md">
           {renderPreviewContent()}
-        </div>
-        <div className="text-sm text-gray-500 mt-2">
-          <p>Type: {document.contentType || 'Unknown'}</p>
-          <p>Size: {document.size ? `${Math.round(document.size / 1024)} KB` : 'Unknown'}</p>
-          <p>Last modified: {document.updatedAt ? new Date(document.updatedAt.seconds * 1000).toLocaleString() : 'Unknown'}</p>
         </div>
       </DialogContent>
     </Dialog>

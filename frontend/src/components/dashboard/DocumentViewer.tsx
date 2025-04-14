@@ -17,7 +17,7 @@ import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
 
 // Use the shared document interface
-import { MyDocumentData } from '@/types';
+import { MyDocumentData } from '@/types/documents';
 
 // Dynamically import PDFViewer component to isolate PDF.js related code
 const PDFViewer = dynamic(() => import('./PDFViewer'), {
