@@ -253,7 +253,8 @@ export async function processExcelOperation(
       status: 'processed', // Mark as processed
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       ...(operation === 'createExcelFile' || !existingDocData ? { createdAt: admin.firestore.FieldValue.serverTimestamp() } : {}), // Add createdAt only if new
-      type: 'spreadsheet' // Indicate file type
+      type: 'spreadsheet', // Indicate file type
+      folderId: null // Default to root folder for new files
     };
 
     await docRef.set(docData, { merge: true }); // Use set with merge to create or update
