@@ -8,7 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { UploadCloud, File as FileIcon, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { MyDocumentData } from '@/types/documents';
+import { MyDocumentData } from '@/types';
 
 interface UploadingFile {
   file: File;

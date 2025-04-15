@@ -17,7 +17,7 @@ import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
 
 // Use the shared document interface
-import { MyDocumentData } from '@/types/documents';
+import { MyDocumentData } from '@/types';
 
 // Dynamically import PDFViewer component to isolate PDF.js related code
 const PDFViewer = dynamic(() => import('./PDFViewer'), {
@@ -81,24 +81,12 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         const errorText = await response.text();
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
-      
-      // Check for X-Document-Type header which may provide more accurate content type info
-      const documentTypeHeader = response.headers.get('X-Document-Type');
-      if (documentTypeHeader) {
-        console.log(`[fetchAndProcessContent] Found X-Document-Type header: ${documentTypeHeader}`);
-        // Update document content type if header is present
-        docToLoad.contentType = documentTypeHeader;
-      }
 
       // PDF is handled by the dynamic PDFViewer component, no direct fetch/state update needed here
       // unless we want to explicitly track PDF state for some reason.
 
-      // Get content type from either contentType or type field
-      const docContentType = docToLoad.contentType || docToLoad.type || '';
-      console.log(`[fetchAndProcessContent] Using content type: ${docContentType}`);
-      
       // Handle different content types
-      if (docContentType === 'text/plain') {
+      if (docToLoad.contentType === 'text/plain') {
         const text = await response.text();
         console.log('[fetchAndProcessContent] Setting text content:', text);
         setTextContent(text);
@@ -106,7 +94,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
           'application/vnd.ms-excel', // .xls
           'text/csv' // .csv
-        ].includes(docContentType)) 
+        ].includes(docToLoad.contentType || '')) 
       {
         const data = await response.arrayBuffer();
         if (data) {
@@ -193,7 +181,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             throw new Error('Error parsing Excel file. The file may be corrupted or in an unsupported format.');
           }
         }
-      } else if (docContentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      } else if (docToLoad.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
         // Handle DOCX files using Mammoth.js
         const arrayBuffer = await response.arrayBuffer();
         try {
@@ -204,7 +192,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
           console.error('Error converting DOCX:', mammothError);
           throw new Error(`Failed to convert DOCX file: ${mammothError instanceof Error ? mammothError.message : String(mammothError)}`);
         }
-      } else if (docContentType.startsWith('image/')) {
+      } else if (docToLoad.contentType?.startsWith('image/')) {
         // Handle image files
         console.log('[fetchAndProcessContent] Setting image URL:', proxyUrl);
         setImageUrl(proxyUrl);
@@ -356,23 +344,19 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   }, [document?.id, handleRefresh, setRefreshKey]);
 
   // --- Derived Constants for Content Type ---
-  // Get the content type from either contentType or type field
-  const docContentType = document?.contentType || document?.type || '';
-  console.log(`[DocumentViewer] Document content type detection: contentType=${document?.contentType}, type=${document?.type}, using=${docContentType}`);
-  
-  const isPdf = docContentType.includes('pdf');
+  const isPdf = document?.contentType?.includes('pdf');
   const isText = [
     'text/plain', 
     'text/markdown', 
     'application/json'
-  ].includes(docContentType);
+  ].includes(document?.contentType || '');
   const isSheet = [
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
     'application/vnd.ms-excel', // .xls
     'text/csv' // .csv
-  ].includes(docContentType);
-  const isImage = docContentType.startsWith('image/');
-  const isDocx = docContentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  ].includes(document?.contentType || '');
+  const isImage = document?.contentType?.startsWith('image/');
+  const isDocx = document?.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
   // Determine if any preview is supported
   const isPreviewSupported = isPdf || isText || isSheet || isImage || isDocx;

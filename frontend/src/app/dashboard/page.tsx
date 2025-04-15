@@ -1,6 +1,6 @@
 'use client';
 
-import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff, Folder, FolderPlus, Move, Pencil, FileSearch } from 'lucide-react';
+import { Loader2, Trash2, FileText, MoreHorizontal, RefreshCw, Maximize2, Minimize2, Eye, EyeOff, Folder, FolderPlus, Move, Pencil } from 'lucide-react';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Skeleton from 'react-loading-skeleton'; 
 import 'react-loading-skeleton/dist/skeleton.css'; 
@@ -28,7 +28,6 @@ import {
 import DocumentViewer from '@/components/dashboard/DocumentViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
 import { FileUpload } from '@/components/dashboard/FileUpload';
-import QuickPreview from '@/components/dashboard/QuickPreview';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Breadcrumbs, { BreadcrumbItem } from '@/components/dashboard/Breadcrumbs'; // Import Breadcrumbs
 import {
@@ -41,7 +40,7 @@ import {
 } from 'firebase/firestore';
 import { db, createFolderAPI, functionsInstance } from '@/lib/firebaseConfig';
 import { httpsCallable } from 'firebase/functions';
-import { MyDocumentData } from '@/types/documents'; // Import only MyDocumentData
+import { MyDocumentData, FolderData, FilesystemItem } from '@/types';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,35 +51,32 @@ import { MoveDocumentModal } from '@/components/dashboard/MoveDocumentModal';
 import { cn } from "@/lib/utils"; 
 
 interface DocumentTableProps {
-  documents: MyDocumentData[]; // Use MyDocumentData[] for documents/folders
+  items: FilesystemItem[];
   isLoading: boolean;
   error: string | null;
-  onSelectItem: (item: MyDocumentData | null) => void; // Use MyDocumentData
+  onSelectItem: (item: FilesystemItem | null) => void;
   onDeleteDocument: (docId: string) => Promise<void>;
   onFolderClick: (folderId: string, folderName: string) => void;
   onMoveClick: (docId: string, docName: string) => void;
   onRenameFolder: (folderId: string, currentName: string) => void;
   onDeleteFolder: (folderId: string, folderName: string) => void;
-  setPreviewDocument: (doc: MyDocumentData | null) => void; // Ensure correct type
 }
 
 function DocumentTable({ 
-  documents, // Rename prop to documents
+  items, 
   isLoading, 
   error, 
   onSelectItem, 
   onDeleteDocument, 
   onFolderClick, 
   onMoveClick, 
-  onRenameFolder,
-  onDeleteFolder,
-  setPreviewDocument
+  onRenameFolder, 
+  onDeleteFolder 
 }: DocumentTableProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const [itemToDelete, setItemToDelete] = useState<MyDocumentData | null>(null); // State for confirmation dialog
-  const [previewDocument, setPreviewDocumentState] = useState<MyDocumentData | null>(null); // State for quick preview
+  const [itemToDelete, setItemToDelete] = useState<FilesystemItem | null>(null); // State for confirmation dialog
   const { toast } = useToast();
 
   const formatDate = (timestamp: any): string => {
@@ -112,7 +108,7 @@ function DocumentTable({
     return 'Invalid Date';
   };
 
-  const displayItems = documents.length > 0 ? documents : [];
+  const displayItems = items.length > 0 ? items : [];
 
   return (
     <div>
@@ -140,11 +136,11 @@ function DocumentTable({
           {isLoading ? (
             // Render Skeleton loaders when loading
             Array.from({ length: 5 }).map((_, index) => (
-              <TableRow key={`skeleton-${index}`} data-testid="skeleton-row">
-                <TableCell className="w-[48px]"><Skeleton circle height={24} width={24} /></TableCell>
-                <TableCell><Skeleton width={`80%`} /></TableCell>
-                <TableCell><Skeleton width={`60%`} /></TableCell>
-                <TableCell><Skeleton width={`60%`} /></TableCell>
+              <TableRow key={`skeleton-${index}`}>
+                <TableCell className="w-8"><Skeleton circle width={16} height={16} /></TableCell>
+                <TableCell className="w-[200px]"><Skeleton height={20} /></TableCell>
+                <TableCell><Skeleton height={20} width={80} /></TableCell>
+                <TableCell><Skeleton height={20} width={60} /></TableCell>
                 <TableCell className="text-right"><Skeleton height={32} width={32} /></TableCell>
               </TableRow>
             ))
@@ -156,7 +152,7 @@ function DocumentTable({
             </TableRow>
           ) : (
             displayItems.map((item) => {
-              if (item.isFolder) { // Check the isFolder flag
+              if (item.type === 'folder') {
                 return (
                   <TableRow key={item.id} className="cursor-pointer hover:bg-muted/50" onClick={() => {
                     onFolderClick(item.id, item.name);
@@ -167,7 +163,7 @@ function DocumentTable({
                     <TableCell className="font-medium">
                       {item.name}
                     </TableCell>
-                    <TableCell>{item.createdAt ? formatDate(item.createdAt) : 'N/A'} {/* Display createdAt */}</TableCell>
+                    <TableCell>{formatDate(item.updatedAt)}</TableCell>
                     <TableCell>N/A</TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu 
@@ -207,7 +203,7 @@ function DocumentTable({
                   </TableRow>
                 );
               } else {
-                const doc = item; // Keep using 'doc' for non-folder items if preferred
+                const doc = item;
                 return (
                   <TableRow 
                     key={doc.id} 
@@ -220,8 +216,8 @@ function DocumentTable({
                     <TableCell className="font-medium">
                       {doc.name}
                     </TableCell>
-                    <TableCell>{doc.createdAt ? formatDate(doc.createdAt) : 'N/A'}</TableCell>
-                    <TableCell> </TableCell>
+                    <TableCell>{formatDate(doc.updatedAt)}</TableCell>
+                    <TableCell>{doc.status || 'N/A'}</TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu 
                         open={openDropdown === doc.id} 
@@ -240,15 +236,7 @@ function DocumentTable({
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={() => onSelectItem(doc)}>
                             <Eye className="mr-2 h-4 w-4" />
-                            View / Preview
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={(e) => {
-                            e.preventDefault();
-                            setOpenDropdown(null);
-                            setPreviewDocument(doc as MyDocumentData);
-                          }}>
-                            <FileSearch className="mr-2 h-4 w-4" />
-                            Quick Preview
+                            View
                           </DropdownMenuItem>
                           <DropdownMenuItem 
                             onSelect={(event) => {
@@ -277,7 +265,7 @@ function DocumentTable({
                             }}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
+                            <span>Delete</span>
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -299,59 +287,70 @@ function DocumentTable({
           )}
         </TableBody>
       </Table>
-      {/* Confirmation Dialog */}
-      <AlertDialog open={!!itemToDelete} onOpenChange={(open) => !open && setItemToDelete(null)}>
-        <AlertDialogTrigger asChild>
-          <Button variant="ghost" className="sr-only">Open confirmation dialog</Button>
-        </AlertDialogTrigger>
+
+      {/* Decoupled Delete Confirmation Dialog */}
+      <AlertDialog open={itemToDelete !== null} onOpenChange={(isOpen) => !isOpen && setItemToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete {itemToDelete?.isFolder ? 'Folder' : 'Document'}</AlertDialogTitle>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete <span className="font-semibold">{itemToDelete?.name ?? 'this item'}</span>? 
-              {itemToDelete?.isFolder ? 
-                <span className="text-red-600 block mt-2">This will permanently delete the folder and all its contents. This action cannot be undone.</span> : 
-                'This action cannot be undone.'}
+              This action cannot be undone. This will permanently delete the {itemToDelete?.type === 'folder' ? 'folder' : 'document'}
+              {' '}
+              <span className="font-medium">'{itemToDelete?.name}'</span>.
+              {itemToDelete?.type === 'folder' && ' All contents within this folder will also be deleted.'} {/* Add warning for folder deletion */}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setItemToDelete(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={async () => {
-                if (itemToDelete) {
-                  if (itemToDelete.isFolder) {
-                    try {
-                      const deleteFolderFunction = httpsCallable(functionsInstance, 'deleteFolder');
-                      await deleteFolderFunction({ folderId: itemToDelete.id });
-                      toast({ title: "Success", description: `Folder '${itemToDelete.name}' and its contents deleted.` });
+            <AlertDialogCancel onClick={() => setItemToDelete(null)} disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (!itemToDelete) return;
+
+              setDeletingId(itemToDelete.id);
+              setIsDeleting(true);
+
+              if (itemToDelete.type === 'document') {
+                // Simply call the onDeleteDocument function and let it handle the UI updates
+                onDeleteDocument(itemToDelete.id)
+                  .catch((error: unknown) => {
+                    console.error(`Error deleting document ${itemToDelete.id}:`, error);
+                    const message = error instanceof Error ? error.message : 'An unknown error occurred.';
+                    toast({ variant: "destructive", title: "Error", description: `Failed to delete document '${itemToDelete.name}'. ${message}` });
+                  })
+                  .finally(() => {
+                    setIsDeleting(false);
+                    setItemToDelete(null); // This closes the dialog
+                  });
+              } else if (itemToDelete.type === 'folder') {
+                const deleteFolderFunction = httpsCallable(functionsInstance, 'deleteFolder');
+                deleteFolderFunction({ folderId: itemToDelete.id })
+                  .then((result) => {
+                    const responseData = result.data as { success: boolean; message?: string };
+
+                    if (responseData.success) {
+                      toast({ title: "Success", description: `Folder '${itemToDelete.name}' and its contents deleted successfully.` });
                       // We don't need to manually update state or navigate here
                       // The page will refresh when the dialog is closed
-                    } catch (error) {
-                      console.error("Error deleting folder:", error);
-                      const message = error instanceof Error ? error.message : 'Unknown error from function.';
-                      toast({ variant: "destructive", title: "Error", description: `Failed to delete folder: ${message}` });
-                    } finally {
-                      setIsDeleting(false);
-                      setItemToDelete(null); // This closes the dialog since it's controlled by itemToDelete !== null
+                    } else {
+                      throw new Error(responseData.message || 'Unknown error from function.');
                     }
-                  } else {
-                    await onDeleteDocument(itemToDelete.id);
-                  }
-                }
-              }} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
+                  })
+                  .catch((error: unknown) => {
+                    console.error(`Error calling deleteFolder function for ${itemToDelete.id}:`, error);
+                    const message = error instanceof Error ? error.message : 'An unknown error occurred.';
+                    toast({ variant: "destructive", title: "Error", description: `Failed to delete folder '${itemToDelete.name}'. ${message}` });
+                  })
+                  .finally(() => {
+                    setIsDeleting(false);
+                    setItemToDelete(null); // This closes the dialog since it's controlled by itemToDelete !== null
+                  });
+              }
+            }} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
               {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      
-      {/* Quick Preview Dialog */}
-      <QuickPreview 
-        document={previewDocument} 
-        isOpen={!!previewDocument} 
-        onClose={() => setPreviewDocument(null)} 
-      />
     </div>
   );
 }
@@ -361,13 +360,11 @@ function DashboardPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [documents, setDocuments] = useState<MyDocumentData[]>([]);
-  const [folders, setFolders] = useState<MyDocumentData[]>([]);
-  const [filesystemItems, setFilesystemItems] = useState<MyDocumentData[]>([]);
+  const [folders, setFolders] = useState<FolderData[]>([]);
+  const [filesystemItems, setFilesystemItems] = useState<FilesystemItem[]>([]);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [folderPath, setFolderPath] = useState<BreadcrumbItem[]>([]); // State for breadcrumbs
   const [selectedDocument, setSelectedDocument] = useState<MyDocumentData | null>(null);
-  // State for quick preview feature
-  const [previewDocument, setPreviewDocument] = useState<MyDocumentData | null>(null);
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [docsError, setDocsError] = useState<string | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -382,7 +379,7 @@ function DashboardPage() {
   const [isRenamingFolder, setIsRenamingFolder] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [movingDocument, setMovingDocument] = useState<{ id: string; name: string } | null>(null);
-  const [availableFolders, setAvailableFolders] = useState<MyDocumentData[]>([]);
+  const [availableFolders, setAvailableFolders] = useState<FolderData[]>([]);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
 
@@ -411,23 +408,18 @@ function DashboardPage() {
     try {
       const userId = user.uid;
 
-      // Fetch folders from the 'folders' collection
+      // Fetch folders
       const foldersQuery = query(
         collection(db, 'users', userId, 'folders'),
-        where('parentFolderId', '==', folderId),
+        where('parentFolderId', '==', currentFolderId),
         orderBy('name', 'asc')
       );
       const folderSnapshot = await getDocs(foldersQuery);
-      const fetchedFolders: MyDocumentData[] = folderSnapshot.docs.map(doc => ({
+      const fetchedFolders: FolderData[] = folderSnapshot.docs.map(doc => ({
         id: doc.id,
-        name: doc.data().name || `Unnamed Folder ${doc.id.substring(0,4)}`,
-        type: 'folder', // Required field for MyDocumentData
-        url: '', // Required field for MyDocumentData
-        isFolder: true, // Explicitly set isFolder to true
-        parentId: doc.data().parentFolderId, // Use parentFolderId from folder document
-        folderId: doc.data().parentFolderId, // Set folderId to match parentFolderId for consistency
-        createdAt: doc.data().createdAt?.toDate ? doc.data().createdAt.toDate() : undefined
-      }));
+        ...doc.data(),
+      } as FolderData));
+      const folderItems: FilesystemItem[] = fetchedFolders.map(f => ({ ...f, type: 'folder' }));
       console.log('Fetched Folders:', fetchedFolders);
 
       // Fetch documents with improved logging
@@ -438,8 +430,7 @@ function DashboardPage() {
       try {
         const documentsQueryByCreatedAt = query(
           collection(db, 'users', userId, 'documents'),
-          where('folderId', '==', folderId),
-          where('isFolder', '==', false),
+          where('folderId', '==', currentFolderId),
           orderBy('createdAt', 'desc') // Sort by creation time descending to show newest first
         );
         
@@ -460,8 +451,7 @@ function DashboardPage() {
         // Fall back to the original query (sorted by name)
         const documentsQueryByName = query(
           collection(db, 'users', userId, 'documents'),
-          where('folderId', '==', folderId),
-          where('isFolder', '==', false),
+          where('folderId', '==', currentFolderId),
           orderBy('name', 'asc')
         );
         
@@ -475,33 +465,18 @@ function DashboardPage() {
         console.log(`[Dashboard] Document ${index+1}: ID=${doc.id}, Name=${doc.data().name}`);
       });
       
-      // Map Firestore data to MyDocumentData interface
       const fetchedDocs: MyDocumentData[] = documentSnapshot.docs.map(doc => ({
         id: doc.id,
-        name: doc.data().name || `Unnamed Document ${doc.id.substring(0,4)}`,
-        type: doc.data().type || 'application/octet-stream', // Default MIME type
-        url: doc.data().url || '',   // Default empty URL
-        size: doc.data().size ?? 0, // Default size to 0
-        createdAt: doc.data().createdAt?.toDate ? doc.data().createdAt.toDate() : undefined, // Use converted Date or undefined
-        userId: doc.data().userId || user.uid, // Default to current user ID
-        isFolder: doc.data().isFolder || false, // Default to false if undefined
-        parentId: doc.data().parentId === undefined ? null : doc.data().parentId, // Handle null parentId
-        // Omit properties not in MyDocumentData: uploadedAt, updatedAt, status, storagePath, etc.
+        ...doc.data(),
+        uploadedAt: doc.data().uploadedAt as Timestamp,
+        createdAt: doc.data().createdAt as Timestamp,
+        updatedAt: doc.data().updatedAt as Timestamp,
       } as MyDocumentData));
+      const documentItems: FilesystemItem[] = fetchedDocs.map(d => ({ ...d, type: 'document' }));
       console.log(`[Dashboard] Processed ${fetchedDocs.length} documents into UI items`);
 
-      // Combine folders and documents (both are MyDocumentData now)
-      const combinedItems = [...fetchedFolders, ...fetchedDocs]; // Combine fetched folders and docs
-
-      // Sort combined items: folders first, then by name
-      combinedItems.sort((a, b) => {
-        if (a.isFolder && !b.isFolder) return -1;
-        if (!a.isFolder && b.isFolder) return 1;
-        return a.name.localeCompare(b.name);
-      });
-
-      setFilesystemItems(combinedItems);
-      console.log(`[Dashboard] Updated UI with ${fetchedFolders.length} folders and ${fetchedDocs.length} documents`);
+      setFilesystemItems([...folderItems, ...documentItems]);
+      console.log(`[Dashboard] Updated UI with ${folderItems.length} folders and ${documentItems.length} documents`);
 
     } catch (error) {
       console.error('[Dashboard] Error fetching documents or folders:', error);
@@ -519,12 +494,12 @@ function DashboardPage() {
     }
   };
 
-  const handleSelectItem = (item: MyDocumentData | null) => {
-    if (item?.isFolder) {
-      console.log('Folder selected:', item);
-      setSelectedDocument(null);
-    } else if (item) {
+  const handleSelectItem = (item: FilesystemItem | null) => {
+    if (item?.type === 'document') {
       handleSelectDocument(item);
+    } else if (item?.type === 'folder') {
+      console.log('Folder selected (for info):', item);
+      setSelectedDocument(null);
     } else {
       handleSelectDocument(null);
     }
@@ -634,17 +609,15 @@ function DashboardPage() {
     console.log(`Fetching all folders for user: ${user.uid}`);
     try {
       setIsLoadingFolders(true); // Start loading
-      const q = query(collection(db, 'users', user.uid, 'documents'), where('isFolder', '==', true));
+      const foldersRef = collection(db, `users/${user.uid}/folders`);
+      const q = query(foldersRef, orderBy('name', 'asc'));
       const querySnapshot = await getDocs(q);
-      const folders: MyDocumentData[] = querySnapshot.docs.map(doc => ({
+      // Ensure createdAt/updatedAt are handled if needed, though FolderData might not require them here
+      const fetchedFolders: FolderData[] = querySnapshot.docs.map(doc => ({
         id: doc.id,
-        name: doc.data().name || `Unnamed Folder ${doc.id.substring(0,4)}`,
-        isFolder: true,
-        parentId: doc.data().parentId === undefined ? null : doc.data().parentId,
-        createdAt: doc.data().createdAt?.toDate ? doc.data().createdAt.toDate() : undefined
-      } as MyDocumentData));
-      console.log('Fetched all folders:', folders.length); 
-      setAvailableFolders(folders);
+        ...doc.data()
+      } as FolderData));
+      setAvailableFolders(fetchedFolders);
     } catch (error) {
       console.error('Error fetching all folders:', error);
       toast({ variant: "destructive", title: "Error", description: "Could not load folders for moving." });
@@ -871,7 +844,7 @@ function DashboardPage() {
                   <div className="flex h-full flex-col p-6 overflow-auto">
                     <div className="flex h-full flex-col">
                       <div className="flex-1 overflow-hidden">
-                        {selectedDocument ? <DocumentViewer document={selectedDocument}/> : null}
+                        {selectedDocument && <DocumentViewer document={selectedDocument}/>}
                       </div>
                     </div>
                   </div>
@@ -891,7 +864,7 @@ function DashboardPage() {
                     {selectedDocument ? (
                       <div className="flex h-full flex-col">
                         <div className="flex-1 overflow-hidden">
-                          {selectedDocument ? <DocumentViewer document={selectedDocument}/> : null}
+                          {selectedDocument && <DocumentViewer document={selectedDocument}/>}
                         </div>
                       </div>
                     ) : (
@@ -921,7 +894,7 @@ function DashboardPage() {
                         ) : (
                           <>
                             <DocumentTable
-                              documents={filesystemItems}
+                              items={filesystemItems}
                               isLoading={false} // Handled outside
                               error={null}      // Handled outside
                               onSelectItem={handleSelectItem}
@@ -930,7 +903,6 @@ function DashboardPage() {
                               onMoveClick={handleOpenMoveModal}
                               onRenameFolder={handleRenameFolder}
                               onDeleteFolder={handleDeleteFolder}
-                              setPreviewDocument={setPreviewDocument}
                             />
                             {filesystemItems.length === 0 && (
                               <p className="mt-4 text-center text-muted-foreground">No documents or folders uploaded yet. Upload a file or create a folder to start.</p>

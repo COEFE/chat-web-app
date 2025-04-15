@@ -7,13 +7,13 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { MyDocumentData } from '@/types/documents'; // Import the correct type
+import { FolderData } from '@/types'; // Assuming FolderData is defined in types
 
 interface MoveDocumentModalProps {
   isOpen: boolean;
   onClose: () => void;
   documentName: string;
-  folders: MyDocumentData[]; // Update prop type
+  folders: FolderData[];
   onConfirmMove: (targetFolderId: string | null) => void;
   isLoadingFolders?: boolean; // Optional loading state for folders
 }
@@ -116,13 +116,11 @@ export function MoveDocumentModal({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ROOT_FOLDER_VALUE}>(Move to Root)</SelectItem>
-                  {folders
-                   .filter(folder => folder.isFolder) // Ensure we only list folders
-                   .map((folder) => (
-                     <SelectItem key={folder.id} value={folder.id}>
-                       {folder.name}
-                     </SelectItem>
-                   ))}
+                  {folders.map((folder) => (
+                    <SelectItem key={folder.id} value={folder.id}>
+                      {folder.name}
+                    </SelectItem>
+                  ))}
                   {folders.length === 0 && (
                      <div className="px-2 py-1.5 text-sm text-muted-foreground">No folders available.</div>
                   )}

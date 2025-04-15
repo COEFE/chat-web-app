@@ -228,13 +228,12 @@ export const processDocumentUpload = onObjectFinalized(
         createdAt,
         status: "processed", // Changed from "uploaded" to "processed"
         downloadURL: signedUrl, // Add the generated signed URL
-        isFolder: false, // Always set isFolder: false for uploaded files
       };
       logger.info("Attempting to create Firestore document with data:", {...documentData, downloadURL: "..."}); // Log data (mask URL)
 
       try {
         // Use set() to create or overwrite the document
-        await docRef.set(documentData); // isFolder: false is now always set
+        await docRef.set(documentData);
         logger.info(`Successfully created Firestore entry for: ${originalName} (ID: ${docRef.id}) with folderId: ${folderIdFromMeta}`);
       } catch (error) {
         logger.error("Error creating Firestore entry: " + error);

@@ -1,8 +1,19 @@
 import { Timestamp } from 'firebase/firestore';
-import type { MyDocumentData } from './documents';
 
 // Shared interface for document data across components
-export type { MyDocumentData } from './documents';
+export interface MyDocumentData {
+  id: string; // Firestore document ID
+  userId: string;
+  name: string;
+  storagePath: string;
+  uploadedAt: Timestamp; // Use Firestore Timestamp
+  updatedAt: Timestamp; // Add the missing updatedAt field
+  contentType: string;
+  status: string; // e.g., 'uploading', 'complete', 'error'
+  downloadURL?: string;
+  size: number; // Size in bytes
+  createdAt: Timestamp | null; // Creation timestamp, null if not available
+}
 
 // Interface for Folder data
 export interface FolderData {
