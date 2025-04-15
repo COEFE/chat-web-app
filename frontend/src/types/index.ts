@@ -1,4 +1,5 @@
 import { Timestamp } from 'firebase/firestore';
+import type { MyDocumentData } from './documents';
 
 // Shared interface for document data across components
 export type { MyDocumentData } from './documents';
