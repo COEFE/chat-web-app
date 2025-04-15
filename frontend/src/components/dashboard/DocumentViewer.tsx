@@ -85,8 +85,12 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       // PDF is handled by the dynamic PDFViewer component, no direct fetch/state update needed here
       // unless we want to explicitly track PDF state for some reason.
 
+      // Get content type from either contentType or type field
+      const docContentType = docToLoad.contentType || docToLoad.type || '';
+      console.log(`[fetchAndProcessContent] Using content type: ${docContentType}`);
+      
       // Handle different content types
-      if (docToLoad.contentType === 'text/plain') {
+      if (docContentType === 'text/plain') {
         const text = await response.text();
         console.log('[fetchAndProcessContent] Setting text content:', text);
         setTextContent(text);
@@ -94,7 +98,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
           'application/vnd.ms-excel', // .xls
           'text/csv' // .csv
-        ].includes(docToLoad.contentType || '')) 
+        ].includes(docContentType)) 
       {
         const data = await response.arrayBuffer();
         if (data) {
@@ -181,7 +185,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             throw new Error('Error parsing Excel file. The file may be corrupted or in an unsupported format.');
           }
         }
-      } else if (docToLoad.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      } else if (docContentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
         // Handle DOCX files using Mammoth.js
         const arrayBuffer = await response.arrayBuffer();
         try {
@@ -192,7 +196,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
           console.error('Error converting DOCX:', mammothError);
           throw new Error(`Failed to convert DOCX file: ${mammothError instanceof Error ? mammothError.message : String(mammothError)}`);
         }
-      } else if (docToLoad.contentType?.startsWith('image/')) {
+      } else if (docContentType.startsWith('image/')) {
         // Handle image files
         console.log('[fetchAndProcessContent] Setting image URL:', proxyUrl);
         setImageUrl(proxyUrl);
@@ -344,19 +348,23 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   }, [document?.id, handleRefresh, setRefreshKey]);
 
   // --- Derived Constants for Content Type ---
-  const isPdf = document?.contentType?.includes('pdf');
+  // Get the content type from either contentType or type field
+  const docContentType = document?.contentType || document?.type || '';
+  console.log(`[DocumentViewer] Document content type detection: contentType=${document?.contentType}, type=${document?.type}, using=${docContentType}`);
+  
+  const isPdf = docContentType.includes('pdf');
   const isText = [
     'text/plain', 
     'text/markdown', 
     'application/json'
-  ].includes(document?.contentType || '');
+  ].includes(docContentType);
   const isSheet = [
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
     'application/vnd.ms-excel', // .xls
     'text/csv' // .csv
-  ].includes(document?.contentType || '');
-  const isImage = document?.contentType?.startsWith('image/');
-  const isDocx = document?.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  ].includes(docContentType);
+  const isImage = docContentType.startsWith('image/');
+  const isDocx = docContentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
   // Determine if any preview is supported
   const isPreviewSupported = isPdf || isText || isSheet || isImage || isDocx;
