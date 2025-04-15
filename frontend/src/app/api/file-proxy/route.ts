@@ -129,6 +129,7 @@ export async function GET(request: NextRequest) {
                 'Content-Length': String(fileBuffer.length),
                 'Content-Disposition': contentDisposition,
                 'Cache-Control': 'public, max-age=86400', // Cache for 24 hours
+                'X-Document-Type': contentType, // Add document type header to ensure viewer can detect file type
                 ...corsHeaders, // Add consistent CORS headers
               },
             });
@@ -184,6 +185,7 @@ export async function GET(request: NextRequest) {
           'Content-Length': String(fileBuffer.length),
           'Content-Disposition': `inline; filename="${file.name.split('/').pop()}"`,
           'Cache-Control': 'public, max-age=86400', // Cache for 24 hours
+          'X-Document-Type': contentType, // Add document type header to ensure viewer can detect file type
           ...corsHeaders, // Add consistent CORS headers
         },
       });

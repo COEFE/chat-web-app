@@ -81,6 +81,14 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         const errorText = await response.text();
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
+      
+      // Check for X-Document-Type header which may provide more accurate content type info
+      const documentTypeHeader = response.headers.get('X-Document-Type');
+      if (documentTypeHeader) {
+        console.log(`[fetchAndProcessContent] Found X-Document-Type header: ${documentTypeHeader}`);
+        // Update document content type if header is present
+        docToLoad.contentType = documentTypeHeader;
+      }
 
       // PDF is handled by the dynamic PDFViewer component, no direct fetch/state update needed here
       // unless we want to explicitly track PDF state for some reason.
