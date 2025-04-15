@@ -86,7 +86,7 @@ const QuickPreview: React.FC<QuickPreviewProps> = ({ document, isOpen, onClose }
         <DialogHeader>
           <DialogTitle>{document.name || 'File Preview'}</DialogTitle>
           <DialogDescription>
-             Type: {document.type || 'Unknown'} | Size: {document.size ? formatBytes(document.size) : 'N/A'} | Modified: {document.createdAt ? format(new Date(document.createdAt), 'PPp') : 'N/A'} {/* Use createdAt */}
+             Type: {document.type || 'Unknown'} | Size: {document.size ? formatBytes(document.size) : 'N/A'} | Modified: {document.createdAt ? format(document.createdAt.toDate(), 'PPp') : 'N/A'} {/* Use createdAt */}
           </DialogDescription>
         </DialogHeader>
         <div className="flex-grow overflow-auto p-1 border rounded-md">
