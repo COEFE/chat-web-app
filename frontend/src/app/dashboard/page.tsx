@@ -411,21 +411,23 @@ function DashboardPage() {
     try {
       const userId = user.uid;
 
-      // Fetch folders
+      // Fetch folders from the 'folders' collection
       const foldersQuery = query(
-        collection(db, 'users', userId, 'documents'),
-        where('folderId', '==', folderId),
-        where('isFolder', '==', true),
+        collection(db, 'users', userId, 'folders'),
+        where('parentFolderId', '==', folderId),
         orderBy('name', 'asc')
       );
       const folderSnapshot = await getDocs(foldersQuery);
       const fetchedFolders: MyDocumentData[] = folderSnapshot.docs.map(doc => ({
         id: doc.id,
         name: doc.data().name || `Unnamed Folder ${doc.id.substring(0,4)}`,
-        isFolder: true,
-        parentId: doc.data().parentId === undefined ? null : doc.data().parentId,
+        type: 'folder', // Required field for MyDocumentData
+        url: '', // Required field for MyDocumentData
+        isFolder: true, // Explicitly set isFolder to true
+        parentId: doc.data().parentFolderId, // Use parentFolderId from folder document
+        folderId: doc.data().parentFolderId, // Set folderId to match parentFolderId for consistency
         createdAt: doc.data().createdAt?.toDate ? doc.data().createdAt.toDate() : undefined
-      } as MyDocumentData));
+      }));
       console.log('Fetched Folders:', fetchedFolders);
 
       // Fetch documents with improved logging
