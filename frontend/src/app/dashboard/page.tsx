@@ -855,72 +855,75 @@ function DashboardPage() {
                 )}
               </div>
             ) : (
-              <div className="flex h-full">
-                <div className={cn(
-                  "border-r", 
-                  selectedDocument ? "w-[70%]" : "w-full"
-                )}>
-                  <div className="flex h-full flex-col p-6 overflow-auto">
-                    {selectedDocument ? (
-                      <div className="flex h-full flex-col">
-                        <div className="flex-1 overflow-hidden">
-                          {selectedDocument && <DocumentViewer document={selectedDocument}/>}
+              <div className="h-full">
+                {selectedDocument ? (
+                  <ResizablePanelGroup direction="horizontal" className="h-full">
+                    <ResizablePanel defaultSize={70} minSize={30} className="border-r">
+                      <div className="flex h-full flex-col p-6 overflow-auto">
+                        <div className="flex h-full flex-col">
+                          <div className="flex-1 overflow-hidden">
+                            {selectedDocument && <DocumentViewer document={selectedDocument}/>}
+                          </div>
                         </div>
                       </div>
-                    ) : (
-                      <>
-                        <Card className="mb-6">
-                          <CardHeader>
-                            <CardTitle>Upload New Document</CardTitle>
-                            <CardDescription>Drag & drop files here or click to select files. Files will be added to the current folder: <span className='font-medium'>{folderPath[folderPath.length - 1]?.name ?? 'Home'}</span></CardDescription>
-                          </CardHeader>
-                          <CardContent>
-                            <FileUpload
-                              onUploadComplete={handleUploadSuccess}
-                              currentFolderId={currentFolderId}
-                            />
-                          </CardContent>
-                        </Card>
-                        {/* Conditional Rendering for Document Table */}
-                        {loadingDocs ? (
-                          <div className="flex items-center justify-center p-10">
-                            <Loader2 className="h-6 w-6 animate-spin mr-2" />
-                            <span>Loading items...</span>
-                          </div>
-                        ) : docsError ? (
-                          <div className="text-red-600 p-4 text-center border border-red-300 rounded-md bg-red-50">
-                            {docsError}
-                          </div>
-                        ) : (
-                          <>
-                            <DocumentTable
-                              items={filesystemItems}
-                              isLoading={false} // Handled outside
-                              error={null}      // Handled outside
-                              onSelectItem={handleSelectItem}
-                              onDeleteDocument={handleDeleteDocument}
-                              onFolderClick={handleFolderClick}
-                              onMoveClick={handleOpenMoveModal}
-                              onRenameFolder={handleRenameFolder}
-                              onDeleteFolder={handleDeleteFolder}
-                            />
-                            {filesystemItems.length === 0 && (
-                              <p className="mt-4 text-center text-muted-foreground">No documents or folders uploaded yet. Upload a file or create a folder to start.</p>
-                            )}
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-                
-                {selectedDocument && (
-                  <div className="w-[30%]">
-                    <div className="flex h-full flex-col p-6">
-                      <ChatInterface documentId={selectedDocument.id} document={selectedDocument} />
+                    </ResizablePanel>
+                    
+                    <ResizableHandle withHandle />
+                    
+                    <ResizablePanel defaultSize={30} minSize={20}>
+                      <div className="flex h-full flex-col p-6">
+                        <ChatInterface documentId={selectedDocument.id} document={selectedDocument} />
+                      </div>
+                    </ResizablePanel>
+                  </ResizablePanelGroup>
+                ) : (
+                  <div className="flex h-full">
+                    <div className="w-full">
+                      <div className="flex h-full flex-col p-6 overflow-auto">
+                      <Card className="mb-6">
+                        <CardHeader>
+                          <CardTitle>Upload New Document</CardTitle>
+                          <CardDescription>Drag & drop files here or click to select files. Files will be added to the current folder: <span className='font-medium'>{folderPath[folderPath.length - 1]?.name ?? 'Home'}</span></CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <FileUpload
+                            onUploadComplete={handleUploadSuccess}
+                            currentFolderId={currentFolderId}
+                          />
+                        </CardContent>
+                      </Card>
+                      {/* Conditional Rendering for Document Table */}
+                      {loadingDocs ? (
+                        <div className="flex items-center justify-center p-10">
+                          <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                          <span>Loading items...</span>
+                        </div>
+                      ) : docsError ? (
+                        <div className="text-red-600 p-4 text-center border border-red-300 rounded-md bg-red-50">
+                          {docsError}
+                        </div>
+                      ) : (
+                        <>
+                          <DocumentTable
+                            items={filesystemItems}
+                            isLoading={false} // Handled outside
+                            error={null}      // Handled outside
+                            onSelectItem={handleSelectItem}
+                            onDeleteDocument={handleDeleteDocument}
+                            onFolderClick={handleFolderClick}
+                            onMoveClick={handleOpenMoveModal}
+                            onRenameFolder={handleRenameFolder}
+                            onDeleteFolder={handleDeleteFolder}
+                          />
+                          {filesystemItems.length === 0 && (
+                            <p className="mt-4 text-center text-muted-foreground">No documents or folders uploaded yet. Upload a file or create a folder to start.</p>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
-                )}
+                </div>
+              )}
               </div>
             )}
           </div>
