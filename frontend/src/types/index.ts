@@ -6,12 +6,13 @@ export interface MyDocumentData {
   userId: string;
   name: string;
   storagePath: string;
+  parentId: string | null; // ID of the parent folder, or null for root
   uploadedAt: Timestamp; // Use Firestore Timestamp
   updatedAt: Timestamp; // Add the missing updatedAt field
   contentType: string;
   status: string; // e.g., 'uploading', 'complete', 'error'
   downloadURL?: string;
-  size: number; // Size in bytes
+  size?: number; // Size in bytes
   createdAt: Timestamp | null; // Creation timestamp, null if not available
 }
 
@@ -19,7 +20,7 @@ export interface MyDocumentData {
 export interface FolderData {
   id: string; // Firestore document ID
   name: string;
-  parentFolderId: string | null; // ID of the parent folder, or null for root
+  parentId: string | null; // ID of the parent folder, or null for root
   userId: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -28,3 +29,9 @@ export interface FolderData {
 // You might also want a type that represents either a folder or a document
 // for use in the display list
 export type FilesystemItem = (FolderData & { type: 'folder' }) | (MyDocumentData & { type: 'document' });
+
+// Type for Breadcrumbs
+export interface BreadcrumbItem {
+  id: string | null; // null represents the root
+  name: string;
+}
