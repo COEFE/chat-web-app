@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db, functionsInstance, storage } from '@/lib/firebaseConfig';
@@ -134,7 +134,8 @@ import { FileUpload } from '@/components/dashboard/FileUpload';
 import { ListTree } from 'lucide-react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import { DraggableRow } from '@/components/dashboard/DraggableRow'; // Import DraggableRow
+import { DraggableRow } from '@/components/dashboard/DraggableRow'; 
+import FolderBreadcrumbs from '@/components/dashboard/FolderBreadcrumbs'; 
 
 import { 
   formatDistanceToNow, 
@@ -157,15 +158,16 @@ interface DocumentTableProps {
   onRenameFolder: (folderId: string, currentName: string) => void;
   onDeleteFolder: (folderId: string, folderName: string) => void;
   initialGrouping?: GroupingState;
-  onMoveRow: (dragIndex: number, hoverIndex: number) => void; // Add onMoveRow prop
-  onDropItemIntoFolder: (itemId: string, targetFolderId: string) => void; // Add prop
+  onMoveRow: (dragIndex: number, hoverIndex: number) => void; 
+  onDropItemIntoFolder: (itemId: string, targetFolderId: string) => void; 
 }
 
 const createColumns = (
   onSelectItem: (item: FilesystemItem | null) => void,
+  onFolderClick: (folderId: string, folderName: string) => void,
   onMoveClick: (itemId: string, itemName: string, itemType: 'document' | 'folder') => void,
   onRenameFolder: (folderId: string, currentName: string) => void,
-  onFolderClick: (folderId: string, folderName: string) => void,
+  onDeleteFolder: (folderId: string, folderName: string) => void,
   handleDeleteClick: (item: FilesystemItem, e: React.MouseEvent) => void,
   isDeleting: boolean,
   deletingId: string | null
@@ -415,9 +417,9 @@ function DocumentTable({
     setItemToDelete(item);
   };
 
-  const columns = React.useMemo(
-    () => createColumns(onSelectItem, onMoveClick, onRenameFolder, onFolderClick, handleDeleteClick, isDeleting, deletingId),
-    [onSelectItem, onMoveClick, onRenameFolder, onFolderClick, handleDeleteClick, isDeleting, deletingId]
+  const columns = useMemo(
+    () => createColumns(onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, handleDeleteClick, isDeleting, deletingId),
+    [onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, handleDeleteClick, isDeleting, deletingId]
   );
 
   const table = useReactTable({
@@ -695,6 +697,11 @@ function DashboardPage() {
   };
 
   async function fetchItems(folderId: string | null = null) {
+    // Use the provided folderId or fall back to the current state
+    // Handle null explicitly to avoid confusion
+    const targetFolderId = folderId !== undefined ? folderId : currentFolderId;
+    console.log(`[fetchItems] Using targetFolderId:`, targetFolderId, 'from input:', folderId, 'current state:', currentFolderId);
+    
     if (authLoading) {
       console.log('Auth is loading, skipping fetch.');
       return;
@@ -705,7 +712,7 @@ function DashboardPage() {
       return;
     }
 
-    console.log(`Fetching items for user: ${user.uid}, folderId: ${currentFolderId}`);
+    console.log(`Fetching items for user: ${user.uid}, folderId: ${targetFolderId}`);
     setLoadingDocs(true);
     setDocsError(null);
     setFilesystemItems([]);
@@ -713,28 +720,31 @@ function DashboardPage() {
     try {
       const userId = user.uid;
 
+      // Query for folders in the current folder
       const foldersQuery = query(
         collection(db, 'users', userId, 'folders'),
-        where('parentFolderId', '==', currentFolderId),
+        where('parentFolderId', '==', targetFolderId),
         orderBy('name', 'asc')
       );
+      console.log(`[fetchItems] Querying folders with parentFolderId: ${targetFolderId}`);
       const folderSnapshot = await getDocs(foldersQuery);
       const fetchedFolders: FolderData[] = folderSnapshot.docs.map(doc => ({
         id: doc.id,
-        ...doc.data(),
-      } as FolderData));
+        ...doc.data() as Omit<FolderData, 'id'>
+      }));
       const folderItems: FilesystemItem[] = fetchedFolders.map(f => ({ ...f, type: 'folder' }));
-      console.log('Fetched Folders:', fetchedFolders);
+      console.log('Fetched Folders:', fetchedFolders.map(f => ({ id: f.id, name: f.name, parentFolderId: f.parentFolderId })));
 
+      // Fetch documents in the current folder
       let documentSnapshot;
       try {
         const documentsQueryByCreatedAt = query(
           collection(db, 'users', userId, 'documents'),
-          where('folderId', '==', currentFolderId),
+          where('folderId', '==', targetFolderId),
           orderBy('createdAt', 'desc') 
         );
         
-        console.log('[Dashboard] Executing Firestore query for documents (sorted by createdAt)...');
+        console.log(`[Dashboard] Executing Firestore query for documents with folderId: ${targetFolderId}`);
         documentSnapshot = await getDocs(documentsQueryByCreatedAt);
         console.log('[Dashboard] Successfully retrieved documents sorted by creation date');
       } catch (indexError) {
@@ -742,13 +752,15 @@ function DashboardPage() {
         
         const documentsQueryByName = query(
           collection(db, 'users', userId, 'documents'),
-          where('folderId', '==', currentFolderId),
+          where('folderId', '==', targetFolderId),
           orderBy('name', 'asc')
         );
         
         console.log('[Dashboard] Falling back to name-based sorting query...');
         documentSnapshot = await getDocs(documentsQueryByName);
       }
+      
+      console.log(`[Dashboard] Document query complete for folderId: ${targetFolderId}, found: ${documentSnapshot.docs.length} documents`);
       
       const fetchedDocs: MyDocumentData[] = documentSnapshot.docs.map(doc => ({
         id: doc.id,
@@ -1115,8 +1127,7 @@ function DashboardPage() {
       console.error("Error moving item into folder:", error);
       toast({ variant: 'destructive', title: 'Error Moving Item', description: 'Failed to update the item in the database.' });
     }
-  }, [filesystemItems]); // Depend on filesystemItems to find the item
-
+  }, [filesystemItems]);  // Effect to fetch items when the current folder changes
   useEffect(() => {
     if (authLoading) {
       console.log('Auth is loading, skipping fetch.');
@@ -1128,14 +1139,55 @@ function DashboardPage() {
       return;
     }
 
-    console.log(`Fetching items for user: ${user.uid}, folderId: ${currentFolderId}`);
+    console.log(`[useEffect] Fetching items for folder: ${currentFolderId}`);
+    
+    // Fetch all folders for breadcrumb navigation
+    fetchAllFolders();
+    
+    // Call fetchItems with the current folder ID
+    // This will handle setting loading state and error state
+    fetchItems(currentFolderId);
+    
+  }, [user, authLoading, router, currentFolderId, refreshTrigger]);
+
+  const handleNavigateFolder = (folderId: string | null) => {
+    console.log("[DashboardPage] handleNavigateFolder called with:", folderId);
+    console.log("[DashboardPage] Current folder ID before change:", currentFolderId);
+    
+    // Don't do anything if we're already in this folder
+    if (folderId === currentFolderId) {
+      console.log("[DashboardPage] Already in this folder, no navigation needed");
+      return;
+    }
+    
+    // Update state
+    setCurrentFolderId(folderId);
+    setSelectedDocument(null); // Clear selection when changing folders
+    
+    // Force an immediate fetch without waiting for the effect
+    const userId = user?.uid;
+    if (!userId) return;
+    
+    console.log("[DashboardPage] Manually fetching items for folder:", folderId);
     setLoadingDocs(true);
     setDocsError(null);
-    setFilesystemItems([]);
-
-    fetchItems();
-
-  }, [user, authLoading, router, currentFolderId, refreshTrigger, setLoadingDocs, setDocsError, setFilesystemItems]);
+    
+    // Call the fetchItems function directly with the new folder ID
+    // This bypasses the useEffect dependency on currentFolderId
+    const fetchFolderItems = async () => {
+      try {
+        // Make sure we're passing the folder ID explicitly
+        await fetchItems(folderId);
+      } catch (error) {
+        console.error("Error fetching items:", error);
+        setDocsError("Failed to load items");
+      } finally {
+        setLoadingDocs(false);
+      }
+    };
+    
+    fetchFolderItems();
+  };
 
   if (authLoading) {
     return <div>Loading...</div>;
@@ -1144,6 +1196,10 @@ function DashboardPage() {
   if (!user) {
     return <div>Loading...</div>;
   }
+
+  const allFolders = useMemo(() => {
+    return filesystemItems.filter(item => item.type === 'folder') as FolderData[];
+  }, [filesystemItems]);
 
   return (
     <div className="flex h-screen flex-col bg-muted/40">
@@ -1157,7 +1213,11 @@ function DashboardPage() {
 
       <main className="flex-1 overflow-hidden p-6 pt-4">
         <div className="mb-4 text-sm text-muted-foreground">
-          <Breadcrumbs path={folderPath} onNavigate={handleNavigate} />
+          <FolderBreadcrumbs 
+            currentFolderId={currentFolderId}
+            folders={availableFolders}
+            onNavigate={handleNavigateFolder}
+          />
         </div>
 
         <div className="flex h-full flex-col">
@@ -1322,7 +1382,7 @@ function DashboardPage() {
                                 error={docsError}
                                 onSelectItem={handleSelectItem} 
                                 onDeleteDocument={handleDeleteDocument}
-                                onFolderClick={handleFolderClick}
+                                onFolderClick={handleNavigateFolder}
                                 onMoveClick={handleOpenMoveModal} 
                                 onRenameFolder={handleRenameFolder} 
                                 onDeleteFolder={handleDeleteFolder} 
@@ -1341,7 +1401,7 @@ function DashboardPage() {
                               isLoading={loadingDocs}
                               error={docsError}
                               onSelectItem={handleSelectItem}
-                              onFolderClick={handleFolderClick}
+                              onFolderClick={handleNavigateFolder}
                               onDeleteDocument={handleDeleteDocument}
                               onDeleteFolder={handleDeleteFolder}
                               onMoveClick={handleOpenMoveModal} 

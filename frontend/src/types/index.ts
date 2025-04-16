@@ -6,7 +6,7 @@ export interface MyDocumentData {
   userId: string;
   name: string;
   storagePath: string;
-  parentId: string | null; // ID of the parent folder, or null for root
+  folderId: string | null; // ID of the parent folder, or null for root
   uploadedAt: Timestamp; // Use Firestore Timestamp
   updatedAt: Timestamp; // Add the missing updatedAt field
   contentType: string;
@@ -20,7 +20,7 @@ export interface MyDocumentData {
 export interface FolderData {
   id: string; // Firestore document ID
   name: string;
-  parentId: string | null; // ID of the parent folder, or null for root
+  parentFolderId: string | null; // ID of the parent folder, or null for root
   userId: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
