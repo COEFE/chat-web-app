@@ -1,8 +1,7 @@
 'use client';
-// This file must be a client component because it uses hooks and state
 
 import * as React from 'react';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db, functionsInstance, storage } from '@/lib/firebaseConfig';
@@ -23,12 +22,123 @@ import {
 } from 'firebase/firestore';
 import { ref as storageRef, getMetadata } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
+import Skeleton from 'react-loading-skeleton';
 import 'react-loading-skeleton/dist/skeleton.css';
 import DocumentViewer from '@/components/dashboard/DocumentViewer';
-import ChatInterface from '@/components/dashboard/ChatInterface'; // Import ChatInterface
 import { FilesystemItem, MyDocumentData, FolderData, BreadcrumbItem } from '@/types'; 
 import { formatBytes, cn } from '@/lib/utils'; 
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { 
+  Folder, 
+  FileText, 
+  Plus, 
+  MoreHorizontal, 
+  Eye, 
+  Pencil, 
+  Trash2, 
+  Move, 
+  Loader2, 
+  List, 
+  LayoutGrid, 
+  Upload, 
+  FolderPlus, 
+  RefreshCw, 
+  EyeOff, 
+  Maximize2, 
+  Minimize2, 
+  ArrowUpDown, 
+  ChevronRight, 
+  ChevronDown, 
+  FileImage, 
+  FileVideo, 
+  FileAudio, 
+  FileSpreadsheet, 
+  FileCode, 
+  FileArchive 
+} from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription, 
+  DialogFooter, 
+  DialogTrigger
+} from "@/components/ui/dialog"; 
+import { 
+  ToggleGroup, 
+  ToggleGroupItem, 
+} from "@/components/ui/toggle-group"
+import { 
+  Card, 
+  CardContent, 
+  CardDescription, 
+  CardFooter, 
+  CardHeader, 
+  CardTitle, 
+} from "@/components/ui/card";
+import { 
+  Table as ShadcnTable, 
+  TableCell, 
+  TableHead, 
+  TableRow 
+} from "@/components/ui/table";
+import { 
+  AlertDialog, 
+  AlertDialogAction, 
+  AlertDialogCancel, 
+  AlertDialogContent, 
+  AlertDialogDescription, 
+  AlertDialogFooter, 
+  AlertDialogHeader, 
+  AlertDialogTitle 
+} from "@/components/ui/alert-dialog";
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuLabel, 
+  DropdownMenuRadioGroup, 
+  DropdownMenuRadioItem, 
+  DropdownMenuSeparator, 
+  DropdownMenuTrigger, 
+  DropdownMenuItem, 
+  DropdownMenuCheckboxItem 
+} from "@/components/ui/dropdown-menu";
+import { useToast } from "@/components/ui/use-toast";
+import { 
+  ColumnDef, 
+  ColumnFiltersState, 
+  SortingState, 
+  VisibilityState, 
+  GroupingState, 
+  ExpandedState, 
+  flexRender, 
+  getCoreRowModel, 
+  getFilteredRowModel, 
+  getPaginationRowModel, 
+  getSortedRowModel, 
+  getGroupedRowModel, 
+  getExpandedRowModel, 
+  useReactTable, 
+  Row, 
+  Cell 
+} from "@tanstack/react-table";
+import { MoveDocumentModal } from '@/components/dashboard/MoveDocumentModal';
+import Breadcrumbs from '@/components/dashboard/Breadcrumbs';
+import DocumentGrid from '@/components/dashboard/DocumentGrid';
+import ChatInterface from '@/components/dashboard/ChatInterface';
+import { FileUpload } from '@/components/dashboard/FileUpload';
+import { ListTree } from 'lucide-react';
+import { DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
+import { DraggableRow } from '@/components/dashboard/DraggableRow'; 
+import FolderBreadcrumbs from '@/components/dashboard/FolderBreadcrumbs';
+import { FavoriteButton } from '@/components/dashboard/FavoriteButton';
+import { FavoriteDocuments, toggleFavorite } from '@/components/dashboard/FavoriteDocuments';
+
 import { 
   formatDistanceToNow, 
   parseISO, 
@@ -38,66 +148,6 @@ import {
   isThisMonth, 
   format 
 } from 'date-fns';
-import { useToast } from "@/components/ui/use-toast"; 
-import {
-  ColumnDef,
-  ColumnFiltersState,
-  GroupingState,
-  SortingState,
-  VisibilityState,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getGroupedRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
-  Row, 
-  Column, 
-  ExpandedState, 
-  getExpandedRowModel, 
-} from "@tanstack/react-table";
-import {
-  Dialog, 
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-  DropdownMenuRadioGroup, 
-  DropdownMenuRadioItem, 
-  DropdownMenuContent, // Re-add DropdownMenuContent import
-} from "@/components/ui/dropdown-menu";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton"; 
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Checkbox } from "@/components/ui/checkbox";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"; 
-import { ChevronDown, ChevronRight, Folder, File as FileIcon, MoreHorizontal, ArrowUpDown, Trash2, Edit, X, Check, Loader2, PlusCircle, Upload, FolderPlus, Minimize2, Maximize2, Eye, EyeOff, ListTree, List, LayoutGrid, RefreshCw } from "lucide-react";
-import { DashboardClient } from '@/components/dashboard/DashboardClient';
-import { DraggableRow } from '@/components/dashboard/DraggableRow';
-import Breadcrumbs from '@/components/dashboard/Breadcrumbs'; // Import Breadcrumbs
-import { FileUpload } from '@/components/dashboard/FileUpload'; // Import FileUpload (named export)
-import { MoveDocumentModal } from '@/components/dashboard/MoveDocumentModal'; // Import MoveDocumentModal (named export)
 
 interface DocumentTableProps {
   data: FilesystemItem[];
@@ -116,9 +166,10 @@ interface DocumentTableProps {
 
 const createColumns = (
   onSelectItem: (item: FilesystemItem | null) => void,
+  onFolderClick: (folderId: string, folderName: string) => void,
   onMoveClick: (itemId: string, itemName: string, itemType: 'document' | 'folder') => void,
   onRenameFolder: (folderId: string, currentName: string) => void,
-  onFolderClick: (folderId: string, folderName: string) => void,
+  onDeleteFolder: (folderId: string, folderName: string) => void,
   handleDeleteClick: (item: FilesystemItem, e: React.MouseEvent) => void,
   isDeleting: boolean,
   deletingId: string | null
@@ -132,44 +183,68 @@ const createColumns = (
     const contentType = item.contentType?.toLowerCase() || '';
     const fileName = item.name?.toLowerCase() || '';
 
-    if (contentType.startsWith('image/')) return <FileIcon className="h-4 w-4 mr-2 flex-shrink-0 text-purple-500" />;
-    if (contentType.startsWith('video/')) return <FileIcon className="h-4 w-4 mr-2 flex-shrink-0 text-orange-500" />;
-    if (contentType.startsWith('audio/')) return <FileIcon className="h-4 w-4 mr-2 flex-shrink-0 text-yellow-500" />;
-    if (contentType === 'application/pdf') return <FileIcon className="h-4 w-4 mr-2 flex-shrink-0 text-red-500" />;
-    if (contentType.includes('spreadsheet') || contentType.includes('excel') || fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) return <FileIcon className="h-4 w-4 mr-2 flex-shrink-0 text-green-600" />;
-    if (contentType.includes('word') || contentType.includes('document') || fileName.endsWith('.docx') || fileName.endsWith('.doc')) return <FileIcon className="h-4 w-4 mr-2 flex-shrink-0 text-blue-600" />;
-    if (contentType.includes('presentation') || fileName.endsWith('.pptx') || fileName.endsWith('.ppt')) return <FileIcon className="h-4 w-4 mr-2 flex-shrink-0 text-orange-600" />; 
-    if (contentType.includes('zip') || contentType.includes('archive') || fileName.endsWith('.zip') || fileName.endsWith('.rar') || fileName.endsWith('.7z')) return <FileIcon className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500" />;
-    if (contentType.includes('code') || contentType.startsWith('text/') || fileName.endsWith('.js') || fileName.endsWith('.ts') || fileName.endsWith('.py') || fileName.endsWith('.java') || fileName.endsWith('.html') || fileName.endsWith('.css')) return <FileIcon className="h-4 w-4 mr-2 flex-shrink-0 text-indigo-500" />;
+    if (contentType.startsWith('image/')) return <FileImage className="h-4 w-4 mr-2 flex-shrink-0 text-purple-500" />;
+    if (contentType.startsWith('video/')) return <FileVideo className="h-4 w-4 mr-2 flex-shrink-0 text-orange-500" />;
+    if (contentType.startsWith('audio/')) return <FileAudio className="h-4 w-4 mr-2 flex-shrink-0 text-yellow-500" />;
+    if (contentType === 'application/pdf') return <FileText className="h-4 w-4 mr-2 flex-shrink-0 text-red-500" />;
+    if (contentType.includes('spreadsheet') || contentType.includes('excel') || fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) return <FileSpreadsheet className="h-4 w-4 mr-2 flex-shrink-0 text-green-600" />;
+    if (contentType.includes('word') || contentType.includes('document') || fileName.endsWith('.docx') || fileName.endsWith('.doc')) return <FileText className="h-4 w-4 mr-2 flex-shrink-0 text-blue-600" />;
+    if (contentType.includes('presentation') || fileName.endsWith('.pptx') || fileName.endsWith('.ppt')) return <FileText className="h-4 w-4 mr-2 flex-shrink-0 text-orange-600" />; // Placeholder icon 
+    if (contentType.includes('zip') || contentType.includes('archive') || fileName.endsWith('.zip') || fileName.endsWith('.rar') || fileName.endsWith('.7z')) return <FileArchive className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500" />;
+    if (contentType.includes('code') || contentType.startsWith('text/') || fileName.endsWith('.js') || fileName.endsWith('.ts') || fileName.endsWith('.py') || fileName.endsWith('.java') || fileName.endsWith('.html') || fileName.endsWith('.css')) return <FileCode className="h-4 w-4 mr-2 flex-shrink-0 text-indigo-500" />;
 
-    return <FileIcon className="h-4 w-4 mr-2 flex-shrink-0 text-gray-400" />; 
+    return <FileText className="h-4 w-4 mr-2 flex-shrink-0 text-gray-400" />; // Default file icon
   };
 
   return [
+    // Favorite column
+    {
+      id: 'favorite',
+      header: '',
+      cell: ({ row }) => {
+        const item = row.original;
+        // Only show favorite button for documents, not folders
+        if (item.type === 'document') {
+          return (
+            <FavoriteButton 
+              document={item} 
+              userId={item.userId} 
+              onToggle={(isFavorite) => {
+                // Update the item in the table
+                item.isFavorite = isFavorite;
+              }}
+            />
+          );
+        }
+        return null;
+      },
+      enableSorting: false,
+      size: 40,
+    },
     {
       accessorKey: 'name',
-      header: ({ column }: { column: Column<FilesystemItem, unknown> }) => (
+      header: ({ column }) => (
         <Button
           variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
           className="-ml-4"
         >
           Name
           <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
       ),
-      cell: ({ row }: { row: Row<FilesystemItem> }) => {
+      cell: ({ row }) => {
         const item = row.original;
-        const isSelected = false; 
+        const isSelected = false; // Simplified, assuming selection state isn't directly managed here
         const icon = getFileTypeIcon(item);
 
         if (item.type === 'folder') {
           return (
             <button
               onClick={(e) => {
-                e.stopPropagation(); 
-                onSelectItem(null); 
-                onFolderClick(item.id, item.name); 
+                e.stopPropagation(); // Prevent row selection if clicking folder name itself
+                onSelectItem(null); // Clear document selection when clicking folder
+                onFolderClick(item.id, item.name); // Use passed prop
               }}
               className={`flex items-center text-left w-full px-0 py-0 bg-transparent border-none cursor-pointer hover:underline ${isSelected ? 'font-semibold' : ''}`}
             >
@@ -180,7 +255,7 @@ const createColumns = (
         } else {
           return (
             <div
-              onClick={() => onSelectItem(item)} 
+              onClick={() => onSelectItem(item)} // Allow selection on the div
               className={`flex items-center cursor-pointer ${isSelected ? 'font-semibold' : ''}`}
             >
               {icon}
@@ -193,31 +268,33 @@ const createColumns = (
     {
       accessorKey: 'type',
       header: 'Type',
-      cell: ({ row }: { row: Row<FilesystemItem> }) => {
+      cell: ({ row }) => {
         const item = row.original;
         if (item.type === 'folder') {
           return <span className="text-gray-600">Folder</span>;
         } else {
+          // Attempt to extract a user-friendly type from contentType
           const contentType = item.contentType || 'File';
-          const simpleType = contentType.split('/').pop() || contentType; 
+          const simpleType = contentType.split('/').pop() || contentType; // Use pop() for potentially complex types like application/vnd.ms-excel
           return <span className="capitalize truncate text-gray-600">{simpleType}</span>;
         }
       },
-      enableGrouping: true, 
-      enableSorting: false, 
+      enableGrouping: true, // Allow grouping by Type
+      enableSorting: false, // Sorting by derived type might be less useful
     },
     {
       accessorKey: 'size',
       header: 'Size',
-      cell: ({ row }: { row: Row<FilesystemItem> }) => {
+      cell: ({ row }) => {
         const item = row.original;
         if (item.type === 'document') {
+          // Use the formatBytes utility
           return <span className="text-gray-600">{formatBytes(item.size)}</span>;
         } else {
-          return <span className="text-gray-600">-</span>; 
+          return <span className="text-gray-600">-</span>; // Folders don't have a size in this context
         }
       },
-      enableSorting: true, 
+      enableSorting: true, // Allow sorting by size
     },
     {
       accessorKey: 'updatedAt',
@@ -227,6 +304,7 @@ const createColumns = (
         if (!item.updatedAt) return <span>-</span>;
 
         let dateString: string;
+        // Check if updatedAt is Firebase Timestamp or ISO string
         if (item.updatedAt instanceof Timestamp) {
           dateString = formatDistanceToNow(item.updatedAt.toDate(), { addSuffix: true });
         } else if (typeof item.updatedAt === 'string') {
@@ -244,11 +322,12 @@ const createColumns = (
       meta: {
         className: 'hidden md:table-cell', 
       },
-      enableGrouping: true, 
-      getGroupingValue: (item: FilesystemItem) => { 
+      enableGrouping: true, // Enable grouping by Date
+      getGroupingValue: (item: FilesystemItem) => { // Use item directly
         if (!item.updatedAt) return 'Unknown Date';
 
         let date: Date;
+        // Check if updatedAt is Firebase Timestamp or ISO string
         if (item.updatedAt instanceof Timestamp) {
           date = item.updatedAt.toDate();
         } else if (typeof item.updatedAt === 'string') {
@@ -256,29 +335,30 @@ const createColumns = (
             date = parseISO(item.updatedAt);
           } catch (e) {
             console.error("Error parsing date string:", item.updatedAt, e);
-            return 'Invalid Date Format'; 
+            return 'Invalid Date Format'; // More specific error
           }
         } else {
-          return 'Unknown Date Type'; 
+          return 'Unknown Date Type'; // Handle other potential types
         }
 
-        if (isNaN(date.getTime())) { 
-             return 'Invalid Date Value'; 
+        if (isNaN(date.getTime())) { // Check if date is valid after parsing
+             return 'Invalid Date Value'; // More specific error
         }
 
         const now = new Date();
         if (isToday(date)) return 'Today';
         if (isYesterday(date)) return 'Yesterday';
-        if (isThisWeek(date, { weekStartsOn: 1 })) return 'This Week'; 
+        if (isThisWeek(date, { weekStartsOn: 1 })) return 'This Week'; // Assuming week starts on Monday
         if (isThisMonth(date)) return 'This Month';
-        return format(date, 'yyyy'); 
-      }, 
-      enableSorting: true, 
+        // Example: Group by year for older dates
+        return format(date, 'yyyy'); // Or 'Older', or 'yyyy-MM' for monthly grouping
+      }, // End of getGroupingValue function
+      enableSorting: true, // Ensure sorting is also enabled if needed
     },
     {
       id: 'actions',
       header: () => <div className="text-right pr-2">Actions</div>, 
-      cell: ({ row }: { row: Row<FilesystemItem> }) => {
+      cell: ({ row }) => {
         const item = row.original;
         return (
           <div className="text-right pr-2"> 
@@ -297,7 +377,7 @@ const createColumns = (
               <DropdownMenuContent align="end">
                 {item.type === 'folder' ? (
                   <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRenameFolder(item.id, item.name); }}>
-                    <Edit className="mr-2 h-4 w-4" />
+                    <Pencil className="mr-2 h-4 w-4" />
                     Rename
                   </DropdownMenuItem>
                 ) : (
@@ -307,7 +387,7 @@ const createColumns = (
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); onMoveClick(item.id, item.name, item.type); }}>
-                  <FolderPlus className="mr-2 h-4 w-4" />
+                  <Move className="mr-2 h-4 w-4" />
                   Move
                 </DropdownMenuItem>
                 <DropdownMenuItem 
@@ -350,43 +430,47 @@ function DocumentTable({
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
-  const [grouping, setGrouping] = useState<GroupingState>(initialGrouping ?? []); 
-  const [expanded, setExpanded] = useState<ExpandedState>({}); 
+  const [grouping, setGrouping] = useState<GroupingState>(initialGrouping ?? []); // Initialize with prop
+  const [expanded, setExpanded] = useState<ExpandedState>({}); // Use correct type
   const { toast } = useToast();
+
+  useEffect(() => {
+    console.log('[DocumentTable] Data prop updated:', data.map(item => item.name)); // Log names using the 'data' prop
+  }, [data]);
 
   const handleDeleteClick = (item: FilesystemItem, e: React.MouseEvent) => {
     e.stopPropagation(); 
     setItemToDelete(item);
   };
 
-  const columns = React.useMemo(
-    () => createColumns(onSelectItem, onMoveClick, onRenameFolder, onFolderClick, handleDeleteClick, isDeleting, deletingId),
-    [onSelectItem, onMoveClick, onRenameFolder, onFolderClick, handleDeleteClick, isDeleting, deletingId]
+  const columns = useMemo(
+    () => createColumns(onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, handleDeleteClick, isDeleting, deletingId),
+    [onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, handleDeleteClick, isDeleting, deletingId]
   );
 
   const table = useReactTable({
-    data, 
+    data, // Use the 'data' prop passed to the component
     columns,
-    getRowId: (originalRow) => originalRow.id, 
+    getRowId: (originalRow) => originalRow.id, // Provide a stable row ID
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    getGroupedRowModel: getGroupedRowModel(), 
-    getExpandedRowModel: getExpandedRowModel(), 
+    getGroupedRowModel: getGroupedRowModel(), // Add grouped row model
+    getExpandedRowModel: getExpandedRowModel(), // Add expanded row model
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
-    onGroupingChange: setGrouping, 
-    onExpandedChange: setExpanded, 
+    onGroupingChange: setGrouping, // Add grouping change handler
+    onExpandedChange: setExpanded, // Add expanded change handler
     state: {
       sorting,
       columnFilters,
       columnVisibility,
       rowSelection,
-      grouping, 
-      expanded, 
+      grouping, // Include grouping in state
+      expanded, // Include expanded in state
     },
   });
 
@@ -454,30 +538,31 @@ function DocumentTable({
 
       {/* TanStack Table Rendering */} 
       <div className="rounded-md border flex-grow overflow-auto"> 
-        <Table className="min-w-full">
-          <TableHead className={cn("[&_tr]:border-b")}> 
+        <ShadcnTable className="min-w-full">
+          <thead className={cn("[&_tr]:border-b")}> 
             {table.getHeaderGroups().map((headerGroup) => ( 
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => {
                   const meta = header.column.columnDef.meta as { className?: string } | undefined;
                   return (
-                    <TableHeader key={header.id} className={meta?.className}>
+                    <TableHead key={header.id} className={meta?.className}>
                       {header.isPlaceholder
                         ? null
                         : flexRender(
                             header.column.columnDef.header,
                             header.getContext()
                           )}
-                    </TableHeader>
+                    </TableHead>
                   );
                 })}
               </TableRow>
             ))}
-          </TableHead> 
-          <TableBody className={cn("[&_tr:last-child]:border-0")}> 
+          </thead> 
+          <tbody className={cn("[&_tr:last-child]:border-0")}> 
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => { 
                 if (row.getIsGrouped()) {
+                  // Render group header row
                   return (
                     <TableRow key={row.id} className="bg-muted/50 hover:bg-muted/80 font-medium">
                       <TableCell colSpan={columns.length} className="py-2 px-4">
@@ -493,6 +578,7 @@ function DocumentTable({
                               <ChevronRight className="h-4 w-4" />
                             )}
                           </button>
+                          {/* Display the formatted group value - uses accessorKey of grouping column */} 
                           <span>{String(row.groupingValue ?? 'Other')}</span>
                           <span className="text-xs text-muted-foreground">({row.subRows.length})</span>
                         </div>
@@ -501,6 +587,7 @@ function DocumentTable({
                   );
                 }
                 
+                // Render normal data row (only if expanded or not part of a group)
                 if (!row.getIsGrouped() && (row.depth === 0 || row.getParentRow()?.getIsExpanded())) {
                   return (
                     <DraggableRow key={row.id} row={row} onMoveRow={onMoveRow} onDropItemIntoFolder={onDropItemIntoFolder}>
@@ -508,7 +595,7 @@ function DocumentTable({
                         <TableCell 
                           key={cell.id} 
                           className={cn(
-                            (cell.column.columnDef.meta as { className?: string })?.className, 
+                            (cell.column.columnDef.meta as { className?: string })?.className, // Type assertion for meta
                             {'cursor-pointer hover:bg-muted/50': cell.column.id !== 'actions' && cell.column.id !== 'select'},
                             {'bg-blue-100 dark:bg-blue-900': row.getIsSelected()} 
                           )}
@@ -522,7 +609,7 @@ function DocumentTable({
                   );
                 }
                 
-                return null; 
+                return null; // Don't render hidden sub-rows
               })
             ) : (
               <TableRow>
@@ -531,28 +618,25 @@ function DocumentTable({
                 </TableCell>
               </TableRow>
             )}
-          </TableBody> 
-        </Table>
+          </tbody> 
+        </ShadcnTable>
       </div>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={itemToDelete !== null} onOpenChange={(open: boolean) => !open && setItemToDelete(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Are you absolutely sure?</DialogTitle>
-            <DialogDescription>
+      <AlertDialog open={itemToDelete !== null} onOpenChange={(open: boolean) => !open && setItemToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
               This action cannot be undone. This will permanently delete the {itemToDelete?.type === 'folder' ? 'folder' : 'document'}
               {' '}
               <span className="font-medium">'{itemToDelete?.name}'</span>.
               {itemToDelete?.type === 'folder' && ' All contents within this folder will also be deleted.'} 
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogTrigger asChild>
-              <Button variant="outline" onClick={() => setItemToDelete(null)} disabled={isDeleting}>Cancel</Button>
-            </DialogTrigger>
-            <DialogTrigger asChild>
-              <Button onClick={() => {
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setItemToDelete(null)} disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
               if (!itemToDelete) return;
 
               setDeletingId(itemToDelete.id);
@@ -594,16 +678,13 @@ function DocumentTable({
             }} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
               {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Delete
-            </Button>
-            </DialogTrigger>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
-
-// We're now using a separate DndProviderWrapper component
 
 function DashboardPage() {
   const { user, loading: authLoading, logout } = useAuth();
@@ -626,14 +707,15 @@ function DashboardPage() {
   const [folderToRename, setFolderToRename] = useState<{id: string; currentName: string} | null>(null);
   const [newRenameFolderName, setNewRenameFolderName] = useState("");
   const [isRenamingFolder, setIsRenamingFolder] = useState(false);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
+  const [refreshFavorites, setRefreshFavorites] = useState<number>(0);
   const [movingDocument, setMovingDocument] = useState<{ id: string; name: string } | null>(null);
   const [availableFolders, setAvailableFolders] = useState<FolderData[]>([]);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list'); 
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false); 
-  const [groupingOption, setGroupingOption] = useState<'type' | 'date' | 'none'>('none'); 
+  const [groupingOption, setGroupingOption] = useState<'type' | 'date' | 'none'>('none'); // Control grouping UI
 
   const panelGroupRef = useRef<any>(null);
 
@@ -642,6 +724,11 @@ function DashboardPage() {
   };
 
   async function fetchItems(folderId: string | null = null) {
+    // Use the provided folderId or fall back to the current state
+    // Handle null explicitly to avoid confusion
+    const targetFolderId = folderId !== undefined ? folderId : currentFolderId;
+    console.log(`[fetchItems] Using targetFolderId:`, targetFolderId, 'from input:', folderId, 'current state:', currentFolderId);
+    
     if (authLoading) {
       console.log('Auth is loading, skipping fetch.');
       return;
@@ -652,7 +739,7 @@ function DashboardPage() {
       return;
     }
 
-    console.log(`Fetching items for user: ${user.uid}, folderId: ${currentFolderId}`);
+    console.log(`Fetching items for user: ${user.uid}, folderId: ${targetFolderId}`);
     setLoadingDocs(true);
     setDocsError(null);
     setFilesystemItems([]);
@@ -660,28 +747,31 @@ function DashboardPage() {
     try {
       const userId = user.uid;
 
+      // Query for folders in the current folder
       const foldersQuery = query(
         collection(db, 'users', userId, 'folders'),
-        where('parentFolderId', '==', currentFolderId),
+        where('parentFolderId', '==', targetFolderId),
         orderBy('name', 'asc')
       );
+      console.log(`[fetchItems] Querying folders with parentFolderId: ${targetFolderId}`);
       const folderSnapshot = await getDocs(foldersQuery);
       const fetchedFolders: FolderData[] = folderSnapshot.docs.map(doc => ({
         id: doc.id,
-        ...doc.data(),
-      } as FolderData));
+        ...doc.data() as Omit<FolderData, 'id'>
+      }));
       const folderItems: FilesystemItem[] = fetchedFolders.map(f => ({ ...f, type: 'folder' }));
-      console.log('Fetched Folders:', fetchedFolders);
+      console.log('Fetched Folders:', fetchedFolders.map(f => ({ id: f.id, name: f.name, parentFolderId: f.parentFolderId })));
 
+      // Fetch documents in the current folder
       let documentSnapshot;
       try {
         const documentsQueryByCreatedAt = query(
           collection(db, 'users', userId, 'documents'),
-          where('folderId', '==', currentFolderId),
+          where('folderId', '==', targetFolderId),
           orderBy('createdAt', 'desc') 
         );
         
-        console.log('[Dashboard] Executing Firestore query for documents (sorted by createdAt)...');
+        console.log(`[Dashboard] Executing Firestore query for documents with folderId: ${targetFolderId}`);
         documentSnapshot = await getDocs(documentsQueryByCreatedAt);
         console.log('[Dashboard] Successfully retrieved documents sorted by creation date');
       } catch (indexError) {
@@ -689,13 +779,15 @@ function DashboardPage() {
         
         const documentsQueryByName = query(
           collection(db, 'users', userId, 'documents'),
-          where('folderId', '==', currentFolderId),
+          where('folderId', '==', targetFolderId),
           orderBy('name', 'asc')
         );
         
         console.log('[Dashboard] Falling back to name-based sorting query...');
         documentSnapshot = await getDocs(documentsQueryByName);
       }
+      
+      console.log(`[Dashboard] Document query complete for folderId: ${targetFolderId}, found: ${documentSnapshot.docs.length} documents`);
       
       const fetchedDocs: MyDocumentData[] = documentSnapshot.docs.map(doc => ({
         id: doc.id,
@@ -707,6 +799,7 @@ function DashboardPage() {
       const documentItems: FilesystemItem[] = fetchedDocs.map(d => ({ ...d, type: 'document' }));
       console.log(`[Dashboard] Processed ${fetchedDocs.length} documents into UI items`);
 
+      // Fetch Metadata from Storage for each document
       const docsWithMetadata = await Promise.all(fetchedDocs.map(async (docData) => {
         let metadataProps: { size?: number; contentType?: string } = {};
         if (docData.storagePath) {
@@ -720,21 +813,26 @@ function DashboardPage() {
             };
           } catch (error) {
             console.warn(`[Dashboard] Failed to get metadata for ${docData.name} (${docData.storagePath}):`, error);
+            // Keep metadataProps empty if fetch fails
           }
         } else {
           console.warn(`[Dashboard] Document ${docData.name} missing storagePath.`);
         }
+        // Combine original data, metadata, and explicitly add type
         return { 
           ...docData, 
           ...metadataProps, 
-          type: 'document' 
-        } as FilesystemItem; 
+          type: 'document' // Explicitly add the type property
+        } as FilesystemItem; // Assert type here for clarity
       }));
 
+      // Combine and sort folders first, then by name
       const combinedItems: FilesystemItem[] = [...folderItems, ...docsWithMetadata].sort((a, b) => {
+        // Sort folders before documents
         if (a.type === 'folder' && b.type !== 'folder') return -1;
         if (a.type !== 'folder' && b.type === 'folder') return 1;
         
+        // If both are the same type, sort by name (case-insensitive)
         const nameA = a.name || '';
         const nameB = b.name || '';
         return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
@@ -778,11 +876,11 @@ function DashboardPage() {
   }, [setCurrentFolderId, setFolderPath]);
 
   const handleNavigate = useCallback((folderId: string | null) => {
-    setSelectedDocument(null); 
+    setSelectedDocument(null); // Deselect document when navigating
     if (folderId === null) {
-      router.push('/dashboard'); 
+      router.push('/dashboard'); // Navigate to root using router
     } else {
-      router.push(`/dashboard?folderId=${folderId}`); 
+      router.push(`/dashboard?folderId=${folderId}`); // Navigate to specific folder using router
     }
   }, [router]);
 
@@ -805,7 +903,7 @@ function DashboardPage() {
   const handleUploadSuccess = () => {
     console.log("Upload complete signal received, refreshing current folder...");
     triggerRefresh();
-    setIsUploadDialogOpen(false); 
+    setIsUploadDialogOpen(false); // Close dialog on success
   };
 
   const handleDeleteDocument = async (docId: string) => {
@@ -1008,19 +1106,24 @@ function DashboardPage() {
     console.log(`Delete folder requested: ${folderName} (${folderId})`);
   };
 
-  const handleGroupingChange = (value: string) => { 
-    setGroupingOption(value as 'type' | 'date' | 'none'); 
+  const handleGroupingChange = (value: string) => { // Accept string from radio group
+    setGroupingOption(value as 'type' | 'date' | 'none'); // Update accepted types
   };
 
   const handleMoveRow = useCallback((dragIndex: number, hoverIndex: number) => {
     setFilesystemItems((prevItems) => {
       const newItems = [...prevItems];
+      // Remove the dragged item from its original position
       const [draggedItem] = newItems.splice(dragIndex, 1);
+      // Insert the dragged item into the new position
       newItems.splice(hoverIndex, 0, draggedItem);
       return newItems;
     });
+    // Note: This currently only reorders the visual state.
+    // Persisting this order would require adding an 'order' field 
+    // to Firestore documents/folders and updating them here if desired.
     console.log(`Moved item from index ${dragIndex} to ${hoverIndex} in local state.`);
-  }, []); 
+  }, []); // Use useCallback to prevent unnecessary re-renders
 
   const handleDropItemIntoFolder = useCallback(async (itemId: string, targetFolderId: string) => {
     console.log(`Attempting to move item ${itemId} into folder ${targetFolderId}`);
@@ -1040,16 +1143,18 @@ function DashboardPage() {
         updatedAt: Timestamp.now(),
       });
 
+      // Optimistically remove the item from the current view
       setFilesystemItems((prevItems) => prevItems.filter(item => item.id !== itemId));
 
       toast({ title: `Successfully moved ${itemToMove.type}`, description: `Moved '${itemToMove.name}' into target folder.` });
       console.log(`Successfully moved item ${itemId} to folder ${targetFolderId} in Firestore.`);
+      // Optionally, trigger a re-fetch or navigate if needed
+
     } catch (error) {
       console.error("Error moving item into folder:", error);
       toast({ variant: 'destructive', title: 'Error Moving Item', description: 'Failed to update the item in the database.' });
     }
-  }, [filesystemItems]); 
-
+  }, [filesystemItems]);  // Effect to fetch items when the current folder changes
   useEffect(() => {
     if (authLoading) {
       console.log('Auth is loading, skipping fetch.');
@@ -1061,14 +1166,55 @@ function DashboardPage() {
       return;
     }
 
-    console.log(`Fetching items for user: ${user.uid}, folderId: ${currentFolderId}`);
+    console.log(`[useEffect] Fetching items for folder: ${currentFolderId}`);
+    
+    // Fetch all folders for breadcrumb navigation
+    fetchAllFolders();
+    
+    // Call fetchItems with the current folder ID
+    // This will handle setting loading state and error state
+    fetchItems(currentFolderId);
+    
+  }, [user, authLoading, router, currentFolderId, refreshTrigger, refreshFavorites]);
+
+  const handleNavigateFolder = (folderId: string | null) => {
+    console.log("[DashboardPage] handleNavigateFolder called with:", folderId);
+    console.log("[DashboardPage] Current folder ID before change:", currentFolderId);
+    
+    // Don't do anything if we're already in this folder
+    if (folderId === currentFolderId) {
+      console.log("[DashboardPage] Already in this folder, no navigation needed");
+      return;
+    }
+    
+    // Update state
+    setCurrentFolderId(folderId);
+    setSelectedDocument(null); // Clear selection when changing folders
+    
+    // Force an immediate fetch without waiting for the effect
+    const userId = user?.uid;
+    if (!userId) return;
+    
+    console.log("[DashboardPage] Manually fetching items for folder:", folderId);
     setLoadingDocs(true);
     setDocsError(null);
-    setFilesystemItems([]);
-
-    fetchItems();
-
-  }, [user, authLoading, router, currentFolderId, refreshTrigger, setLoadingDocs, setDocsError, setFilesystemItems]);
+    
+    // Call the fetchItems function directly with the new folder ID
+    // This bypasses the useEffect dependency on currentFolderId
+    const fetchFolderItems = async () => {
+      try {
+        // Make sure we're passing the folder ID explicitly
+        await fetchItems(folderId);
+      } catch (error) {
+        console.error("Error fetching items:", error);
+        setDocsError("Failed to load items");
+      } finally {
+        setLoadingDocs(false);
+      }
+    };
+    
+    fetchFolderItems();
+  };
 
   if (authLoading) {
     return <div>Loading...</div>;
@@ -1078,217 +1224,170 @@ function DashboardPage() {
     return <div>Loading...</div>;
   }
 
+  const allFolders = useMemo(() => {
+    return filesystemItems.filter(item => item.type === 'folder') as FolderData[];
+  }, [filesystemItems]);
+
   return (
-    <DashboardClient>
-      <div className="flex h-screen flex-col bg-muted/40">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-4">
-          <h1 className="text-xl font-semibold whitespace-nowrap">My Documents</h1>
-          <div className="ml-auto flex items-center gap-4">
-            <span className="text-sm text-muted-foreground whitespace-nowrap">Welcome, {user.displayName || user.email}</span>
-            <Button variant="outline" size="sm" onClick={logout}>Logout</Button>
-          </div>
-        </header>
+    <div className="flex h-screen flex-col bg-muted/40">
+      <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-4">
+        <h1 className="text-xl font-semibold whitespace-nowrap">My Documents</h1>
+        <div className="ml-auto flex items-center gap-4">
+          <span className="text-sm text-muted-foreground whitespace-nowrap">Welcome, {user.displayName || user.email}</span>
+          <Button variant="outline" size="sm" onClick={logout}>Logout</Button>
+        </div>
+      </header>
 
-        <main className="flex-1 flex flex-col overflow-hidden">
-          <div className="mb-4 text-sm text-muted-foreground">
-            <Breadcrumbs path={folderPath} onNavigate={handleNavigate} />
-          </div>
+      <main className="flex-1 overflow-hidden p-6 pt-4">
+        <div className="mb-4 text-sm text-muted-foreground">
+          <FolderBreadcrumbs 
+            currentFolderId={currentFolderId}
+            folders={availableFolders}
+            onNavigate={handleNavigateFolder}
+          />
+        </div>
 
-          <div className="flex h-full flex-col">
-            {selectedDocument && (
-              <div className="flex justify-end mb-2 gap-2">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setIsMaximized(prev => !prev)}
-                  title={isMaximized ? "Exit full screen" : "Full screen"}
-                >
-                  {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setIsViewerVisible(prev => !prev)}
-                  title={isViewerVisible ? "Hide document viewer" : "Show document viewer"}
-                >
-                  {isViewerVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
+        <div className="flex h-full flex-col">
+          {selectedDocument ? (
+            <div className="flex-1 overflow-auto">
+              <DocumentViewer document={selectedDocument} />
+            </div>
+          ) : (
+            <div className="flex-1 overflow-auto">
+              {/* Favorites Section */}
+              {user && (
+                <div className="mb-6">
+                  <FavoriteDocuments 
+                    userId={user.uid}
+                    onDocumentSelect={handleSelectItem}
+                    onRefreshFavorites={() => setRefreshFavorites(prev => prev + 1)}
+                  />
+                </div>
+              )}
+              
+              <div className="flex justify-between items-center mb-4 flex-shrink-0">
+                <h2 className="text-xl font-semibold">Documents</h2>
+                <div className="flex items-center space-x-2">
+                  {/* Grouping Control */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <ListTree className="h-4 w-4 mr-2" /> 
+                        Group: {groupingOption === 'type' ? 'Type' : groupingOption === 'date' ? 'Date' : 'None'}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuLabel>Group By</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuRadioGroup value={groupingOption} onValueChange={handleGroupingChange}>
+                        <DropdownMenuRadioItem value="none">None</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="type">Type</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="date">Date</DropdownMenuRadioItem>
+                        {/* Add more grouping options here (e.g., date) */}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  
+                  {/* View Mode Toggle */}
+                  <ToggleGroup 
+                    type="single" 
+                    defaultValue="list" 
+                    value={viewMode}
+                    onValueChange={(value: 'list' | 'grid') => {
+                      if (value === 'list' || value === 'grid') {
+                        setViewMode(value);
+                      }
+                    }}
+                    aria-label="View mode"
+                  >
+                    <ToggleGroupItem value="list" aria-label="List view">
+                      <List className="h-4 w-4" />
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="grid" aria-label="Grid view">
+                      <LayoutGrid className="h-4 w-4" />
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+
+                  <Button variant="outline" size="icon" onClick={triggerRefresh} title="Refresh Documents">
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
-            )}
-            
-            <div className="flex-1 rounded-lg border overflow-hidden">
-              {isMaximized ? (
-                <div className="h-full">
-                  {selectedDocument ? (
-                    <div className="flex h-full flex-col p-6 overflow-auto">
-                      <div className="flex h-full flex-col">
-                        <div className="flex-1 overflow-hidden">
-                          {selectedDocument && <DocumentViewer document={selectedDocument}/>}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-muted-foreground">
-                      Select a document to view.
-                    </div>
-                  )}
+              {loadingDocs ? (
+                <div className="flex items-center justify-center p-10">
+                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                  <span>Loading items...</span>
+                </div>
+              ) : docsError ? (
+                <div className="text-red-600 p-4 text-center border border-red-300 rounded-md bg-red-50">
+                  {docsError}
                 </div>
               ) : (
-                <div className="h-full">
-                  {selectedDocument ? (
-                    <ResizablePanelGroup direction="horizontal" className="h-full">
-                      <ResizablePanel defaultSize={70} minSize={30} className="border-r">
-                        <div className="flex h-full flex-col p-6 overflow-auto">
-                          <div className="flex h-full flex-col">
-                            <div className="flex-1 overflow-hidden">
-                              {selectedDocument && <DocumentViewer document={selectedDocument}/>}
-                            </div>
-                          </div>
-                        </div>
-                      </ResizablePanel>
-                      
-                      <ResizableHandle withHandle />
-                      
-                      <ResizablePanel defaultSize={30} minSize={20}>
-                        <div className="flex h-full flex-col p-6">
-                          <ChatInterface documentId={selectedDocument.id} document={selectedDocument} />
-                        </div>
-                      </ResizablePanel>
-                    </ResizablePanelGroup>
+                <>
+                  {viewMode === 'list' ? (
+                    <DndProvider backend={HTML5Backend}>
+                      <DocumentTable 
+                        data={filesystemItems}
+                        isLoading={loadingDocs}
+                        error={docsError}
+                        onSelectItem={handleSelectItem} 
+                        onDeleteDocument={handleDeleteDocument}
+                        onFolderClick={handleNavigateFolder}
+                        onMoveClick={handleOpenMoveModal} 
+                        onRenameFolder={handleRenameFolder} 
+                        onDeleteFolder={handleDeleteFolder} 
+                        initialGrouping={ 
+                          groupingOption === 'type' ? ['type'] : 
+                          groupingOption === 'date' ? ['updatedAt'] : 
+                          [] 
+                        } 
+                        onMoveRow={handleMoveRow} 
+                        onDropItemIntoFolder={handleDropItemIntoFolder}
+                      />
+                    </DndProvider>
                   ) : (
-                    <div className="flex h-full">
-                      <div className="w-full">
-                        <div className="flex h-full flex-col p-6 overflow-auto">
-                        {/* Upload Dialog */}
-                        <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
-                          <DialogTrigger asChild>
-                            <Button variant="outline" size="sm">
-                              <Upload className="h-4 w-4 mr-2" />
-                              Upload Document
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent className="sm:max-w-[525px]">
-                            <DialogHeader>
-                              <DialogTitle>Upload New Document</DialogTitle>
-                              <DialogDescription>
-                                Drag & drop files here or click to select. Files will be added to: <span className='font-medium'>{folderPath[folderPath.length - 1]?.name ?? 'Home'}</span>
-                              </DialogDescription>
-                            </DialogHeader>
-                            <div className="pt-4 pb-0"> 
-                              <FileUpload
-                                onUploadComplete={handleUploadSuccess} 
-                                currentFolderId={currentFolderId}
+                    <DocumentGrid 
+                      items={filesystemItems}
+                      isLoading={loadingDocs}
+                      error={docsError}
+                      onSelectItem={handleSelectItem}
+                      onFolderClick={handleNavigateFolder}
+                      onDeleteDocument={handleDeleteDocument}
+                      onDeleteFolder={handleDeleteFolder}
+                      onMoveClick={handleOpenMoveModal} 
+                      onRenameFolder={handleRenameFolder}
+                    />
+                  )}
+                </>
+              )}
+            </div>
+          )}
                               />
-                            </div>
-                            {/* Optional: Add explicit Close button if needed */}
-                            {/* <DialogFooter>
-                              <Button variant="outline" onClick={() => setIsUploadDialogOpen(false)}>Close</Button>
-                            </DialogFooter> */}
-                          </DialogContent>
-                        </Dialog>
-                        {/* Conditional Rendering for Document Table/Grid */}
-                        <div className="flex justify-between items-center mb-4 flex-shrink-0">
-                          <h2 className="text-xl font-semibold">Documents</h2>
-                          <div className="flex items-center space-x-2">
-                            {/* Grouping Control */}
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="outline" size="sm">
-                                  <ListTree className="h-4 w-4 mr-2" /> 
-                                  Group: {groupingOption === 'type' ? 'Type' : groupingOption === 'date' ? 'Date' : 'None'}
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Group By</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuRadioGroup value={groupingOption} onValueChange={handleGroupingChange}>
-                                  <DropdownMenuRadioItem value="none">None</DropdownMenuRadioItem>
-                                  <DropdownMenuRadioItem value="type">Type</DropdownMenuRadioItem>
-                                  <DropdownMenuRadioItem value="date">Date</DropdownMenuRadioItem>
-                                  {/* Add more grouping options here (e.g., date) */}
-                                </DropdownMenuRadioGroup>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                            
-                            {/* View Mode Toggle */}
-                            <ToggleGroup 
-                              type="single" 
-                              defaultValue="list" 
-                              value={viewMode}
-                              onValueChange={(value: 'list' | 'grid') => {
-                                if (value === 'list' || value === 'grid') {
-                                  setViewMode(value);
-                                }
-                              }}
-                              aria-label="View mode"
-                            >
-                              <ToggleGroupItem value="list" aria-label="List view">
-                                <List className="h-4 w-4" />
-                              </ToggleGroupItem>
-                              <ToggleGroupItem value="grid" aria-label="Grid view">
-                                <LayoutGrid className="h-4 w-4" />
-                              </ToggleGroupItem>
-                            </ToggleGroup>
-
-                            <Button variant="outline" size="icon" onClick={triggerRefresh} title="Refresh Documents">
-                              <RefreshCw className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        {loadingDocs ? (
-                          <div className="flex items-center justify-center p-10">
-                            <Loader2 className="h-6 w-6 animate-spin mr-2" />
-                            <span>Loading items...</span>
-                          </div>
-                        ) : docsError ? (
-                          <div className="text-red-600 p-4 text-center border border-red-300 rounded-md bg-red-50">
-                            {docsError}
-                          </div>
-                        ) : (
-                          <>
-                            {viewMode === 'list' ? (
-                              <DocumentTable 
-                                data={filesystemItems}
-                                isLoading={loadingDocs}
-                                error={docsError}
-                                onSelectItem={handleSelectItem} 
-                                onDeleteDocument={handleDeleteDocument}
-                                onFolderClick={handleFolderClick}
-                                onMoveClick={handleOpenMoveModal} 
-                                onRenameFolder={handleRenameFolder} 
-                                onDeleteFolder={handleDeleteFolder} 
-                                initialGrouping={ 
-                                  groupingOption === 'type' ? ['type'] : 
-                                  groupingOption === 'date' ? ['updatedAt'] : 
-                                  [] 
-                                } 
-                                onMoveRow={handleMoveRow} 
-                                onDropItemIntoFolder={handleDropItemIntoFolder}
-                              />
-                            ) : (
-                              <DocumentGrid 
-                                items={filesystemItems}
-                                isLoading={loadingDocs}
-                                error={docsError}
-                                onSelectItem={handleSelectItem}
-                                onFolderClick={handleFolderClick}
-                                onDeleteDocument={handleDeleteDocument}
-                                onDeleteFolder={handleDeleteFolder}
-                                onMoveClick={handleOpenMoveModal} 
-                                onRenameFolder={handleRenameFolder}
-                              />
-                            )}
-                          </>
-                        )}
-                      </div>
+                            </DndProvider>
+                          ) : (
+                            <DocumentGrid 
+                              items={filesystemItems}
+                              isLoading={loadingDocs}
+                              error={docsError}
+                              onSelectItem={handleSelectItem}
+                              onFolderClick={handleNavigateFolder}
+                              onDeleteDocument={handleDeleteDocument}
+                              onDeleteFolder={handleDeleteFolder}
+                              onMoveClick={handleOpenMoveModal} 
+                              onRenameFolder={handleRenameFolder}
+                            />
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
-                )}
+                </div>
+              )}
               </div>
             )}
           </div>
-        </main>
-      </div>
+        </div>
+      </main>
       <Dialog open={showCreateFolderDialog} onOpenChange={setShowCreateFolderDialog}>
         <DialogTrigger asChild>
           <Button variant="outline" size="sm" onClick={() => setShowCreateFolderDialog(true)}>
@@ -1392,8 +1491,7 @@ function DashboardPage() {
         onConfirmMove={handleMoveConfirm} 
         isLoadingFolders={isLoadingFolders}
       />
-      </div>
-    </DashboardClient>
+    </div>
   );
 }
 
