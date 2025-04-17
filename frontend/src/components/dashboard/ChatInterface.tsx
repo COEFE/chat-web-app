@@ -56,8 +56,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
   // DEBUG: Log the auth token value before useChat is initialized
   console.log('[ChatInterface] Auth token before useChat:', authToken);
 
-  // Prepare headers for useChat
-  const chatHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+  // Prepare headers for useChat - ensure it's undefined if no token
+  const chatHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
   // DEBUG: Log the headers being passed to useChat
   console.log('[ChatInterface] Headers for useChat:', chatHeaders);
 
@@ -66,8 +66,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
     api: '/api/chat',
     id: documentId, // Use primary document ID as the chat ID
     initialMessages: [], // Explicitly start with empty messages
-    // Add the headers property conditionally
-    headers: chatHeaders, // Pass the prepared headers object
+    // Pass the prepared headers object (or undefined)
+    headers: chatHeaders, 
     body: {
       documentId: documentId, // Primary document ID
       currentDocument: document, // Primary document data
