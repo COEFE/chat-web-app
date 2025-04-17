@@ -37,14 +37,6 @@ function loadServiceAccount(): ServiceAccount | undefined {
     projectId: projectId,
     privateKey: privateKey,
     clientEmail: clientEmail,
-    // Include optional fields if found, otherwise SDK might infer or not need them
-    ...(privateKeyId && { private_key_id: privateKeyId }), // Note: SDK might expect snake_case here
-    ...(clientId && { client_id: clientId }), // Note: SDK might expect snake_case here
-    type: 'service_account', // This is standard
-    auth_uri: authUri, // Use snake_case as per typical JSON format
-    token_uri: tokenUri,
-    auth_provider_x509_cert_url: authProviderX509CertUrl,
-    ...(clientX509CertUrl && { client_x509_cert_url: clientX509CertUrl }),
   };
 
   // Log constructed object structure (excluding private key for safety)
