@@ -22,6 +22,9 @@ export default function DocumentChatPage() {
   const [isAddDocumentModalOpen, setIsAddDocumentModalOpen] = useState(false);
   const [activeDocumentId, setActiveDocumentId] = useState<string>('');
   const documentId = params?.documentId as string || '';
+  
+  // Define document title state that will be updated when documents/activeDocumentId change
+  const [documentTitle, setDocumentTitle] = useState<string>('Document Viewer');
 
   // Set the active document ID when documents change
   useEffect(() => {
@@ -29,6 +32,18 @@ export default function DocumentChatPage() {
       setActiveDocumentId(documents[0].id);
     }
   }, [documents, activeDocumentId]);
+
+  // Update document title when active document changes
+  useEffect(() => {
+    const activeDoc = documents.find(doc => doc.id === activeDocumentId);
+    const title = activeDoc?.name || 'Document Viewer';
+    setDocumentTitle(title);
+  }, [documents, activeDocumentId]);
+  
+  // Update browser title when documentTitle changes
+  useEffect(() => {
+    document.title = `${documentTitle} | Chat Web App`;
+  }, [documentTitle]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -181,16 +196,8 @@ export default function DocumentChatPage() {
     );
   }
 
-  // Get the active document for title/metadata
+  // Get the active document for rendering
   const activeDocument = documents.find(doc => doc.id === activeDocumentId);
-  const documentTitle = activeDocument?.name || 'Document Viewer';
-  
-  // Update document title using browser API for better history/refresh handling
-  useEffect(() => {
-    if (documentTitle) {
-      document.title = `${documentTitle} | Chat Web App`;
-    }
-  }, [documentTitle]);
   
   return (
     <div className="flex h-screen flex-col bg-muted/40">
