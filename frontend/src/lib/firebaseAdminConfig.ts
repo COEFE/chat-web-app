@@ -12,7 +12,7 @@ function loadServiceAccount(): ServiceAccount | undefined {
   console.log('[FirebaseAdmin] Attempting to load service account from individual environment variables...');
 
   const projectId = process.env.FIREBASE_PROJECT_ID;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\n/g, '\n'); // Replace \n with actual newlines
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY; // Remove .replace(), use raw value
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
 
   // Add other necessary fields if they are set as env vars
