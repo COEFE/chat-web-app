@@ -1156,7 +1156,6 @@ function DashboardPage() {
     // Update state
     setCurrentFolderId(folderId);
     setDocId(null); // Clear selected document when changing folders
-    setSelectedDocument(null); // Clear selection when changing folders
     
     // Force an immediate fetch without waiting for the effect
     const userId = user?.uid;
