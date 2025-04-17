@@ -1,5 +1,6 @@
 import admin, { ServiceAccount } from 'firebase-admin';
-import { getApps, getApp, initializeApp, App } from 'firebase-admin/app';
+import path from 'path';
+import fs from 'fs';
 
 // For debugging Vercel environment issues
 const isVercel = process.env.VERCEL === '1';
@@ -7,77 +8,107 @@ const environment = isVercel ? 'Vercel' : 'Local';
 console.log(`Running in ${environment} environment`);
 
 // Create a service account from environment variables or direct JSON
-const serviceAccount = {
-  type: 'service_account',
-  project_id: 'web-chat-app-fa7f0',
-  private_key_id: '99a5d24a3efee832bf078cd21c1463eb24bb5846',
-  private_key: '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC64uQKBVr6G7ER\n4rHiMa+QqwBIKzLGixq87K8Oim1dAeXvO4C30eeV8x8dQDHGmJ58exnFX4ixS9OH\nP43sRwfOjl2QLu9ty0T3YWhep6+DAAazZX6OHmcv2OIdV3BR5VvWIR7vzE6ACIwm\nC1YpyQBQcrOt56ySuuf14uj0BWLBcerxspT9hwulMNRjfXlTlDOMMPwe1/h0qQZt\ny4wUDtBh0Fuz4XpYDBknQ9k+XzDW+KFRTW5noRZlg91IBvrm5r1JHX2Mn2cYXbGk\nNaRIDIeJLEzFrXR4b24/GDvIjOEzgd0hWX1/x3AcL5X0qMr2MBvcRncVgFWdHq7w\nEkWNq8DrAgMBAAECggEACbU1hqERQRgP0k+wpoD8OgtCoCfA+Hf2CJr8MPOB4NNI\nwBea2nGd57fRsEb1uaI97ADHrZgGgBHh8rmbbrWgiIX0Au8H4u/XLPPeDw9Y2k41\ntZCadVl2ShGoapZwhYs2LQuwEWF528QV5k1adCCL0qH9XBWXwlDRMdWlUjUMFI5L\n0iz6osILpdQ9Bh0jRwntbVU/uHxMNfPcuGIuW5XpAYLqXRwX0GySdybH/mN+kZWN\nKKmW1XwzKc31crOmJlxlAnDx+zlCVwXWDbuNfh4xBa0jltT/xAAJKlSQS1etsnU+\n/0gQgFM8W6clPNUUAiCmGgflQSGHxnBU5pa0t1G02QKBgQDzeHGhjOYOtwAFQiwl\nqvdPrC8Thef4nDBMKUFIMaGLzCSaHwDSzp3nAeQHdNPbEl2o0WByVTmn53qrMzAs\nmjGoyOy8lb3h/CBeY3LaI3fJZPxMMkR7x1Twebckx1xyVyrIpMGRc2wZVzGf/pgS\nmL0Kcbf3KXFCRQPqQUvqk4GVBwKBgQDEgP02IrKA9oVrEJyLt9zZTXhqwrI7/EKv\nRTMBJqlhzhnBbeP4CQm213NI8E9Ue9RXW9l4kc/70ItYSFe09QKhvEb7DgyKh0iZ\nZS+8J90F1x9Jy8oiADOyAZu/Z9yowMv6p21AN0oq3LEXYD8hJqFyuMnCcg2nYwZ9\nRoEf/qt//QKBgF2dTxvN4FuCE9jxw6XMIgGZdBRupW4bKBrwtfA7XSEyolQ8XYWw\n+lfrizEuw5L1cdvKfeoYSO39fFY9fWV4+GUstJIihXtSBWQlmvCzOIjQco4dueVa\nFJfORRQ4L5yrVYEGkIMLvWHU+/jH3NMxtWZBqXm4jprrjIDTEIymoOmbAoGABghf\nvbW6/TKUTgEojTGL2jACrmRjzGumMHNTaYmiUZpeOA4Dna3JWo+qvmaCSPm0PypW\nttjjJbv1SzSNXMTY29ZH55U61VXp6Kuul3wx0OgV0dIr1ndjHuflvC6YG6YvnPZe\n6EXKRR6ZYTpXNdFVy4vYxdtyh90GafosJKtQ4JECgYEAsROBTEaT5A4JXVW7jt7b\nvKXOCgne9vek0QRpnaAlQWc8O0vc5HwYdXWmfjiXhNGnWbX67QALeODMP+DA6tGT\nz093eG0RBDdmrYH6pvI89D5kd1asenIEn56HaBiMtDO3vk/GyZmy7lD3XQw0YcLd\n/UFewzsu6jEjOHg1aVLMq4k=\n-----END PRIVATE KEY-----\n',
-  client_email: 'firebase-adminsdk-fbsvc@web-chat-app-fa7f0.iam.gserviceaccount.com',
-  client_id: '110858865888826309936',
-  auth_uri: 'https://accounts.google.com/o/oauth2/auth',
-  token_uri: 'https://oauth2.googleapis.com/token',
-  auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
-  client_x509_cert_url: 'https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40web-chat-app-fa7f0.iam.gserviceaccount.com',
-  universe_domain: 'googleapis.com'
-};
+function loadServiceAccount(): ServiceAccount | undefined {
+  let serviceAccountContent: string | undefined;
+  const isVercel = process.env.VERCEL === '1';
+  const serviceAccountPath = isVercel ? '/etc/firebase-service-account.json' : './firebase-service-account.json';
 
-console.log(`Using service account for project: ${serviceAccount.project_id}`);
-console.log(`Service account email: ${serviceAccount.client_email}`);
+  try {
+    // Try to load the service account from the environment variable
+    serviceAccountContent = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (serviceAccountContent) {
+      console.log('Loaded service account from environment variable.');
+    } else {
+      // If not found in environment variable, try to load from file
+      serviceAccountContent = fs.readFileSync(path.resolve(__dirname, serviceAccountPath), 'utf8');
+      console.log(`Loaded service account from file: ${serviceAccountPath}`);
+    }
+  } catch (error) {
+    console.error('Failed to load service account:', error);
+  }
+
+  if (serviceAccountContent) {
+    try {
+      // Parse the service account JSON
+      const serviceAccount: ServiceAccount = JSON.parse(serviceAccountContent);
+      return serviceAccount;
+    } catch (error) {
+      console.error('Failed to parse service account JSON:', error);
+    }
+  }
+
+  return undefined;
+}
 
 /**
  * Initializes the Firebase Admin SDK if it hasn't been initialized yet.
  * Uses a direct service account configuration.
  */
-export function initializeFirebaseAdmin(): App {
-  // Use getApps() to check if any apps are initialized
-  if (getApps().length > 0) {
-    // console.log('Firebase Admin SDK already initialized.');
-    // Return the existing default app instance
-    return getApp(); // No need to specify name for default app
+export function initializeFirebaseAdmin(): admin.app.App {
+  // Use admin.apps to check length and admin.app() to get default
+  if (admin.apps.length > 0) { 
+    console.log('Firebase Admin SDK already initialized.');
+    // If duplicate, return the existing default app
+    return admin.app(); // Use admin.app() to get default app
   }
 
   console.log('Attempting to initialize Firebase Admin SDK...');
+  const serviceAccount = loadServiceAccount();
 
-  try {
-    // Initialize with the hardcoded service account
-    console.log('Initializing with direct service account configuration...');
-    
-    // Use the correct bucket name format from the Firestore document: web-chat-app-fa7f0.firebasestorage.app
-    const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app';
-    console.log(`Using storage bucket: ${storageBucket}`);
-    
-    // Use initializeApp from firebase-admin/app
-    const app = initializeApp({
-      credential: admin.credential.cert(serviceAccount as ServiceAccount),
-      storageBucket: storageBucket
-    }); // No need to specify name for default app
-    
-    // console.log(`Firebase Admin SDK initialized with storage bucket: ${app.options.storageBucket}`);
-    
-    console.log(`Firebase Admin SDK initialized successfully with project ID: ${serviceAccount.project_id}`);
-    return app;
-  } catch (error: any) {
-    console.error('Failed to initialize Firebase Admin SDK:', error);
-    
-    // Fallback to Application Default Credentials if available
+  // Try initializing with the service account first
+  if (serviceAccount) {
+    console.log('Found service account file/variable. Attempting initialization...');
     try {
-      console.log('Trying to initialize with Application Default Credentials as fallback...');
+      // Initialize using the main 'admin' object
+      const app = admin.initializeApp({ 
+        // Cast to ServiceAccount to satisfy type checker
+        credential: admin.credential.cert(serviceAccount as ServiceAccount),
+        storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app',
+      });
+      console.log(`Firebase Admin SDK initialized successfully with project ID: ${serviceAccount.projectId}`);
+      return app;
+    } catch (error: any) {
+      console.error('Failed to initialize Firebase Admin SDK:', error);
+      
+      // Fallback to Application Default Credentials if available
+      try {
+        console.log('Trying to initialize with Application Default Credentials as fallback...');
+        // Use the same storage bucket name for consistency
+        const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app';
+        console.log(`Using storage bucket with ADC: ${storageBucket}`);
+        
+        // Use initializeApp from the main 'admin' object
+        const app = admin.initializeApp({
+          credential: admin.credential.applicationDefault(),
+          storageBucket: storageBucket
+        }); 
+        console.log('Firebase Admin SDK initialized successfully with Application Default Credentials.');
+        return app;
+      } catch (adcError) {
+        console.error('Application Default Credentials also failed:', adcError);
+      }
+      
+      throw new Error(`Failed to initialize Firebase Admin SDK: ${error.message}`);
+    }
+  } else {
+    // Fallback to Application Default Credentials if no service account is found
+    try {
+      console.log('Trying to initialize with Application Default Credentials...');
       // Use the same storage bucket name for consistency
       const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app';
       console.log(`Using storage bucket with ADC: ${storageBucket}`);
       
-      // Use initializeApp from firebase-admin/app
-      const app = initializeApp({
+      // Use initializeApp from the main 'admin' object
+      const app = admin.initializeApp({
         credential: admin.credential.applicationDefault(),
         storageBucket: storageBucket
-      }); // No need to specify name for default app
+      }); 
       console.log('Firebase Admin SDK initialized successfully with Application Default Credentials.');
       return app;
     } catch (adcError) {
-      console.error('Application Default Credentials also failed:', adcError);
+      console.error('Application Default Credentials failed:', adcError);
+      throw new Error('Failed to initialize Firebase Admin SDK');
     }
-    
-    throw new Error(`Failed to initialize Firebase Admin SDK: ${error.message}`);
   }
 }
 
@@ -85,9 +116,9 @@ export function initializeFirebaseAdmin(): App {
  * Gets the initialized Firebase Admin SDK instance.
  * Initializes it if it hasn't been initialized yet.
  */
-export function getFirebaseAdmin(): App {
+export function getFirebaseAdmin(): admin.app.App { 
   // Simply call initializeFirebaseAdmin - it handles the check internally now
-  return initializeFirebaseAdmin();
+  return initializeFirebaseAdmin(); 
 }
 
 /**
