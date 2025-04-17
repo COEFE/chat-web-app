@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Maximize2, Minimize2, Plus } from 'lucide-react';
 import DocumentViewer from '@/components/dashboard/DocumentViewer';
@@ -51,6 +51,9 @@ export default function DocumentChatPage() {
             id: docSnap.id,
             ...docSnap.data(),
           } as MyDocumentData]);
+          
+          // Set this document as active
+          setActiveDocumentId(docSnap.id);
         } else {
           setError('Document not found');
           setDocuments([]); // Ensure documents array is empty on error
@@ -64,11 +67,15 @@ export default function DocumentChatPage() {
       }
     };
 
-    fetchInitialDocument();
+    // Only fetch if we have a valid documentId and user
+    if (documentId && user) {
+      fetchInitialDocument();
+    }
   }, [documentId, user, authLoading, router]);
 
   const handleBack = () => {
-    router.back();
+    // Use push to dashboard instead of back() to ensure consistent navigation
+    router.push('/dashboard');
   };
 
   // Open the document selection modal
@@ -146,12 +153,19 @@ export default function DocumentChatPage() {
     }
   };
 
+  // Show a more detailed loading state during authentication
   if (authLoading) {
-    return <div className="flex h-screen items-center justify-center">Loading...</div>;
+    return (
+      <div className="flex h-screen flex-col items-center justify-center">
+        <div className="mb-4 text-xl font-semibold">Loading document viewer...</div>
+        <div className="text-sm text-muted-foreground">Please wait while we authenticate your session</div>
+      </div>
+    );
   }
 
-  if (!user) {
-    return null; // Router will redirect
+  // Only return null if we're sure the user isn't authenticated
+  if (!user && !authLoading) {
+    return null; // Router will redirect to login
   }
 
   if (loading) {
@@ -167,6 +181,17 @@ export default function DocumentChatPage() {
     );
   }
 
+  // Get the active document for title/metadata
+  const activeDocument = documents.find(doc => doc.id === activeDocumentId);
+  const documentTitle = activeDocument?.name || 'Document Viewer';
+  
+  // Update document title using browser API for better history/refresh handling
+  useEffect(() => {
+    if (documentTitle) {
+      document.title = `${documentTitle} | Chat Web App`;
+    }
+  }, [documentTitle]);
+  
   return (
     <div className="flex h-screen flex-col bg-muted/40">
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:px-6">
