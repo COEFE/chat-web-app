@@ -107,6 +107,11 @@ export default function ChatHistoryPage() {
     router.back();
   };
 
+  // Navigate to document chat view for a specific document
+  const handleDocumentChatClick = (documentId: string) => {
+    router.push(`/document-chat/${documentId}`);
+  };
+
   if (authLoading || (loading && messages.length === 0)) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -150,14 +155,32 @@ export default function ChatHistoryPage() {
           <ScrollArea className="h-full pr-4">
             <div className="space-y-6">
               {sortedGroupKeys.map((docId) => (
-                <Card key={docId}>
-                  <CardHeader>
-                    <CardTitle className="text-base truncate">Conversation (Doc ID: ...{docId.slice(-8)})</CardTitle>
-                    {groupedMessages[docId][0]?.createdAt && (
+                <Card 
+                  key={docId} 
+                  className="cursor-pointer hover:shadow-md transition-shadow" 
+                  onClick={() => handleDocumentChatClick(docId)}
+                >
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <div className="flex-1">
+                      <CardTitle className="text-base truncate">Conversation (Doc ID: ...{docId.slice(-8)})</CardTitle>
+                      {groupedMessages[docId][0]?.createdAt && (
                         <CardDescription>
-                            Last message: {formatDistanceToNow(new Date(groupedMessages[docId][groupedMessages[docId].length - 1].createdAt || 0), { addSuffix: true })}
+                          Last message: {formatDistanceToNow(new Date(groupedMessages[docId][groupedMessages[docId].length - 1].createdAt || 0), { addSuffix: true })}
                         </CardDescription>
-                    )}
+                      )}
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="ml-2 text-primary"
+                      onClick={(e) => {
+                        e.stopPropagation(); // Prevent card click event from firing
+                        handleDocumentChatClick(docId);
+                      }}
+                    >
+                      View Chat
+                    </Button>
+
                   </CardHeader>
                   <CardContent className="space-y-3 pl-4 pr-4 pb-4 text-sm">
                     {groupedMessages[docId].map((msg) => (
