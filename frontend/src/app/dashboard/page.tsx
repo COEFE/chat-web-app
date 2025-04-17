@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useQueryState } from 'nuqs'; // Import useQueryState
 import { useAuth } from '@/context/AuthContext';
 import { db, functionsInstance, storage } from '@/lib/firebaseConfig';
 import { 
@@ -676,7 +677,8 @@ function DashboardPage() {
   const [filesystemItems, setFilesystemItems] = useState<FilesystemItem[]>([]);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [folderPath, setFolderPath] = useState<BreadcrumbItem[]>([]); 
-  const [selectedDocument, setSelectedDocument] = useState<MyDocumentData | null>(null);
+  const [docId, setDocId] = useQueryState('docId'); 
+  const [activeDocumentData, setActiveDocumentData] = useState<MyDocumentData | null>(null);
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [docsError, setDocsError] = useState<string | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -829,25 +831,22 @@ function DashboardPage() {
     }
   };
 
-  const handleSelectDocument = (doc: MyDocumentData | null) => {
-    console.log('Document selected:', doc);
-    setSelectedDocument(doc);
-    if (doc && !isViewerVisible) {
-      setIsViewerVisible(true);
-    }
-  };
-
   const handleSelectItem = (item: FilesystemItem | null) => {
     console.log('Item selected:', item);
     if (item?.type === 'document') {
-      // Navigate to the document chat page when a document is selected
-      console.log('Navigating to document chat page for:', item.id);
-      router.push(`/document-chat/${item.id}`);
+      // Set the docId query parameter when a document is selected
+      console.log('Setting docId query param to:', item.id);
+      setDocId(item.id);
+      // Fetching data will be handled by a useEffect watching docId
+      // router.push(`/document-chat/${item.id}`); // <-- Remove navigation
     } else if (item?.type === 'folder') {
-      console.log('Folder selected (for info):', item);
-      setSelectedDocument(null);
+      console.log('Folder selected, clearing docId');
+      // Clear the docId when a folder is selected or selection is cleared
+      setDocId(null); 
     } else {
-      handleSelectDocument(null);
+      console.log('Selection cleared, clearing docId');
+      // Clear the docId when selection is cleared
+      setDocId(null); 
     }
   };
 
@@ -855,33 +854,17 @@ function DashboardPage() {
     console.log(`Navigating into folder: ${folderName} (${folderId})`);
     setCurrentFolderId(folderId);
     setFolderPath(prev => [...prev, { id: folderId, name: folderName }]);
-    setSelectedDocument(null);
-  }, [setCurrentFolderId, setFolderPath]);
+    setDocId(null); // Clear selected document when changing folders
+  }, [setCurrentFolderId, setFolderPath, setDocId]); // Add setDocId dependency
 
   const handleNavigate = useCallback((folderId: string | null) => {
-    setSelectedDocument(null); // Deselect document when navigating
+    setDocId(null); // Deselect document when navigating folders via breadcrumbs
     if (folderId === null) {
       router.push('/dashboard'); // Navigate to root using router
     } else {
       router.push(`/dashboard?folderId=${folderId}`); // Navigate to specific folder using router
     }
-  }, [router]);
-
-  const handleBreadcrumbNavigate = useCallback((folderId: string) => {
-    console.log(`Updating internal state for folder: ${folderId}`);
-    if (folderId === 'root') {
-      setFolderPath([]);
-      setCurrentFolderId(null);
-      setSelectedDocument(null);
-    } else {
-      const folderIndex = folderPath.findIndex(item => item.id === folderId);
-      if (folderIndex !== -1) {
-        setFolderPath(folderPath.slice(0, folderIndex + 1));
-        setCurrentFolderId(folderId);
-        setSelectedDocument(null);
-      }
-    }
-  }, [folderPath, setCurrentFolderId, setFolderPath]);
+  }, [router, setDocId]); // Add setDocId dependency
 
   const handleUploadSuccess = () => {
     console.log("Upload complete signal received, refreshing current folder...");
@@ -1172,6 +1155,7 @@ function DashboardPage() {
     
     // Update state
     setCurrentFolderId(folderId);
+    setDocId(null); // Clear selected document when changing folders
     setSelectedDocument(null); // Clear selection when changing folders
     
     // Force an immediate fetch without waiting for the effect
@@ -1198,6 +1182,60 @@ function DashboardPage() {
     
     fetchFolderItems();
   };
+
+  useEffect(() => {
+    const fetchActiveDocument = async () => {
+      if (docId && user) {
+        console.log(`[Effect] docId changed to: ${docId}, fetching document data...`);
+        setLoadingDocs(true); // Reuse loading state or add a specific one
+        try {
+          const docRef = doc(db, 'users', user.uid, 'documents', docId);
+          const docSnap = await getDoc(docRef);
+
+          if (docSnap.exists()) {
+            const fetchedDoc = {
+              id: docSnap.id,
+              ...docSnap.data(),
+              uploadedAt: docSnap.data().uploadedAt as Timestamp,
+              createdAt: docSnap.data().createdAt as Timestamp,
+              updatedAt: docSnap.data().updatedAt as Timestamp,
+            } as MyDocumentData;
+            console.log('[Effect] Found active document:', fetchedDoc.name);
+            setActiveDocumentData(fetchedDoc);
+            // Automatically show viewer if a doc is loaded via URL
+            if (!isViewerVisible) {
+              setIsViewerVisible(true);
+            }
+          } else {
+            console.warn(`[Effect] Document with id ${docId} not found.`);
+            toast({
+              variant: "destructive",
+              title: "Document Not Found",
+              description: "The selected document could not be found. It might have been deleted.",
+            });
+            setActiveDocumentData(null);
+            setDocId(null); // Clear the invalid docId from the URL
+          }
+        } catch (error) {
+          console.error('[Effect] Error fetching active document:', error);
+          toast({
+            variant: "destructive",
+            title: "Error Loading Document",
+            description: `Failed to load the selected document: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          });
+          setActiveDocumentData(null);
+          setDocId(null); // Clear the problematic docId
+        } finally {
+          setLoadingDocs(false);
+        }
+      } else {
+        console.log('[Effect] docId is null or user not available, clearing active document.');
+        setActiveDocumentData(null);
+      }
+    };
+
+    fetchActiveDocument();
+  }, [docId, user, toast, setDocId]); // Add dependencies
 
   if (authLoading) {
     return <div>Loading...</div>;
@@ -1234,7 +1272,7 @@ function DashboardPage() {
         </div>
 
         <div className="flex h-full flex-col">
-          {selectedDocument && (
+          {activeDocumentData && (
             <>
               <div className="flex justify-end mb-2 gap-2">
                 <Button 
@@ -1259,8 +1297,8 @@ function DashboardPage() {
               {isViewerVisible && (
                 <div className={`mb-4 ${isMaximized ? 'fixed inset-0 z-50 bg-background p-6' : 'h-[60vh] overflow-auto border rounded-md'}`}>
                   <div className="h-full flex flex-col">
-                    <DocumentViewer document={selectedDocument} />
-                    <ChatInterface documentId={selectedDocument.id} document={selectedDocument} />
+                    <DocumentViewer document={activeDocumentData} />
+                    <ChatInterface documentId={activeDocumentData.id} document={activeDocumentData} />
                   </div>
                 </div>
               )}
