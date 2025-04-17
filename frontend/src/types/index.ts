@@ -14,7 +14,6 @@ export interface MyDocumentData {
   downloadURL?: string;
   size?: number; // Size in bytes
   createdAt: Timestamp | null; // Creation timestamp, null if not available
-  isFavorite?: boolean; // Whether the document is favorited by the user
 }
 
 // Interface for Folder data
@@ -29,18 +28,7 @@ export interface FolderData {
 
 // You might also want a type that represents either a folder or a document
 // for use in the display list
-export type FilesystemItem = 
-  | (FolderData & { type: 'folder' }) 
-  | (MyDocumentData & { type: 'document' });
-
-// Interface for favorite document references
-export interface FavoriteDocument {
-  id: string; // ID of the favorite document entry
-  documentId: string; // Reference to the original document ID
-  userId: string; // User who favorited the document
-  addedAt: Timestamp; // When the document was favorited
-  documentName?: string; // Optional cached document name for quicker display
-}
+export type FilesystemItem = (FolderData & { type: 'folder' }) | (MyDocumentData & { type: 'document' });
 
 // Type for Breadcrumbs
 export interface BreadcrumbItem {

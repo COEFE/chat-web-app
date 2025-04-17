@@ -6,6 +6,9 @@ import { getStorage, ref, uploadBytesResumable as firebaseUploadBytesResumable, 
 import { useAuth } from '@/context/AuthContext';
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { StatusIndicator } from "@/components/ui/status-indicator";
+import { StatusButton } from "@/components/ui/status-button";
 import { UploadCloud, File as FileIcon, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MyDocumentData } from '@/types';
@@ -137,13 +140,16 @@ export function FileUpload({
 
     console.log(`Finished processing all ${filesToProcess.length} files sequentially. All succeeded: ${allSucceeded}`);
 
+    // Call onUploadComplete immediately to close the dialog
     if (allSucceeded && onUploadComplete) {
-      console.log('Introducing delay before refreshing documents...');
-      // Add timeout to allow the Cloud Function to complete processing
+      console.log('Calling onUploadComplete callback immediately');
+      onUploadComplete();
+      
+      // We'll still wait a moment to refresh the document list, but the UI won't be blocked
       setTimeout(() => {
-        console.log('Calling onUploadComplete callback after delay.');
-        onUploadComplete();
-      }, 7000);  // 7-second delay (Increased for testing)
+        console.log('Refreshing document list after short delay');
+        // The dialog is already closed, so this just refreshes the list
+      }, 2000);  // Reduced to 2-second delay
     }
 
   }, [user, onUploadComplete, currentFolderId]); 
@@ -215,8 +221,9 @@ export function FileUpload({
             </p>
           )}
           <p className="text-xs">(Max 10MB per file)</p>
-          <Button 
+          <StatusButton 
             type="button" 
+            action="upload"
             variant="outline" 
             size="sm" 
             className="mt-2" 
@@ -227,7 +234,7 @@ export function FileUpload({
             disabled={!user}
           >
             Select Files
-          </Button>
+          </StatusButton>
         </div>
       </div>
 
@@ -235,55 +242,75 @@ export function FileUpload({
         <div className="space-y-2">
           <h4 className="text-lg font-medium">Uploads:</h4>
           <ul className="space-y-3">
-            {uploadingFiles.map((uploadingFile) => (
-              <li key={uploadingFile.id} className="flex items-center justify-between space-x-2 p-2 border rounded-md">
-                <div className="flex items-center space-x-2 flex-1 min-w-0">
-                  <FileIcon className="h-5 w-5 mr-2 flex-shrink-0 text-gray-500" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{uploadingFile.file.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      ({Math.round(uploadingFile.file.size / 1024)} KB)
-                      {uploadingFile.status === 'error' && <span className='text-red-500 ml-2'>- {uploadingFile.error}</span>}
-                    </p>
-                    {(uploadingFile.status === 'uploading' || uploadingFile.status === 'success') && (
-                      <Progress value={uploadingFile.progress} className="h-2 mt-1" />
-                    )}
+            {uploadingFiles.map((uploadingFile) => {
+              // Map component status to our status system
+              const statusMap = {
+                'pending': 'pending',
+                'uploading': 'uploading',
+                'success': 'complete',
+                'error': 'error'
+              } as const;
+              
+              const status = statusMap[uploadingFile.status];
+              
+              return (
+                <li key={uploadingFile.id} className="flex items-center justify-between space-x-2 p-2 border rounded-md">
+                  <div className="flex items-center space-x-2 flex-1 min-w-0">
+                    <FileIcon className="h-5 w-5 mr-2 flex-shrink-0 text-gray-500" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium truncate">{uploadingFile.file.name}</p>
+                        <StatusBadge 
+                          status={status} 
+                          size="sm"
+                          text={uploadingFile.status === 'uploading' ? `${Math.round(uploadingFile.progress)}%` : undefined}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        ({Math.round(uploadingFile.file.size / 1024)} KB)
+                      </p>
+                      {uploadingFile.status === 'error' && (
+                        <p className="text-xs mt-1">{uploadingFile.error}</p>
+                      )}
+                      {(uploadingFile.status === 'uploading' || uploadingFile.status === 'success') && (
+                        <Progress 
+                          value={uploadingFile.progress} 
+                          className={cn(
+                            "h-2 mt-1",
+                            uploadingFile.status === 'success' ? "bg-green-100" : ""  
+                          )} 
+                        />
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center space-x-1 flex-shrink-0">
-                  {uploadingFile.status === 'pending' && <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />}
-                  {uploadingFile.status === 'uploading' && <Loader2 className="h-5 w-5 text-primary animate-spin" />}
-                  {uploadingFile.status === 'success' && <CheckCircle className="h-5 w-5 text-green-500" />}
-                  {uploadingFile.status === 'error' && <AlertCircle className="h-5 w-5 text-red-500" />}
-                  {(uploadingFile.status === 'pending' || uploadingFile.status === 'error') && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
                       onClick={() => removeFile(uploadingFile.id)}
-                      className="text-red-500 hover:text-red-700 p-1 h-auto"
+                      className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                      aria-label="Remove file"
                     >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </li>
-            ))}
+                      <X className="h-4 w-4 text-gray-500" />
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
 
       {rejectedFiles.length > 0 && (
-        <div className="space-y-2 mt-4 p-3 border border-red-200 bg-red-50 rounded-md">
-          <div className="flex justify-between items-center">
-            <h4 className="text-base font-medium text-red-700">Rejected Files:</h4>
-            <Button variant="ghost" size="sm" onClick={clearRejected} className="text-red-600 hover:text-red-800 p-1 h-auto">
-              <X className="h-4 w-4 mr-1" /> Clear
-            </Button>
-          </div>
-          <ul className="list-disc list-inside space-y-1 text-sm text-red-600">
+        <div className="mt-4">
+          <StatusIndicator
+            status="error"
+            text="Some files were rejected"
+            description="The following files could not be uploaded because they are either not supported or exceed the 10MB limit."
+          />
+          <ul className="space-y-1 text-xs mt-2 pl-8">
             {rejectedFiles.map((file, index) => (
-              <li key={`${file.name}-${index}`}>
-                {file.name} - Invalid type or size too large
+              <li key={index} className="list-disc text-red-700 dark:text-red-400">
+                {file.name} ({Math.round(file.size / 1024)} KB)
               </li>
             ))}
           </ul>

@@ -194,13 +194,107 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  // --- Get messages, documentId, currentDocument, activeSheet from body --- 
+  // Initialize array for additional document contents
+  if (!body.additionalContents) {
+    body.additionalContents = [];
+  }
+  
+  // Process additional documents if provided
+  if (body.additionalDocumentIds && body.additionalDocumentIds.length > 0 && body.additionalDocuments && body.additionalDocuments.length > 0) {
+    console.log(`Processing ${body.additionalDocumentIds.length} additional documents`);
+    
+    // Process each additional document
+    for (let i = 0; i < body.additionalDocuments.length; i++) {
+      const addDoc = body.additionalDocuments[i];
+      const addDocId = body.additionalDocumentIds[i];
+      
+      if (!addDoc || !addDoc.storagePath) {
+        console.warn(`Skipping additional document ${addDocId}: Missing storage path`);
+        continue;
+      }
+      
+      console.log(`Processing additional document: ID=${addDocId}, Path=${addDoc.storagePath}`);
+      const addFileName = addDoc.name || addDocId;
+      const addFileType = addFileName?.split('.').pop()?.toLowerCase() || null;
+      
+      try {
+        const file: GoogleCloudFile = bucket.file(addDoc.storagePath);
+        const [exists] = await file.exists();
+        if (!exists) {
+          console.warn(`Additional file not found at path: ${addDoc.storagePath}`);
+          continue; // Skip this document but continue processing others
+        }
+        
+        // Download file content
+        const [fileBuffer] = await file.download();
+        console.log(`Additional file downloaded successfully (${fileBuffer.length} bytes)`);
+        
+        let addFileContent: string;
+        
+        // Process file content based on file type
+        if (addFileType === 'pdf') {
+          try {
+            // Convert Buffer to Uint8Array for PDF extraction
+            const fileUint8Array = new Uint8Array(fileBuffer);
+            const extractResult = await extractText(fileUint8Array);
+            
+            // Handle the result which might be an object with text array
+            addFileContent = Array.isArray(extractResult.text) 
+              ? extractResult.text.join('\n') 
+              : typeof extractResult === 'string' 
+                ? extractResult 
+                : typeof extractResult.text === 'string' 
+                  ? extractResult.text 
+                  : 'Error: Could not extract text from PDF';
+          } catch (pdfError) {
+            console.error('Additional PDF text extraction error:', pdfError);
+            continue; // Skip this document but continue processing others
+          }
+        } else if (addFileType === 'xlsx' || addFileType === 'xls') {
+          try {
+            const workbook = XLSX.read(fileBuffer);
+            const sheetNames = workbook.SheetNames;
+            const sheetToUse = sheetNames[0]; // Use first sheet for additional documents
+            const worksheet = workbook.Sheets[sheetToUse];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            
+            addFileContent = `Excel file "${addFileName}" sheet "${sheetToUse}" contents:\n`;
+            addFileContent += jsonData.map((row: any) => row.join('\t')).join('\n');
+          } catch (excelError) {
+            console.error('Additional Excel processing error:', excelError);
+            continue; // Skip this document but continue processing others
+          }
+        } else {
+          // Default: treat as text file
+          addFileContent = fileBuffer.toString('utf-8');
+        }
+        
+        // Add to additional contents array
+        body.additionalContents.push({
+          id: addDocId,
+          name: addFileName,
+          content: addFileContent,
+          type: addFileType || 'text'
+        });
+        
+        console.log(`Added additional document ${addFileName} (${addFileContent.length} chars)`);
+      } catch (error) {
+        console.error(`Error processing additional document ${addDocId}:`, error);
+        // Continue with other documents
+      }
+    }
+  }
+
+  // --- Get messages, documentId, currentDocument, additionalDocuments, activeSheet from body --- 
   // Explicitly type messages as VercelChatMessage[] upon destructuring
-  // Use firestore.DocumentData for currentDocument
-  const { messages, documentId, currentDocument, activeSheet }: {
+  // Use firestore.DocumentData for currentDocument and additionalDocuments
+  const { messages, documentId, currentDocument, additionalDocumentIds, additionalDocuments, additionalContents, activeSheet }: {
     messages: VercelChatMessage[];
     documentId?: string;
     currentDocument?: firestore.DocumentData;
+    additionalDocumentIds?: string[];
+    additionalDocuments?: firestore.DocumentData[];
+    additionalContents?: Array<{id: string, name: string, content: string, type: string}>;
     activeSheet?: string;
   } = body;
 
@@ -224,48 +318,55 @@ export async function POST(req: NextRequest) {
   console.log(`Active Sheet provided: ${activeSheet}`);
 
   // 3. Document Context Handling (if documentId provided)
-  let fileContent: string | null = null;
-  let fileType: string | null = null;
-  let fileName: string | null = null;
+  let primaryFileContent: string | null = null;
+  let primaryFileType: string | null = null;
+  let primaryFileName: string | null = null;
+  
+  // We'll use body.additionalContents to store additional document content
 
+  // Process primary document first
   if (documentId && currentDocument?.storagePath) {
-    console.log(`Processing request with document context: ID=${documentId}, Path=${currentDocument.storagePath}`);
-    fileName = currentDocument.name || documentId;
-    fileType = fileName?.split('.').pop()?.toLowerCase() || null;
-    console.log(`File type determined as: ${fileType}`);
+    console.log(`Processing primary document: ID=${documentId}, Path=${currentDocument.storagePath}`);
+    primaryFileName = currentDocument.name || documentId;
+    primaryFileType = primaryFileName?.split('.').pop()?.toLowerCase() || null;
+    console.log(`Primary file type determined as: ${primaryFileType}`);
 
     try {
       const file: GoogleCloudFile = bucket.file(currentDocument.storagePath);
       const [exists] = await file.exists();
       if (!exists) {
-        console.error(`File not found at path: ${currentDocument.storagePath}`);
+        console.error(`Primary file not found at path: ${currentDocument.storagePath}`);
         return NextResponse.json(
-          { error: "Document file not found in storage." },
+          { error: "Primary document file not found in storage." },
           { status: 404 }
         );
       }
 
       // Download file content
       const [fileBuffer] = await file.download();
-      console.log(`File downloaded successfully (${fileBuffer.length} bytes)`);
+      console.log(`Primary file downloaded successfully (${fileBuffer.length} bytes)`);
 
       // Process based on file type
-      if (fileType === 'xlsx') {
-        // --- Direct Excel Handling --- 
-        // Removed direct Excel handling logic
-      } else if (fileType === 'pdf') {
+      if (primaryFileType === 'pdf') {
         console.log(`[route.ts] Attempting PDF text extraction for document: ${documentId} using unpdf...`); 
         try {
            // Convert Node.js Buffer to Uint8Array
            const fileUint8Array = new Uint8Array(fileBuffer); 
            console.log(`[route.ts] Converted Buffer (length: ${fileBuffer.length}) to Uint8Array (length: ${fileUint8Array.length}) for unpdf.`);
           // Pass the Uint8Array to extractText
-          const { text } = await extractText(fileUint8Array); 
-          fileContent = text.join('\n'); // Join array elements into a single string
+          const extractResult = await extractText(fileUint8Array);
+          // Handle the result which might be an object with text array
+          primaryFileContent = Array.isArray(extractResult.text) 
+            ? extractResult.text.join('\n') 
+            : typeof extractResult === 'string' 
+              ? extractResult 
+              : typeof extractResult.text === 'string' 
+                ? extractResult.text 
+                : 'Error: Could not extract text from PDF';
            console.log(`[route.ts] PDF content extracted successfully for document: ${documentId}.`); 
          } catch (pdfError: any) { 
              console.error(`[route.ts] Error during unpdf text extraction for document ${documentId}:`, pdfError);
-             fileContent = ''; // Set to empty string on PDF extraction failure
+             primaryFileContent = ''; // Set to empty string on PDF extraction failure
             // Explicitly log message and stack if they exist
             if (pdfError.message) {
               console.error(`[route.ts] unpdf Error Message: ${pdfError.message}`);
@@ -276,12 +377,40 @@ export async function POST(req: NextRequest) {
             // Re-throw the error to be caught by the outer catch block
             throw new Error(`unpdf extraction failed: ${pdfError.message || 'Unknown PDF processing error'}`);
         }
-       } else if (['txt', 'md', 'csv', 'json', 'html', 'xml', 'js', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rb', 'php'].includes(fileType || '')) {
-         fileContent = fileBuffer.toString('utf-8');
-         console.log("Plain text content extracted.");
+       } else if (primaryFileType === 'xlsx' || primaryFileType === 'xls') {
+         // Handle Excel files
+         try {
+           // Parse Excel file
+           const workbook = XLSX.read(fileBuffer);
+           const sheetNames = workbook.SheetNames;
+           
+           // If activeSheet is specified and exists, use that sheet
+           // Otherwise, use the first sheet
+           const sheetToUse = activeSheet && sheetNames.includes(activeSheet) 
+             ? activeSheet 
+             : sheetNames[0];
+             
+           const worksheet = workbook.Sheets[sheetToUse];
+           
+           // Convert worksheet to JSON
+           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+           
+           // Convert JSON data to string representation
+           primaryFileContent = `Excel file "${primaryFileName}" sheet "${sheetToUse}" contents:\n`;
+           primaryFileContent += jsonData.map((row: any) => row.join('\t')).join('\n');
+           
+           console.log(`Excel content extracted from sheet "${sheetToUse}" (${primaryFileContent.length} chars)`);
+         } catch (excelError) {
+           console.error('Excel processing error:', excelError);
+           return NextResponse.json(
+             { error: "Failed to process Excel file." },
+             { status: 500 }
+           );
+         }
        } else {
-         console.warn(`Unsupported file type for content extraction: ${fileType}`);
-         fileContent = `Cannot display content for file type: ${fileType}`;
+         // Default: treat as text file
+         primaryFileContent = fileBuffer.toString('utf-8');
+         console.log(`Text file content extracted (${primaryFileContent.length} chars)`);
        }
     } catch (error) {
       console.error(`Error processing document ${documentId}:`, error);
@@ -304,8 +433,8 @@ export async function POST(req: NextRequest) {
      .join('\n');
      
   // Construct the prompt - include history and document context
-  const documentContext = fileContent 
-     ? `\n\n--- Document Content (${fileName || 'current document'}) ---\n${fileContent.substring(0, 20000)} ${fileContent.length > 20000 ? '\n[Content Truncated]' : ''}\n--- End Document Content ---` 
+  const documentContext = primaryFileContent 
+     ? `\n\n--- Document Content (${primaryFileName || 'current document'}) ---\n${primaryFileContent.substring(0, 20000)} ${primaryFileContent.length > 20000 ? '\n[Content Truncated]' : ''}\n--- End Document Content ---` 
      : '\n\nNo document context provided.';
      
   // Combine history, document context, and the latest user message
@@ -344,18 +473,50 @@ If asked to modify an Excel file or create a spreadsheet, call the 'excelOperati
 Do not output raw JSON. Use the tool.
 If asked a general question or a question about the document content, answer normally.`;
 
-    if (fileContent) {
+    // Add primary document context if available
+    if (primaryFileContent) {
         // Append document context, truncating if necessary
-        const truncatedContent = fileContent.substring(0, 20000); // Limit context size
-        const isTruncated = fileContent.length > 20000;
+        const truncatedContent = primaryFileContent.substring(0, 20000); // Limit context size
+        const isTruncated = primaryFileContent.length > 20000;
         finalSystemPrompt += `
         
---- Document Context (${fileName || 'current document'}) ---
+--- Primary Document Context (${primaryFileName || 'current document'}) ---
 ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
---- End Document Context ---`;
-        console.log(`[route.ts] Appending document context (${fileName || 'current document'}) to system prompt. Length: ${truncatedContent.length}, Truncated: ${isTruncated}`);
+--- End Primary Document Context ---`;
+        console.log(`[route.ts] Appending primary document context (${primaryFileName || 'current document'}) to system prompt. Length: ${truncatedContent.length}, Truncated: ${isTruncated}`);
     } else {
-        console.log("[route.ts] No document context (fileContent) to append to system prompt.");
+        console.log("[route.ts] No primary document context to append to system prompt.");
+    }
+    
+    // Add additional document contexts if available
+    if (body.additionalContents && body.additionalContents.length > 0) {
+        console.log(`[route.ts] Appending ${body.additionalContents.length} additional document contexts to system prompt.`);
+        
+        // Calculate remaining space for additional documents
+        const basePromptLength = finalSystemPrompt.length;
+        const maxTotalLength = 80000; // Adjust based on model's context window
+        const remainingSpace = Math.max(0, maxTotalLength - basePromptLength);
+        const spacePerAdditionalDoc = Math.floor(remainingSpace / body.additionalContents.length);
+        
+        for (const addDoc of body.additionalContents) {
+            // Truncate additional content to fit within allocated space
+            const truncatedAddContent = addDoc.content.length > spacePerAdditionalDoc
+                ? addDoc.content.substring(0, spacePerAdditionalDoc) + "\n[Content Truncated]"
+                : addDoc.content;
+            
+            finalSystemPrompt += `
+            
+--- Additional Document: ${addDoc.name} (${addDoc.type}) ---
+${truncatedAddContent}
+--- End Additional Document ---`;
+            
+            console.log(`[route.ts] Added additional document ${addDoc.name} to system prompt. Length: ${truncatedAddContent.length}`);
+        }
+        
+        // Add instruction for handling multiple documents
+        finalSystemPrompt += `
+
+When answering questions, use information from both the primary document and any additional documents. If information appears in multiple documents, synthesize it and note the different sources.`;
     }
      
     // --- Prepare messages for AI API (Use the full conversation history for context) ---
@@ -386,6 +547,8 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
           await messagesCollectionRef.add({ 
             role: lastUserMsg.role,
             content: lastUserMsg.content,
+            userId: capturedUserId, // Add userId
+            documentId: capturedDocumentId, // Add documentId
             createdAt: firestore.FieldValue.serverTimestamp(),
           });
           console.log(`[route.ts] User message saved BEFORE AI call for document ${documentId}`);
@@ -492,17 +655,19 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
           }
 
           // --- Save Assistant's Final Message in onFinish --- 
-          if (capturedDocumentId && capturedUserId) { 
-            const messagesCollectionRef = db.collection('users').doc(capturedUserId).collection('documents').doc(capturedDocumentId).collection('messages');
+          if (documentId && userId) { 
+            const messagesCollectionRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
             // Save assistant message (could be text response or Excel result message)
             await messagesCollectionRef.add({
               role: 'assistant',
               content: finalAiMessageContent, // This now holds the correct message
+              userId: userId, // Use userId directly
+              documentId: documentId, // Use documentId directly
               createdAt: firestore.FieldValue.serverTimestamp(),
               // Add excelFileUrl only if the operation was successful and resulted in a file
               ...(isExcelOperation && excelResult?.success && excelResult?.fileUrl ? { excelFileUrl: excelResult.fileUrl } : {}),
             });
-            console.log(`[route.ts][onFinish] Assistant message saved (tool/text) for document ${capturedDocumentId}`);
+            console.log(`[route.ts][onFinish] Assistant message saved (tool/text) for document ${documentId}`);
           } else {
             console.log("[route.ts][onFinish] Skipping assistant message save - no documentId or userId.");
           }
@@ -539,6 +704,8 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
           await messagesCollectionRef.add({
             role: lastUserMessage.role,
             content: lastUserMessage.content,
+            userId: userId, // Use userId directly
+            documentId: documentId, // Use documentId directly
             createdAt: firestore.FieldValue.serverTimestamp(),
           });
           console.log(`User message saved (on error) for document ${documentId}`);
@@ -548,6 +715,8 @@ ${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
         await messagesCollectionRef.add({
           role: 'assistant',
           content: `Sorry, there was an error processing your request. ${error instanceof Error ? error.message : ''}`,
+          userId: userId, // Use userId directly
+          documentId: documentId, // Use documentId directly
           createdAt: firestore.FieldValue.serverTimestamp(),
         });
         console.log(`Error message saved for document ${documentId}`);

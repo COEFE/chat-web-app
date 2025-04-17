@@ -18,11 +18,17 @@ import {
 } from 'firebase/firestore';
 
 interface ChatInterfaceProps {
-  documentId: string;
-  document?: MyDocumentData; 
+  documentId: string; // Primary/active document ID
+  document?: MyDocumentData;
+  // Optional additional properties for multi-document support
+  additionalDocuments?: MyDocumentData[];
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, additionalDocuments = [] }) => {
+  // Combine primary document with additional documents for context
+  const allDocuments = document ? [document, ...additionalDocuments] : additionalDocuments;
+  // Get all document IDs for the API call
+  const allDocumentIds = allDocuments.map(doc => doc.id);
   const scrollAreaRef = useRef<HTMLDivElement>(null); 
   const { user } = useAuth(); 
   const [authToken, setAuthToken] = useState<string | null>(null); // State for auth token
@@ -47,16 +53,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document }) =
     }
   }, [user]); // Re-run when user changes
 
+  // DEBUG: Log the auth token value before useChat is initialized
+  console.log('[ChatInterface] Auth token before useChat:', authToken);
+
+  // Prepare headers for useChat
+  const chatHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+  // DEBUG: Log the headers being passed to useChat
+  console.log('[ChatInterface] Headers for useChat:', chatHeaders);
+
   // Initialize useChat hook - provides messages, setMessages, etc.
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages } = useChat({
     api: '/api/chat',
-    id: documentId,
+    id: documentId, // Use primary document ID as the chat ID
     initialMessages: [], // Explicitly start with empty messages
     // Add the headers property conditionally
-    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+    headers: chatHeaders, // Pass the prepared headers object
     body: {
-      documentId: documentId,
-      currentDocument: document,
+      documentId: documentId, // Primary document ID
+      currentDocument: document, // Primary document data
+      additionalDocumentIds: allDocumentIds.filter(id => id !== documentId), // Additional document IDs
+      additionalDocuments: additionalDocuments, // Additional document data
       activeSheet: activeSheet,
     },
     onFinish: (message) => {

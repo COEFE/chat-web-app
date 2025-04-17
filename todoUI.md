@@ -20,13 +20,13 @@ This document outlines the improvements needed to transform our dashboard into a
 - [x] **Add customizable columns** in list view (date modified, size, type, etc.)
 - [x] **Create visual tags/badges** for different document types (PDF, Excel, Word, etc.)
 - [x] **Introduce document grouping** beyond folders (by date, type, project, etc.)
-- [ ] **Add drag-and-drop functionality** for file organization
+- [x] **Add drag-and-drop functionality** for file organization
 - [ ] **Implement quick filters** at the top of the document list
 
 ### 2. Navigation & Accessibility
 
 - [x] **Make document rows directly clickable** (recently implemented)
-- [ ] **Add breadcrumb navigation** with dropdown menus at each level
+- [x] **Add breadcrumb navigation** with dropdown menus at each level
 - [ ] **Create a favorites/pinned section** for frequently accessed documents
 - [ ] **Add keyboard shortcuts** for power users (Ctrl+F for search, etc.)
 - [ ] **Implement search suggestions** and recent searches

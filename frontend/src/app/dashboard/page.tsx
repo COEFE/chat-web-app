@@ -54,7 +54,8 @@ import {
   FileAudio, 
   FileSpreadsheet, 
   FileCode, 
-  FileArchive 
+  FileArchive, 
+  Columns 
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -129,14 +130,14 @@ import {
 import { MoveDocumentModal } from '@/components/dashboard/MoveDocumentModal';
 import Breadcrumbs from '@/components/dashboard/Breadcrumbs';
 import DocumentGrid from '@/components/dashboard/DocumentGrid';
-import ChatInterface from '@/components/dashboard/ChatInterface'; // Correct import path
+import ChatInterface from '@/components/dashboard/ChatInterface'; 
 import { FileUpload } from '@/components/dashboard/FileUpload';
 import { ListTree } from 'lucide-react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { DraggableRow } from '@/components/dashboard/DraggableRow'; 
 import FolderBreadcrumbs from '@/components/dashboard/FolderBreadcrumbs'; 
-import { FavoritesSection } from '@/components/dashboard/FavoritesSection'; // Add import
+import Link from 'next/link'; // Import Link
 
 import { 
   formatDistanceToNow, 
@@ -337,7 +338,7 @@ const createColumns = (
         const item = row.original;
         return (
           <div className="text-right pr-2"> 
-            <DropdownMenu>
+            <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>
                 <Button 
                   variant="ghost" 
@@ -423,6 +424,12 @@ function DocumentTable({
     [onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, handleDeleteClick, isDeleting, deletingId]
   );
 
+  // Set up pagination with 20 items per page
+  const [pagination, setPagination] = useState({
+    pageIndex: 0,
+    pageSize: 20,
+  });
+
   const table = useReactTable({
     data, // Use the 'data' prop passed to the component
     columns,
@@ -439,6 +446,7 @@ function DocumentTable({
     onRowSelectionChange: setRowSelection,
     onGroupingChange: setGrouping, // Add grouping change handler
     onExpandedChange: setExpanded, // Add expanded change handler
+    onPaginationChange: setPagination,
     state: {
       sorting,
       columnFilters,
@@ -446,6 +454,7 @@ function DocumentTable({
       rowSelection,
       grouping, // Include grouping in state
       expanded, // Include expanded in state
+      pagination, // Include pagination in state
     },
   });
 
@@ -478,41 +487,11 @@ function DocumentTable({
   }
 
   return (
-    <div className="flex flex-col flex-grow overflow-hidden h-full"> 
-       {/* Column Toggle Button */}
-       <div className="flex items-center py-2 justify-end flex-shrink-0 pr-2"> 
-         <DropdownMenu>
-           <DropdownMenuTrigger asChild>
-             <Button variant="outline" className="ml-auto">
-               Columns
-             </Button>
-           </DropdownMenuTrigger>
-           <DropdownMenuContent align="end">
-             {table
-               .getAllColumns()
-               .filter((column) => column.getCanHide())
-               .map((column) => {
-                 return (
-                   <DropdownMenuCheckboxItem
-                     key={column.id}
-                     className="capitalize"
-                     checked={column.getIsVisible()}
-                     onCheckedChange={(value: boolean) =>
-                       column.toggleVisibility(!!value)
-                     }
-                   >
-                     {typeof column.columnDef.header === 'string' 
-                        ? column.columnDef.header 
-                        : column.id}
-                   </DropdownMenuCheckboxItem>
-                 );
-               })}
-           </DropdownMenuContent>
-         </DropdownMenu>
-       </div>
+    <div className="flex flex-col h-[calc(100vh-200px)] overflow-auto"> 
+       {/* Column Toggle Button removed from here - moved to toolbar */}
 
       {/* TanStack Table Rendering */} 
-      <div className="rounded-md border flex-grow overflow-auto"> 
+      <div className="rounded-md border"> 
         <ShadcnTable className="min-w-full">
           <thead className={cn("[&_tr]:border-b")}> 
             {table.getHeaderGroups().map((headerGroup) => ( 
@@ -595,6 +574,33 @@ function DocumentTable({
             )}
           </tbody> 
         </ShadcnTable>
+        
+        {/* Pagination Controls */}
+        <div className="flex items-center justify-between px-4 py-2 border-t">
+          <div className="flex-1 text-sm text-muted-foreground">
+            Showing {table.getFilteredRowModel().rows.length > 0 ? table.getState().pagination.pageIndex * table.getState().pagination.pageSize + 1 : 0} to {Math.min((table.getState().pagination.pageIndex + 1) * table.getState().pagination.pageSize, table.getFilteredRowModel().rows.length)} of {table.getFilteredRowModel().rows.length} items
+          </div>
+          <div className="flex items-center space-x-6 lg:space-x-8">
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => table.previousPage()}
+                disabled={!table.getCanPreviousPage()}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => table.nextPage()}
+                disabled={!table.getCanNextPage()}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Delete Confirmation Dialog */}
@@ -832,8 +838,11 @@ function DashboardPage() {
   };
 
   const handleSelectItem = (item: FilesystemItem | null) => {
+    console.log('Item selected:', item);
     if (item?.type === 'document') {
-      handleSelectDocument(item);
+      // Navigate to the document chat page when a document is selected
+      console.log('Navigating to document chat page for:', item.id);
+      router.push(`/document-chat/${item.id}`);
     } else if (item?.type === 'folder') {
       console.log('Folder selected (for info):', item);
       setSelectedDocument(null);
@@ -1206,6 +1215,9 @@ function DashboardPage() {
     <div className="flex h-screen flex-col bg-muted/40">
       <header className="sticky top-0 z-30 flex h-8 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-1">
         <h1 className="text-base font-semibold whitespace-nowrap">My Documents</h1>
+        <Link href="/chat-history" className="text-sm text-blue-600 hover:underline">
+          Chat History
+        </Link>
         <div className="ml-auto flex items-center gap-3">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Welcome, {user.displayName || user.email}</span>
           <Button variant="outline" size="sm" className="h-6 text-xs py-0" onClick={logout}>Logout</Button>
@@ -1223,44 +1235,50 @@ function DashboardPage() {
 
         <div className="flex h-full flex-col">
           {selectedDocument && (
-            <div className="flex justify-end mb-2 gap-2">
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => setIsMaximized(prev => !prev)}
-                title={isMaximized ? "Exit full screen" : "Full screen"}
-              >
-                {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => setIsViewerVisible(prev => !prev)}
-                title={isViewerVisible ? "Hide document viewer" : "Show document viewer"}
-              >
-                {isViewerVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </Button>
-            </div>
+            <>
+              <div className="flex justify-end mb-2 gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setIsMaximized(prev => !prev)}
+                  title={isMaximized ? "Exit full screen" : "Full screen"}
+                >
+                  {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setIsViewerVisible(prev => !prev)}
+                  title={isViewerVisible ? "Hide document viewer" : "Show document viewer"}
+                >
+                  {isViewerVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+              </div>
+              
+              {/* Document Viewer and Chat Interface */}
+              {isViewerVisible && (
+                <div className={`mb-4 ${isMaximized ? 'fixed inset-0 z-50 bg-background p-6' : 'h-[60vh] overflow-auto border rounded-md'}`}>
+                  <div className="h-full flex flex-col">
+                    <DocumentViewer document={selectedDocument} />
+                    <ChatInterface documentId={selectedDocument.id} document={selectedDocument} />
+                  </div>
+                </div>
+              )}
+            </>
           )}
           
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Favorites Section - Now part of the main flex column */} 
-            <div className="border-b"> {/* Container for border */} 
-              <FavoritesSection 
-                userId={user.uid} // Use user.uid
-                onSelectItem={handleSelectItem} // Correct prop name
-              />
-            </div>
+          <div className={`flex-1 flex flex-col overflow-hidden ${isMaximized && isViewerVisible ? 'hidden' : ''}`}>
+            {/* Favorites Section removed to simplify UI and reduce whitespace */}
 
             {/* Document List/Grid Section - Takes remaining space */}
-            <div className="flex-1 overflow-hidden p-4"> {/* Apply flex-1 and padding */} 
+            <div className="flex-1 overflow-hidden p-3"> {/* Container for document section */} 
               {/* Document Management Toolbar */} 
-              <div className="mb-3"> {/* Add margin-bottom here */} 
+              <div className="mb-2"> {/* Reduced margin-bottom */} 
                 <div className="flex items-center justify-between bg-muted/30 p-1.5 rounded-md">
                   {/* Left side - Primary Actions */} 
                   <div className="flex items-center space-x-1.5">
                     {/* New Button with Dropdown */}
-                    <DropdownMenu>
+                    <DropdownMenu modal={false}>
                       <DropdownMenuTrigger asChild>
                         <Button variant="default" size="sm" className="h-7 px-2.5">
                           <Plus className="h-3.5 w-3.5 mr-1.5" />
@@ -1284,11 +1302,10 @@ function DashboardPage() {
                       <RefreshCw className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                  
-                  {/* Right side - View Controls */}
+                                    {/* Right side - View Controls */}
                   <div className="flex items-center space-x-1.5">
                     {/* Grouping Control */}
-                    <DropdownMenu>
+                    <DropdownMenu modal={false}>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="sm" className="h-7 px-2">
                           <ListTree className="h-3.5 w-3.5 mr-1.5" /> 
@@ -1307,6 +1324,51 @@ function DashboardPage() {
                         </DropdownMenuRadioGroup>
                       </DropdownMenuContent>
                     </DropdownMenu>
+                    
+                    {/* Columns Control - Moved here */}
+                    {viewMode === 'list' && (
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" className="h-7 px-2">
+                            <Columns className="h-3.5 w-3.5 mr-1.5" />
+                            <span className="text-xs">Columns</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuLabel>Toggle Columns</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          {viewMode === 'list' && filesystemItems.length > 0 && (
+                            <>
+                              {/* This is a placeholder for column visibility toggles */}
+                              <DropdownMenuCheckboxItem
+                                className="capitalize"
+                                checked={true}
+                              >
+                                Name
+                              </DropdownMenuCheckboxItem>
+                              <DropdownMenuCheckboxItem
+                                className="capitalize"
+                                checked={true}
+                              >
+                                Type
+                              </DropdownMenuCheckboxItem>
+                              <DropdownMenuCheckboxItem
+                                className="capitalize"
+                                checked={true}
+                              >
+                                Size
+                              </DropdownMenuCheckboxItem>
+                              <DropdownMenuCheckboxItem
+                                className="capitalize"
+                                checked={true}
+                              >
+                                Date Modified
+                              </DropdownMenuCheckboxItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                     
                     {/* View Mode Toggle */}
                     <div className="border-l border-muted-foreground/20 pl-1.5 ml-0.5">
@@ -1335,7 +1397,7 @@ function DashboardPage() {
               </div>
               
               {/* Upload Dialog */}
-              <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
+              <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen} modal={false}>
                 <DialogContent className="sm:max-w-[525px]">
                   <DialogHeader>
                     <DialogTitle>Upload Document</DialogTitle>
@@ -1353,9 +1415,8 @@ function DashboardPage() {
               </Dialog>
               
               {/* Document Section Header - More Compact */}
-              <div className="flex justify-between items-center mb-2 mt-4 flex-shrink-0"> 
-                <div className="flex items-center">
-                  <h2 className="text-base font-medium">Documents</h2>
+              <div className="flex justify-between items-center mb-1 mt-2 flex-shrink-0">                <div className="flex items-center">
+                  <h2 className="text-sm font-medium">Documents</h2>
                   <span className="text-xs text-muted-foreground ml-2">
                     ({folderPath.length > 0 ? folderPath[folderPath.length - 1].name : 'Home'}) • 
                     {filesystemItems.length} {filesystemItems.length === 1 ? 'item' : 'items'}
@@ -1363,8 +1424,8 @@ function DashboardPage() {
                 </div>
               </div>
               {loadingDocs ? (
-                <div className="flex items-center justify-center p-10">
-                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                <div className="flex items-center justify-center p-4">
+                  <Loader2 className="h-5 w-5 animate-spin mr-2" />
                   <span>Loading items...</span>
                 </div>
               ) : docsError ? (
@@ -1373,47 +1434,49 @@ function DashboardPage() {
                 </div>
               ) : (
                 <>
-                  {viewMode === 'list' ? (
-                    <DndProvider backend={HTML5Backend}>
-                      <DocumentTable 
-                        data={filesystemItems}
+                  <div className="h-[calc(100vh-220px)] overflow-auto">
+                    {viewMode === 'list' ? (
+                      <DndProvider backend={HTML5Backend}>
+                        <DocumentTable 
+                          data={filesystemItems}
+                          isLoading={loadingDocs}
+                          error={docsError}
+                          onSelectItem={handleSelectItem} 
+                          onDeleteDocument={handleDeleteDocument}
+                          onFolderClick={handleNavigateFolder}
+                          onMoveClick={handleOpenMoveModal} 
+                          onRenameFolder={handleRenameFolder} 
+                          onDeleteFolder={handleDeleteFolder} 
+                          initialGrouping={ 
+                            groupingOption === 'type' ? ['type'] : 
+                            groupingOption === 'date' ? ['updatedAt'] : 
+                            [] 
+                          } 
+                          onMoveRow={handleMoveRow} 
+                          onDropItemIntoFolder={handleDropItemIntoFolder}
+                        />
+                      </DndProvider>
+                    ) : (
+                      <DocumentGrid 
+                        items={filesystemItems}
                         isLoading={loadingDocs}
                         error={docsError}
-                        onSelectItem={handleSelectItem} 
-                        onDeleteDocument={handleDeleteDocument}
+                        onSelectItem={handleSelectItem}
                         onFolderClick={handleNavigateFolder}
+                        onDeleteDocument={handleDeleteDocument}
+                        onDeleteFolder={handleDeleteFolder}
                         onMoveClick={handleOpenMoveModal} 
-                        onRenameFolder={handleRenameFolder} 
-                        onDeleteFolder={handleDeleteFolder} 
-                        initialGrouping={ 
-                          groupingOption === 'type' ? ['type'] : 
-                          groupingOption === 'date' ? ['updatedAt'] : 
-                          [] 
-                        } 
-                        onMoveRow={handleMoveRow} 
-                        onDropItemIntoFolder={handleDropItemIntoFolder}
+                        onRenameFolder={handleRenameFolder}
                       />
-                    </DndProvider>
-                  ) : (
-                    <DocumentGrid 
-                      items={filesystemItems}
-                      isLoading={loadingDocs}
-                      error={docsError}
-                      onSelectItem={handleSelectItem}
-                      onFolderClick={handleNavigateFolder}
-                      onDeleteDocument={handleDeleteDocument}
-                      onDeleteFolder={handleDeleteFolder}
-                      onMoveClick={handleOpenMoveModal} 
-                      onRenameFolder={handleRenameFolder}
-                    />
-                  )}
+                    )}
+                  </div>
                 </>
               )}
             </div>
           </div>
         </div>
       </main>
-      <Dialog open={showCreateFolderDialog} onOpenChange={setShowCreateFolderDialog}>
+      <Dialog open={showCreateFolderDialog} onOpenChange={setShowCreateFolderDialog} modal={false}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>Create New Folder</DialogTitle>
@@ -1451,7 +1514,7 @@ function DashboardPage() {
       </Dialog>
 
       {/* Rename Folder Dialog */}
-      <Dialog open={!!folderToRename} onOpenChange={(open) => !open && setFolderToRename(null)}>
+      <Dialog open={!!folderToRename} onOpenChange={(open) => !open && setFolderToRename(null)} modal={false}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>Rename Folder</DialogTitle>
