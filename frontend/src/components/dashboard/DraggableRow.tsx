@@ -50,8 +50,12 @@ export const DraggableRow: React.FC<DraggableRowProps> = ({
       return {
         handlerId: monitor.getHandlerId(),
         isOver: monitor.isOver(),
-        // Determine if dropping is allowed (e.g., target is a folder, item isn't already inside)
-        canDrop: monitor.canDrop() && item.type === 'folder' && monitor.getItem()?.original?.id !== item.id && monitor.getItem()?.original?.parentId !== item.id,
+        // Determine if dropping is allowed
+        canDrop: monitor.canDrop() &&
+                 item.type === 'folder' && // Target must be a folder
+                 monitor.getItem()?.original?.id !== item.id && // Cannot drop onto self
+                 // Allow drop if dragged has no parent OR parent is not the target
+                 (!monitor.getItem()?.original?.parentId || monitor.getItem()?.original?.parentId !== item.id),
       };
     },
     hover(draggedItem: DragItem, monitor) {
@@ -123,12 +127,13 @@ export const DraggableRow: React.FC<DraggableRowProps> = ({
       // Only handle drop *into* folder if the target is a folder and the dragged item is a FILESYSTEM_ITEM
       if (item.type === 'folder' && draggedItem.type === ItemTypes.FILESYSTEM_ITEM) {
         console.log(`Checking drop conditions: target folder='${item.name}', item='${draggedItem.original.name}'`);
-        // Prevent dropping an item into itself or its current parent
-        if (draggedItem.id !== item.id && draggedItem.original.parentId !== item.id) {
+        // Prevent dropping an item into itself or its current parent (using optional chaining)
+        if (draggedItem.id !== item.id && draggedItem.original?.parentId !== item.id) {
           console.log(`Conditions met! Calling onDropItemIntoFolder: itemId=${draggedItem.id}, targetFolderId=${item.id}`);
           onDropItemIntoFolder(draggedItem.id, item.id);
         } else {
-          console.log(`Drop prevented: either dropping onto self (item.id=${item.id}) or into current parent (item.parentId=${draggedItem.original.parentId})`);
+          // Use optional chaining in the log message as well
+          console.log(`Drop prevented: either dropping onto self (item.id=${item.id}) or into current parent (item.parentId=${draggedItem.original?.parentId})`);
         }
       } else {
         console.log('Drop condition not met (target not folder or dragged item type mismatch).');

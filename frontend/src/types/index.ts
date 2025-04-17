@@ -14,6 +14,7 @@ export interface MyDocumentData {
   downloadURL?: string;
   size?: number; // Size in bytes
   createdAt: Timestamp | null; // Creation timestamp, null if not available
+  parentId?: string | null; // Add optional parentId
 }
 
 // Interface for Folder data
@@ -24,6 +25,7 @@ export interface FolderData {
   userId: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  parentId?: string | null; // Add optional parentId
 }
 
 // You might also want a type that represents either a folder or a document
