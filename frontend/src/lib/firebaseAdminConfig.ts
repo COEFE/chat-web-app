@@ -18,34 +18,54 @@ function loadServiceAccount(): ServiceAccount | undefined {
     // Try to load the service account from the environment variable first
     serviceAccountContent = process.env.FIREBASE_SERVICE_ACCOUNT;
     if (serviceAccountContent) {
-      console.log('[FirebaseAdmin] Loaded service account from environment variable.');
+      console.log('[FirebaseAdmin] Attempting to load from environment variable.');
+      // Log the first few and last few characters to check integrity without exposing the key
+      const previewLength = 30;
+      if (serviceAccountContent.length > previewLength * 2) {
+          console.log(`[FirebaseAdmin] Env Var Content (Preview): ${serviceAccountContent.substring(0, previewLength)}...${serviceAccountContent.substring(serviceAccountContent.length - previewLength)}`);
+      } else {
+          console.log(`[FirebaseAdmin] Env Var Content (Full): ${serviceAccountContent}`); // Log full content if short
+      }
     } else {
-      // If not found in environment variable, try to load from file
-      // Resolve path relative to the current working directory, which should be the project root in most deployments
+      console.log('[FirebaseAdmin] Environment variable FIREBASE_SERVICE_ACCOUNT not found.');
+      // Fallback to file loading
       const resolvedPath = path.resolve(process.cwd(), serviceAccountPath);
-      console.log(`[FirebaseAdmin] Env var not found. Attempting to load from file: ${resolvedPath}`);
+      console.log(`[FirebaseAdmin] Attempting to load from file: ${resolvedPath}`);
       serviceAccountContent = fs.readFileSync(resolvedPath, 'utf8');
       console.log(`[FirebaseAdmin] Loaded service account from file: ${resolvedPath}`);
     }
   } catch (error: any) {
     // Log specific errors for file vs env var
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      console.error('[FirebaseAdmin] Error parsing service account from environment variable:', error.message);
-    } else {
-      console.warn(`[FirebaseAdmin] Failed to load service account from file (${serviceAccountPath}): ${error.message}. Will attempt ADC.`);
+    if (process.env.FIREBASE_SERVICE_ACCOUNT && !serviceAccountContent) {
+        // Error happened trying to read the env var itself (less likely)
+        console.error('[FirebaseAdmin] Error reading environment variable:', error.message);
+    } else if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+        // Error happened trying to read the file
+        console.warn(`[FirebaseAdmin] Failed to load service account from file (${serviceAccountPath}): ${error.message}.`);
     }
+    // Continue execution, will attempt ADC later if serviceAccountContent remains undefined
+    console.log('[FirebaseAdmin] Proceeding without loaded service account key due to read error.');
   }
 
   if (serviceAccountContent) {
     try {
-      // Parse the service account JSON
+      console.log('[FirebaseAdmin] Attempting to parse service account JSON...');
       const serviceAccount: ServiceAccount = JSON.parse(serviceAccountContent);
+      console.log('[FirebaseAdmin] Successfully parsed service account JSON.');
       return serviceAccount;
-    } catch (error) {
-      console.error('[FirebaseAdmin] Failed to parse service account JSON:', error);
+    } catch (parseError: any) { 
+      console.error('[FirebaseAdmin] Failed to parse service account JSON:', parseError.message);
+      // Log preview again in case of parse error
+      const previewLength = 30;
+      if (serviceAccountContent.length > previewLength * 2) {
+        console.error(`[FirebaseAdmin] Env Var Content during parse failure (Preview): ${serviceAccountContent.substring(0, previewLength)}...${serviceAccountContent.substring(serviceAccountContent.length - previewLength)}`);
+      } else {
+        console.error(`[FirebaseAdmin] Env Var Content during parse failure (Full): ${serviceAccountContent}`);
+      }
     }
   }
-
+  // If content was null/undefined OR parsing failed
+  console.log('[FirebaseAdmin] Service account could not be loaded or parsed successfully.');
   return undefined;
 }
 
