@@ -10,21 +10,30 @@ console.log(`Running in ${environment} environment`);
 // Create a service account from environment variables or direct JSON
 function loadServiceAccount(): ServiceAccount | undefined {
   let serviceAccountContent: string | undefined;
-  const isVercel = process.env.VERCEL === '1';
-  const serviceAccountPath = isVercel ? '/etc/firebase-service-account.json' : './firebase-service-account.json';
+  // For Vercel, try reading from the root first if env var fails.
+  // For local, read from the root relative to the CWD where node is run (usually project root).
+  const serviceAccountPath = './firebase-service-account.json'; 
 
   try {
-    // Try to load the service account from the environment variable
+    // Try to load the service account from the environment variable first
     serviceAccountContent = process.env.FIREBASE_SERVICE_ACCOUNT;
     if (serviceAccountContent) {
-      console.log('Loaded service account from environment variable.');
+      console.log('[FirebaseAdmin] Loaded service account from environment variable.');
     } else {
       // If not found in environment variable, try to load from file
-      serviceAccountContent = fs.readFileSync(path.resolve(__dirname, serviceAccountPath), 'utf8');
-      console.log(`Loaded service account from file: ${serviceAccountPath}`);
+      // Resolve path relative to the current working directory, which should be the project root in most deployments
+      const resolvedPath = path.resolve(process.cwd(), serviceAccountPath);
+      console.log(`[FirebaseAdmin] Env var not found. Attempting to load from file: ${resolvedPath}`);
+      serviceAccountContent = fs.readFileSync(resolvedPath, 'utf8');
+      console.log(`[FirebaseAdmin] Loaded service account from file: ${resolvedPath}`);
     }
-  } catch (error) {
-    console.error('Failed to load service account:', error);
+  } catch (error: any) {
+    // Log specific errors for file vs env var
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      console.error('[FirebaseAdmin] Error parsing service account from environment variable:', error.message);
+    } else {
+      console.warn(`[FirebaseAdmin] Failed to load service account from file (${serviceAccountPath}): ${error.message}. Will attempt ADC.`);
+    }
   }
 
   if (serviceAccountContent) {
@@ -33,7 +42,7 @@ function loadServiceAccount(): ServiceAccount | undefined {
       const serviceAccount: ServiceAccount = JSON.parse(serviceAccountContent);
       return serviceAccount;
     } catch (error) {
-      console.error('Failed to parse service account JSON:', error);
+      console.error('[FirebaseAdmin] Failed to parse service account JSON:', error);
     }
   }
 
