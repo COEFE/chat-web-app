@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFirebaseAdmin, getAdminDb } from '@/lib/firebaseAdminConfig';
+import { getAdminStorage } from '@/lib/firebaseAdminConfig';
 
 // CORS headers for all responses
 const corsHeaders = {
@@ -29,12 +29,8 @@ export async function GET(request: NextRequest) {
 
     console.log(`[file-proxy] Request for file: ${filePath}, userId: ${userId || 'not provided'}`);
 
-    // Initialize Firebase Admin if needed
-    const admin = getFirebaseAdmin();
-    const storage = admin.storage();
-
-    // Get the bucket with the correct name format
-    // Use the fileBucket from the Firestore document: web-chat-app-fa7f0.firebasestorage.app
+    // Use getAdminStorage() to get the correctly initialized storage instance
+    const storage = getAdminStorage();
     const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app';
     console.log(`[file-proxy] Using bucket name: ${bucketName}`);
     const bucket = storage.bucket(bucketName);
