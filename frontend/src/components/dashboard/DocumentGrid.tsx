@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Folder, FileText, Loader2, Star } from 'lucide-react';
+import { Folder, FileText, Loader2, Star, MoreHorizontal, Pencil, Move, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FilesystemItem } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,8 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, Trash2, Move, Pencil } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
+import { Timestamp } from 'firebase/firestore';
 import Skeleton from 'react-loading-skeleton';
 
 interface DocumentGridProps {
@@ -167,8 +168,23 @@ const DocumentGrid: React.FC<DocumentGridProps> = ({
             <p className="text-sm font-medium leading-none truncate" title={item.name}>
               {item.name}
             </p>
-            {/* Optional: Add date or other info here */}
-            {/* <p className="text-xs text-muted-foreground">{...}</p> */}
+            {(item.createdAt || item.updatedAt) && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {(() => { // IIFE for cleaner logic
+                  const dateValue = item.createdAt || item.updatedAt;
+                  let date: Date | null = null;
+                  if (dateValue instanceof Timestamp) {
+                    date = dateValue.toDate();
+                  } else if (typeof dateValue === 'string') {
+                    try { date = new Date(dateValue); } catch (e) { /* ignore invalid date string */ }
+                  } else if (typeof dateValue === 'number') { // Handle potential epoch numbers
+                    try { date = new Date(dateValue); } catch (e) { /* ignore invalid number */ }
+                  }
+                  
+                  return date ? formatDistanceToNow(date, { addSuffix: true }) : 'Date unavailable';
+                })()}
+              </p>
+            )}
           </CardContent>
         </Card>
       ))}

@@ -21,11 +21,11 @@
 
 - [x] Replace `<Input>` with `<Textarea>` for multi-line input.
 - [x] Consider Shift+Enter for newline vs. Enter for submit in Textarea.
-- [ ] Replace "Send" text button with an icon button (e.g., Paper Plane) + aria-label.
+- [x] Replace "Send" text button with an icon button (e.g., Paper Plane) + aria-label.
 
 ## Initial State / Empty Chat
 
-- [ ] Show a placeholder message in an empty chat (e.g., "Ask me anything about [Document Name]").
+- [x] Show a placeholder message in an empty chat (e.g., "Ask me anything about [Document Name]").
 
 ## Responsiveness
 
@@ -35,3 +35,13 @@
 ## Backend/API Integration
 
 - [ ] Refactor Excel update handling: Use structured API response (e.g., `excelUpdated: true`) instead of string markers.
+
+## Document Viewer/List UI
+- [x] Fix CORS issue when viewing documents (Proxy API)
+- [x] Show placeholder message in empty chat with document name
+- [x] Implement Favorites feature (Button + State)
+- [x] Add "Date Added" column/info to document list/grid
+- [ ] ~~Group documents by date in list view (Today, Yesterday, This Week, etc.)~~ (Using grid view now)
+- [ ] Persist view mode (grid/list) selection
+- [ ] Implement drag-and-drop reordering (List view)
+- [ ] Implement drag-and-drop into folders (Grid/List view)
