@@ -59,9 +59,12 @@ import {
   FileCode, 
   FileArchive, 
   Columns, 
-  Star // Add Star icon import
+  Star, 
+  Layers as LayersIcon, 
+  SlidersHorizontal 
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
+// Badge component removed
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -164,7 +167,10 @@ interface DocumentTableProps {
   onMoveClick: (itemId: string, itemName: string, itemType: 'document' | 'folder') => void;
   onRenameFolder: (folderId: string, currentName: string) => void;
   onDeleteFolder: (folderId: string, folderName: string) => void;
-  initialGrouping?: GroupingState;
+  grouping: GroupingState;
+  onGroupingChange: (grouping: GroupingState) => void;
+  columnVisibility: VisibilityState;
+  onColumnVisibilityChange: (columnVisibility: VisibilityState) => void;
   onMoveRow: (dragIndex: number, hoverIndex: number) => void; 
   onDropItemIntoFolder: (itemId: string, targetFolderId: string) => void; 
   favoriteIds: Set<string>;
@@ -315,7 +321,8 @@ const createColumns = (
         }
       },
       enableGrouping: true, // Allow grouping by Type
-      enableSorting: false, // Sorting by derived type might be less useful
+      enableSorting: true, // Allow sorting by type
+      enableHiding: true, // Allow hiding this column
     },
     {
       accessorKey: 'size',
@@ -330,6 +337,8 @@ const createColumns = (
         }
       },
       enableSorting: true, // Allow sorting by size
+      enableGrouping: false, // Size doesn't make sense for grouping
+      enableHiding: true, // Allow hiding this column
     },
     {
       accessorKey: 'uploadedAt',
@@ -382,10 +391,48 @@ const createColumns = (
 
         return dateA - dateB;
       },
-      enableSorting: true, 
+      enableSorting: true,
+      enableGrouping: true, // Enable grouping by Date Added
+      getGroupingValue: (item: FilesystemItem) => { // Use item directly
+        const dateValue = item.type === 'document' ? item.uploadedAt : item.createdAt;
+        if (!dateValue) return 'Unknown Date';
+
+        let date: Date;
+        // Check if date is Firebase Timestamp or ISO string
+        if (dateValue instanceof Timestamp) {
+          date = dateValue.toDate();
+        } else if (typeof dateValue === 'string') {
+          try {
+            date = parseISO(dateValue);
+          } catch (e) {
+            console.error("Error parsing date string:", dateValue, e);
+            return 'Invalid Date Format';
+          }
+        } else if (typeof dateValue === 'number') {
+          try {
+            date = new Date(dateValue);
+          } catch (e) {
+            return 'Invalid Date Format';
+          }
+        } else {
+          return 'Unknown Date Type';
+        }
+
+        if (isNaN(date.getTime())) {
+          return 'Invalid Date Value';
+        }
+
+        const now = new Date();
+        if (isToday(date)) return 'Today';
+        if (isYesterday(date)) return 'Yesterday';
+        if (isThisWeek(date, { weekStartsOn: 1 })) return 'This Week';
+        if (isThisMonth(date)) return 'This Month';
+        return format(date, 'yyyy');
+      },
       meta: {
         className: 'hidden md:table-cell', // Ensure it's hidden on smaller screens like others
       },
+      enableHiding: true, // Allow hiding this column
     },
     {
       accessorKey: 'updatedAt',
@@ -445,6 +492,7 @@ const createColumns = (
         return format(date, 'yyyy'); // Or 'Older', or 'yyyy-MM' for monthly grouping
       }, // End of getGroupingValue function
       enableSorting: true, // Ensure sorting is also enabled if needed
+      enableHiding: true, // Allow hiding this column
     },
 
     {
@@ -525,7 +573,10 @@ function DocumentTable({
   onMoveClick, 
   onRenameFolder, 
   onDeleteFolder, 
-  initialGrouping, 
+  grouping, 
+  onGroupingChange, 
+  columnVisibility, 
+  onColumnVisibilityChange,
   onMoveRow, 
   onDropItemIntoFolder, 
   favoriteIds, 
@@ -537,9 +588,7 @@ function DocumentTable({
   const [deletingId, setDeletingId] = useState<string | null>(null); 
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
-  const [grouping, setGrouping] = useState<GroupingState>(initialGrouping ?? []); // Initialize with prop
   const [expanded, setExpanded] = useState<ExpandedState>({}); // Use correct type
   const { toast } = useToast();
 
@@ -575,9 +624,9 @@ function DocumentTable({
     getFilteredRowModel: getFilteredRowModel(),
     getGroupedRowModel: getGroupedRowModel(), // Add grouped row model
     getExpandedRowModel: getExpandedRowModel(), // Add expanded row model
-    onColumnVisibilityChange: setColumnVisibility,
+    onColumnVisibilityChange: onColumnVisibilityChange,
     onRowSelectionChange: setRowSelection,
-    onGroupingChange: setGrouping, // Add grouping change handler
+    onGroupingChange: onGroupingChange, // Add grouping change handler
     onExpandedChange: setExpanded, // Add expanded change handler
     onPaginationChange: setPagination,
     state: {
@@ -621,7 +670,95 @@ function DocumentTable({
 
   return (
     <div className="flex flex-col h-[calc(100vh-200px)] overflow-auto"> 
-       {/* Column Toggle Button removed from here - moved to toolbar */}
+      {/* Table Toolbar with Column Toggle and Grouping Controls */}
+      <div className="flex items-center justify-between py-2 px-1 mb-2">
+        <div className="flex flex-1 items-center space-x-2">
+          {/* Group By Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 border-dashed">
+                <LayersIcon className="mr-2 h-4 w-4" />
+                Group
+                {table.getState().grouping.length > 0 && (
+                  <span className="ml-2 bg-secondary text-secondary-foreground rounded-sm px-1 text-xs">
+                    {table.getState().grouping.length}
+                  </span>
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuLabel>Group by column</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {table
+                .getAllColumns() // Use getAllColumns to get defined columns
+                .filter((column) => column.getCanGroup()) // Filter by columns that can be grouped
+                .map((column) => {
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={column.id}
+                      className="capitalize"
+                      checked={column.getIsGrouped()}
+                      onCheckedChange={(value) => {
+                        // If checking the box, set grouping to this column.
+                        // If unchecking, clear grouping.
+                        table.setGrouping(value ? [column.id] : []); 
+                      }}
+                    >
+                      {/* Use a friendlier display name */}
+                      {column.id === 'type' ? 'Type' : 
+                       column.id === 'updatedAt' ? 'Date Modified' : 
+                       column.id === 'uploadedAt' ? 'Date Added' : 
+                       column.id}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
+              {table.getState().grouping.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => table.setGrouping([])}
+                    className="justify-center text-xs"
+                  >
+                    Reset
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Column Visibility Toggle */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 border-dashed">
+                <SlidersHorizontal className="mr-2 h-4 w-4" />
+                Columns
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {table.getAllLeafColumns().filter(column => column.getCanHide()).map(column => (
+                <DropdownMenuCheckboxItem
+                  key={column.id}
+                  className="capitalize"
+                  checked={column.getIsVisible()}
+                  onCheckedChange={(value) => {
+                    console.log(`Toggling visibility of ${column.id} to ${value} via column.toggleVisibility`);
+                    column.toggleVisibility(!!value); // Use table's method
+                  }}
+                >
+                  {/* Use a friendlier display name if available, else the ID */}
+                  {column.id === 'type' ? 'Type' : 
+                   column.id === 'size' ? 'Size' :
+                   column.id === 'updatedAt' ? 'Date Modified' : 
+                   column.id === 'uploadedAt' ? 'Date Added' : 
+                   column.id}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
 
       {/* TanStack Table Rendering */} 
       {/* Use more contrasting border */}
@@ -1447,6 +1584,33 @@ function DashboardPage() {
     }
   };
 
+  // Add state for grouping controlled by DashboardPage
+  const [grouping, setGrouping] = useState<GroupingState>(
+    groupingOption === 'type' ? ['type'] :
+    groupingOption === 'date' ? ['uploadedAt'] : // Assuming 'Date Added' corresponds to 'uploadedAt'
+    []
+  );
+
+  // Add state for column visibility controlled by DashboardPage
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
+    // Default visibility - Adjust as needed
+    name: true,
+    type: true,
+    size: true,
+    uploadedAt: true, // Corresponds to 'Date Added'
+    updatedAt: true, // Corresponds to 'Date Modified'
+    actions: true
+  });
+
+  // Effect to update grouping state when groupingOption changes (e.g., from toolbar)
+  useEffect(() => {
+    setGrouping(
+      groupingOption === 'type' ? ['type'] :
+      groupingOption === 'date' ? ['uploadedAt'] : // Ensure this matches the column accessor key
+      []
+    );
+  }, [groupingOption]);
+
   return (
     <div className="flex h-screen flex-col bg-muted/40">
       {/* Remove border-b, update link color, update button classes */}
@@ -1524,7 +1688,7 @@ function DashboardPage() {
                   {/* Left side - Primary Actions */} 
                   <div className="flex items-center space-x-1.5">
                     {/* New Button with Dropdown */}
-                    <DropdownMenu modal={false}>
+                    <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="default" size="sm" className="h-7 px-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                           <Plus className="h-3.5 w-3.5 mr-1.5" />
@@ -1551,7 +1715,7 @@ function DashboardPage() {
                                     {/* Right side - View Controls */}
                   <div className="flex items-center space-x-1.5">
                     {/* Grouping Control */}
-                    <DropdownMenu modal={false}>
+                    <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="sm" className="h-7 px-2">
                           <ListTree className="h-3.5 w-3.5 mr-1.5" /> 
@@ -1573,7 +1737,7 @@ function DashboardPage() {
                     
                     {/* Columns Control - Moved here */}
                     {viewMode === 'list' && (
-                      <DropdownMenu modal={false}>
+                      <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="sm" className="h-7 px-2">
                             <Columns className="h-3.5 w-3.5 mr-1.5" />
@@ -1626,11 +1790,11 @@ function DashboardPage() {
                     <FavoritesDialog
                       trigger={
                         <Button variant="outline" size="sm" className="h-9 gap-1 ml-2 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2">
-                          <Star className="h-3.5 w-3.5" />
-                          <span className="sr-only sm:not-sr-only sm:whitespace-nowrap">
-                            Favorites
-                          </span>
-                        </Button>
+                        <Star className="h-3.5 w-3.5" />
+                        <span className="sr-only sm:not-sr-only sm:whitespace-nowrap">
+                          Favorites
+                        </span>
+                      </Button>
                       }
                       allItems={filesystemItems}
                       favoriteIds={favoriteIds}
@@ -1718,11 +1882,10 @@ function DashboardPage() {
                           onMoveClick={handleOpenMoveModal} 
                           onRenameFolder={handleRenameFolder} 
                           onDeleteFolder={handleDeleteFolder} 
-                          initialGrouping={ 
-                            groupingOption === 'type' ? ['type'] : 
-                            groupingOption === 'date' ? ['uploadedAt'] : 
-                            [] 
-                          } 
+                          grouping={grouping}
+                          onGroupingChange={setGrouping}
+                          columnVisibility={columnVisibility}
+                          onColumnVisibilityChange={setColumnVisibility}
                           onMoveRow={handleMoveRow} 
                           onDropItemIntoFolder={handleDropItemIntoFolder}
                           favoriteIds={favoriteIds}
