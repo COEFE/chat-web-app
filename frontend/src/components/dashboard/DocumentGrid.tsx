@@ -171,38 +171,17 @@ const DocumentGrid: React.FC<DocumentGridProps> = ({
             {(item.createdAt || item.updatedAt) && (
               <p className="text-xs text-muted-foreground mt-1">
                 {(() => { // IIFE for cleaner logic
-                  const formatDate = (dateValue: Timestamp | string | number | null | undefined): string | null => {
-                    if (!dateValue) return null; // Handles null, undefined, 0, '' etc.
-                    let date: Date | null = null;
-                    if (dateValue instanceof Timestamp) {
-                      date = dateValue.toDate();
-                    } else if (typeof dateValue === 'string' || typeof dateValue === 'number') {
-                       // Ensure it's not an empty string or 0 if those aren't valid dates
-                       if (dateValue) { 
-                         try { date = new Date(dateValue); } catch (e) { /* ignore invalid date */ }
-                       }
-                    }
-                    // Check if date is valid after potential conversion
-                    return date && !isNaN(date.getTime()) ? formatDistanceToNow(date, { addSuffix: true }) : null;
-                  };
-
-                  const createdStr = formatDate(item.createdAt);
-                  const updatedStr = formatDate(item.updatedAt);
+                  const dateValue = item.createdAt || item.updatedAt;
+                  let date: Date | null = null;
+                  if (dateValue instanceof Timestamp) {
+                    date = dateValue.toDate();
+                  } else if (typeof dateValue === 'string') {
+                    try { date = new Date(dateValue); } catch (e) { /* ignore invalid date string */ }
+                  } else if (typeof dateValue === 'number') { // Handle potential epoch numbers
+                    try { date = new Date(dateValue); } catch (e) { /* ignore invalid number */ }
+                  }
                   
-                  let output = '';
-                  if (createdStr) {
-                    output += `Added: ${createdStr}`;
-                  }
-                  // Only show modified if it exists and is different from created
-                  if (updatedStr && updatedStr !== createdStr) {
-                    if (output) output += ' / '; // Separator
-                    output += `Mod: ${updatedStr}`;
-                  } else if (!createdStr && updatedStr) {
-                     // If only updated exists, show that
-                    output += `Mod: ${updatedStr}`;
-                  }
-
-                  return output || 'Date unavailable'; // Fallback
+                  return date ? formatDistanceToNow(date, { addSuffix: true }) : 'Date unavailable';
                 })()}
               </p>
             )}
