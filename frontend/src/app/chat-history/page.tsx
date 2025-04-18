@@ -170,9 +170,9 @@ export default function ChatHistoryPage() {
                       )}
                     </div>
                     <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="ml-2 text-primary"
+                      variant="outline"
+                      size="sm"
+                      className="border-[var(--muted-foreground)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]"
                       onClick={(e) => {
                         e.stopPropagation(); // Prevent card click event from firing
                         handleDocumentChatClick(docId);

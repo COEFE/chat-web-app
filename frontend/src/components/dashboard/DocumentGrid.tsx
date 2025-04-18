@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Folder, FileText, Loader2 } from 'lucide-react';
+import { Folder, FileText, Loader2, Star } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FilesystemItem } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -24,7 +24,9 @@ interface DocumentGridProps {
   onDeleteFolder: (folderId: string, folderName: string) => void;
   onMoveClick: (itemId: string, itemName: string, itemType: 'document' | 'folder') => void;
   onRenameFolder: (folderId: string, currentName: string) => void;
-  // We might need rename for documents too later
+  favoriteIds: Set<string>;
+  handleToggleFavorite: (itemId: string, currentStatus: boolean) => Promise<void>;
+  togglingFavoriteId: string | null;
 }
 
 const DocumentGrid: React.FC<DocumentGridProps> = ({
@@ -37,6 +39,9 @@ const DocumentGrid: React.FC<DocumentGridProps> = ({
   onDeleteFolder,
   onMoveClick,
   onRenameFolder,
+  favoriteIds,
+  handleToggleFavorite,
+  togglingFavoriteId,
 }) => {
 
   if (isLoading) {
@@ -88,10 +93,11 @@ const DocumentGrid: React.FC<DocumentGridProps> = ({
           onClick={(e) => handleCardClick(item, e)}
         >
           <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2 pt-4 px-4">
+            {/* Use theme colors for icons */}
             {item.type === 'folder' ? (
-              <Folder className="h-6 w-6 text-blue-500" />
+              <Folder className="h-6 w-6 text-[var(--primary)]" />
             ) : (
-              <FileText className="h-6 w-6 text-gray-500" />
+              <FileText className="h-6 w-6 text-[var(--muted-foreground)]" />
             )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -111,7 +117,8 @@ const DocumentGrid: React.FC<DocumentGridProps> = ({
                   Move
                 </DropdownMenuItem>
                 <DropdownMenuItem 
-                  className="text-red-600 focus:text-red-600 focus:bg-red-100"
+                  /* Apply specific dark mode colors */
+                  className="text-red-600 focus:text-red-600 focus:bg-red-100 dark:text-red-400 dark:focus:bg-red-900/50 dark:focus:text-red-400"
                   onClick={(e) => {
                     e.stopPropagation();
                     if (item.type === 'document') {
@@ -124,8 +131,37 @@ const DocumentGrid: React.FC<DocumentGridProps> = ({
                   <Trash2 className="mr-2 h-4 w-4" />
                   Delete
                 </DropdownMenuItem>
+                <DropdownMenuItem 
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    handleToggleFavorite(item.id, favoriteIds.has(item.id)); 
+                  }}
+                  disabled={togglingFavoriteId === item.id}
+                >
+                  <Star className={`mr-2 h-4 w-4 ${favoriteIds.has(item.id) ? 'fill-current text-yellow-400' : ''}`} /> 
+                  {togglingFavoriteId === item.id 
+                    ? 'Updating...' 
+                    : favoriteIds.has(item.id) 
+                      ? 'Remove from Favorites' 
+                      : 'Add to Favorites'}
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute top-1 right-1 h-7 w-7 text-muted-foreground hover:text-primary focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0"
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent card click
+                handleToggleFavorite(item.id, favoriteIds.has(item.id));
+              }}
+              disabled={togglingFavoriteId === item.id}
+              aria-label={favoriteIds.has(item.id) ? "Remove from Favorites" : "Add to Favorites"}
+            >
+              <Star 
+                className={`h-4 w-4 ${favoriteIds.has(item.id) && "fill-yellow-400 text-yellow-500"} ${togglingFavoriteId === item.id && "animate-pulse"}`}
+              />
+            </Button>
           </CardHeader>
           <CardContent className="pb-4 px-4">
             <p className="text-sm font-medium leading-none truncate" title={item.name}>

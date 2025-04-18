@@ -18,7 +18,10 @@ import {
   deleteDoc, 
   Timestamp, 
   getDoc,
-  writeBatch
+  writeBatch,
+  setDoc,
+  arrayUnion,
+  arrayRemove
 } from 'firebase/firestore';
 import { ref as storageRef, getMetadata } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
@@ -55,7 +58,8 @@ import {
   FileSpreadsheet, 
   FileCode, 
   FileArchive, 
-  Columns 
+  Columns, 
+  Star // Add Star icon import
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -138,16 +142,17 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
 import { DraggableRow } from '@/components/dashboard/DraggableRow'; 
 import FolderBreadcrumbs from '@/components/dashboard/FolderBreadcrumbs'; 
 import Link from 'next/link'; // Import Link
-
+import FavoritesDialog from '@/components/dashboard/FavoritesDialog'; // Import FavoritesDialog
 import { 
+  format, 
+  isValid, 
   formatDistanceToNow, 
   parseISO, 
   isToday, 
   isYesterday, 
   isThisWeek, 
-  isThisMonth, 
-  format 
-} from 'date-fns';
+  isThisMonth 
+} from 'date-fns'; // Restore necessary date-fns imports
 
 interface DocumentTableProps {
   data: FilesystemItem[];
@@ -162,6 +167,9 @@ interface DocumentTableProps {
   initialGrouping?: GroupingState;
   onMoveRow: (dragIndex: number, hoverIndex: number) => void; 
   onDropItemIntoFolder: (itemId: string, targetFolderId: string) => void; 
+  favoriteIds: Set<string>;
+  handleToggleFavorite: (itemId: string, currentStatus: boolean) => Promise<void>;
+  togglingFavoriteId: string | null;
 }
 
 const createColumns = (
@@ -172,7 +180,10 @@ const createColumns = (
   onDeleteFolder: (folderId: string, folderName: string) => void,
   handleDeleteClick: (item: FilesystemItem, e: React.MouseEvent) => void,
   isDeleting: boolean,
-  deletingId: string | null
+  deletingId: string | null,
+  favoriteIds: Set<string>,
+  handleToggleFavorite: (itemId: string, currentStatus: boolean) => Promise<void>,
+  togglingFavoriteId: string | null
 ): ColumnDef<FilesystemItem>[] => {
   // Helper to get the appropriate icon based on item type and content type
   const getFileTypeIcon = (item: FilesystemItem) => {
@@ -213,29 +224,77 @@ const createColumns = (
         const item = row.original;
         const isSelected = false; // Simplified, assuming selection state isn't directly managed here
         const icon = getFileTypeIcon(item);
+        const isFavorite = favoriteIds.has(item.id);
+        const isToggling = togglingFavoriteId === item.id;
 
         if (item.type === 'folder') {
           return (
-            <button
-              onClick={(e) => {
-                e.stopPropagation(); // Prevent row selection if clicking folder name itself
-                onSelectItem(null); // Clear document selection when clicking folder
-                onFolderClick(item.id, item.name); // Use passed prop
-              }}
-              className={`flex items-center text-left w-full px-0 py-0 bg-transparent border-none cursor-pointer hover:underline ${isSelected ? 'font-semibold' : ''}`}
-            >
+            <div className="flex items-center gap-1 group"> {/* Adjust gap if needed */}
+              {/* Inline Favorite Toggle Button - Moved to the left */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "h-6 w-6 text-muted-foreground rounded-full opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 flex-shrink-0", // Added flex-shrink-0
+                  (isFavorite || isToggling) && "opacity-100", // Always show if favorite or toggling
+                  "focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0"
+                )}
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent row selection/navigation
+                  handleToggleFavorite(item.id, isFavorite);
+                }}
+                disabled={isToggling}
+                aria-label={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+                title={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+              >
+                <Star 
+                  className={cn(
+                    "h-4 w-4", 
+                    isFavorite && "fill-yellow-400 text-yellow-500",
+                    isToggling && "animate-pulse"
+                  )}
+                />
+              </Button>
               {icon}
-              <span className="truncate">{item.name}</span>
-            </button>
+              <button
+                onClick={() => onFolderClick(item.id, item.name)}
+                className="hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm truncate"
+                title={item.name}
+              >
+                {item.name}
+              </button>
+            </div>
           );
         } else {
           return (
-            <div
-              onClick={() => onSelectItem(item)} // Allow selection on the div
-              className={`flex items-center cursor-pointer ${isSelected ? 'font-semibold' : ''}`}
-            >
+            <div className="flex items-center gap-1 group"> {/* Adjust gap if needed */}
+              {/* Inline Favorite Toggle Button - Moved to the left */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "h-6 w-6 text-muted-foreground rounded-full opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 flex-shrink-0", // Added flex-shrink-0
+                  (isFavorite || isToggling) && "opacity-100", // Always show if favorite or toggling
+                  "focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0"
+                )}
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent row selection/navigation
+                  handleToggleFavorite(item.id, isFavorite);
+                }}
+                disabled={isToggling}
+                aria-label={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+                title={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+              >
+                <Star 
+                  className={cn(
+                    "h-4 w-4", 
+                    isFavorite && "fill-yellow-400 text-yellow-500",
+                    isToggling && "animate-pulse"
+                  )}
+                />
+              </Button>
               {icon}
-              <span className="truncate">{item.name}</span>
+              <span className="truncate" title={item.name}>{item.name}</span>
             </div>
           );
         }
@@ -265,19 +324,82 @@ const createColumns = (
         const item = row.original;
         if (item.type === 'document') {
           // Use the formatBytes utility
-          return <span className="text-gray-600">{formatBytes(item.size)}</span>;
+          return <span className="text-sm text-muted-foreground hidden md:table-cell">{formatBytes(item.size)}</span>;
         } else {
-          return <span className="text-gray-600">-</span>; // Folders don't have a size in this context
+          return <span className="text-sm text-muted-foreground hidden md:table-cell">-</span>; // Folders don't have a size in this context
         }
       },
       enableSorting: true, // Allow sorting by size
+    },
+    {
+      accessorKey: 'uploadedAt',
+      header: 'Date Added',
+      cell: ({ row }) => {
+        const item = row.original;
+        let date: Date | null = null;
+
+        if (item.type === 'document' && item.uploadedAt) {
+          // Check if uploadedAt is a Firestore Timestamp and convert
+          if (typeof item.uploadedAt.toDate === 'function') {
+            date = item.uploadedAt.toDate();
+          }
+        } else if (item.type === 'folder' && item.createdAt) {
+          // Check if createdAt is a Firestore Timestamp and convert
+          if (typeof item.createdAt.toDate === 'function') {
+            date = item.createdAt.toDate();
+          } 
+        }
+
+        // Format the date if it's valid
+        return date && isValid(date) ? (
+          <div className="text-sm text-muted-foreground hidden md:table-cell">{format(date, 'MMM d, yyyy')}</div>
+        ) : (
+          <div className="text-sm text-muted-foreground hidden md:table-cell">--</div>
+        );
+      },
+      sortingFn: (rowA, rowB, columnId) => {
+        const itemA = rowA.original;
+        const itemB = rowB.original;
+        let dateA: number | null = null;
+        let dateB: number | null = null;
+
+        if (itemA.type === 'document' && itemA.uploadedAt?.toDate) dateA = itemA.uploadedAt.toDate().getTime();
+        else if (itemA.type === 'folder' && itemA.createdAt?.toDate) dateA = itemA.createdAt.toDate().getTime();
+
+        if (itemB.type === 'document' && itemB.uploadedAt?.toDate) dateB = itemB.uploadedAt.toDate().getTime();
+        else if (itemB.type === 'folder' && itemB.createdAt?.toDate) dateB = itemB.createdAt.toDate().getTime();
+
+        if (dateA === null && dateB === null) return 0;
+        if (dateA === null) return -1; // Nulls first (or last depending on sort direction)
+        if (dateB === null) return 1;
+
+        return dateA - dateB;
+      },
+      enableSorting: true, 
+    },
+    {
+      accessorKey: 'contentType',
+      header: 'Content Type',
+      cell: ({ row }) => {
+        const item = row.original;
+        const contentType = item.type === 'document' ? item.contentType : 'Folder'; // Display 'Folder' for folders
+ 
+        // Basic content type formatting (can be expanded)
+        const formattedType = contentType?.split('/').pop()?.toUpperCase() || '--';
+ 
+        return (
+          <div className="text-sm text-muted-foreground hidden md:table-cell">
+            {contentType === 'Folder' ? contentType : formattedType}
+          </div>
+        );
+      },
     },
     {
       accessorKey: 'updatedAt',
       header: 'Date Modified',
       cell: ({ row }: { row: Row<FilesystemItem> }) => {
         const item = row.original;
-        if (!item.updatedAt) return <span>-</span>;
+        if (!item.updatedAt) return <span className="text-sm text-muted-foreground">-</span>;
 
         let dateString: string;
         // Check if updatedAt is Firebase Timestamp or ISO string
@@ -293,7 +415,7 @@ const createColumns = (
           dateString = '-';
         }
 
-        return <span>{dateString}</span>;
+        return <span className="text-sm text-muted-foreground">{dateString}</span>;
       },
       meta: {
         className: 'hidden md:table-cell', 
@@ -374,6 +496,20 @@ const createColumns = (
                   <Trash2 className="mr-2 h-4 w-4" />
                   Delete
                 </DropdownMenuItem>
+                <DropdownMenuItem 
+                  onClick={(e: React.MouseEvent) => { 
+                    e.stopPropagation(); 
+                    handleToggleFavorite(item.id, favoriteIds.has(item.id)); 
+                  }}
+                  disabled={togglingFavoriteId === item.id} // Disable while toggling this item
+                >
+                  <Star className={`mr-2 h-4 w-4 ${favoriteIds.has(item.id) ? 'fill-current text-yellow-400' : ''}`} />
+                  {togglingFavoriteId === item.id 
+                    ? 'Updating...' 
+                    : favoriteIds.has(item.id) 
+                      ? 'Remove from Favorites' 
+                      : 'Add to Favorites'}
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -398,6 +534,9 @@ function DocumentTable({
   initialGrouping, 
   onMoveRow, 
   onDropItemIntoFolder, 
+  favoriteIds, 
+  handleToggleFavorite,
+  togglingFavoriteId
 }: DocumentTableProps) {
   const [itemToDelete, setItemToDelete] = useState<FilesystemItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -420,8 +559,8 @@ function DocumentTable({
   };
 
   const columns = useMemo(
-    () => createColumns(onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, handleDeleteClick, isDeleting, deletingId),
-    [onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, handleDeleteClick, isDeleting, deletingId]
+    () => createColumns(onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, handleDeleteClick, isDeleting, deletingId, favoriteIds, handleToggleFavorite, togglingFavoriteId),
+    [onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, handleDeleteClick, isDeleting, deletingId, favoriteIds, handleToggleFavorite, togglingFavoriteId]
   );
 
   // Set up pagination with 20 items per page
@@ -491,9 +630,11 @@ function DocumentTable({
        {/* Column Toggle Button removed from here - moved to toolbar */}
 
       {/* TanStack Table Rendering */} 
-      <div className="rounded-md border"> 
+      {/* Use more contrasting border */}
+      <div className="rounded-md border border-[var(--muted-foreground)]"> 
         <ShadcnTable className="min-w-full">
-          <thead className={cn("[&_tr]:border-b")}> 
+          {/* Use more contrasting border */}
+          <thead className={cn("[&_tr]:border-b [&_tr]:border-[var(--muted-foreground)]")}> 
             {table.getHeaderGroups().map((headerGroup) => ( 
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => {
@@ -576,25 +717,29 @@ function DocumentTable({
         </ShadcnTable>
         
         {/* Pagination Controls */}
-        <div className="flex items-center justify-between px-4 py-2 border-t">
+        <div className="flex items-center justify-between px-4 py-2 border-t border-[var(--muted-foreground)]">
           <div className="flex-1 text-sm text-muted-foreground">
             Showing {table.getFilteredRowModel().rows.length > 0 ? table.getState().pagination.pageIndex * table.getState().pagination.pageSize + 1 : 0} to {Math.min((table.getState().pagination.pageIndex + 1) * table.getState().pagination.pageSize, table.getFilteredRowModel().rows.length)} of {table.getFilteredRowModel().rows.length} items
           </div>
           <div className="flex items-center space-x-6 lg:space-x-8">
             <div className="flex items-center space-x-2">
+              {/* Use more contrasting border/text */}
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => table.previousPage()}
                 disabled={!table.getCanPreviousPage()}
+                className="border-[var(--muted-foreground)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]"
               >
                 Previous
               </Button>
+              {/* Use more contrasting border/text */}
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => table.nextPage()}
                 disabled={!table.getCanNextPage()}
+                className="border-[var(--muted-foreground)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]"
               >
                 Next
               </Button>
@@ -616,7 +761,13 @@ function DocumentTable({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setItemToDelete(null)} disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel 
+              onClick={() => setItemToDelete(null)} 
+              disabled={isDeleting}
+              className="border-[var(--muted-foreground)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]"
+            >
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction onClick={() => {
               if (!itemToDelete) return;
 
@@ -656,7 +807,7 @@ function DocumentTable({
                     setItemToDelete(null); 
                   });
               }
-            }} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
+            }} disabled={isDeleting} className="bg-red-600 hover:bg-red-700 text-white">
               {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Delete
             </AlertDialogAction>
@@ -695,7 +846,7 @@ function DashboardPage() {
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list'); 
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false); 
-  const [groupingOption, setGroupingOption] = useState<'type' | 'date' | 'none'>('none'); // Control grouping UI
+  const [groupingOption, setGroupingOption] = useState<'none' | 'type' | 'date'>('none'); // Control grouping UI
 
   const panelGroupRef = useRef<any>(null);
 
@@ -1199,6 +1350,12 @@ function DashboardPage() {
     fetchFolderItems();
   };
 
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+
+  useEffect(() => {
+    setInitialLoadComplete(true);
+  }, []);
+
   if (authLoading) {
     return <div>Loading...</div>;
   }
@@ -1211,16 +1368,111 @@ function DashboardPage() {
     return filesystemItems.filter(item => item.type === 'folder') as FolderData[];
   }, [filesystemItems]);
 
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [loadingFavorites, setLoadingFavorites] = useState(true);
+  const [togglingFavoriteId, setTogglingFavoriteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user || !initialLoadComplete) return; // Wait for user and initial items load
+
+    setLoadingFavorites(true);
+    const favoritesDocRef = doc(db, 'userFavorites', user.uid);
+
+    getDoc(favoritesDocRef)
+      .then((docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setFavoriteIds(new Set(data.favoritedItemIds || []));
+        } else {
+          // Document doesn't exist, user has no favorites yet
+          setFavoriteIds(new Set());
+        }
+      })
+      .catch((error) => {
+        console.error("Error fetching favorites:", error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Could not load your favorites.",
+        });
+        setFavoriteIds(new Set()); // Reset on error
+      })
+      .finally(() => {
+        setLoadingFavorites(false);
+      });
+
+  }, [user, initialLoadComplete, refreshTrigger]); // Rerun if user changes or refresh triggered after initial load
+
+  const handleToggleFavorite = async (itemId: string, currentStatus: boolean) => {
+    if (!user || togglingFavoriteId) return; // Prevent concurrent toggles
+
+    setTogglingFavoriteId(itemId);
+    const favoritesDocRef = doc(db, 'userFavorites', user.uid);
+    const operation = currentStatus ? arrayRemove(itemId) : arrayUnion(itemId);
+    const successMessage = currentStatus ? "Removed from favorites" : "Added to favorites";
+    const actionVerb = currentStatus ? "remove" : "add";
+
+    try {
+      const docSnap = await getDoc(favoritesDocRef);
+      if (docSnap.exists()) {
+        await updateDoc(favoritesDocRef, { favoritedItemIds: operation });
+      } else if (!currentStatus) {
+        // Only create the doc if we are adding the first favorite
+        await setDoc(favoritesDocRef, { favoritedItemIds: [itemId] });
+      } else {
+        // Trying to remove from a non-existent doc, should not happen but handle gracefully
+        console.warn("Attempted to remove favorite from non-existent userFavorites doc");
+        throw new Error("Favorites record not found.")
+      }
+      
+      // Update local state optimistically? Or after success?
+      // Let's update after success for now
+      setFavoriteIds(prev => {
+        const newSet = new Set(prev);
+        if (currentStatus) {
+          newSet.delete(itemId);
+        } else {
+          newSet.add(itemId);
+        }
+        return newSet;
+      });
+
+      toast({ title: "Success", description: successMessage });
+
+    } catch (error) {
+      console.error(`Error ${actionVerb}ing favorite ${itemId}:`, error);
+      // Add type check for error
+      const message = error instanceof Error ? error.message : String(error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: `Failed to ${actionVerb} favorite. ${message}`,
+      });
+    } finally {
+      setTogglingFavoriteId(null);
+    }
+  };
+
   return (
     <div className="flex h-screen flex-col bg-muted/40">
-      <header className="sticky top-0 z-30 flex h-8 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-1">
+      {/* Remove border-b, update link color, update button classes */}
+      <header className="sticky top-0 z-30 flex h-8 items-center gap-4 bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-1">
         <h1 className="text-base font-semibold whitespace-nowrap">My Documents</h1>
-        <Link href="/chat-history" className="text-sm text-blue-600 hover:underline">
+        {/* Use primary color for link */}
+        <Link href="/chat-history" className="text-sm text-[var(--primary)] hover:underline">
           Chat History
         </Link>
         <div className="ml-auto flex items-center gap-3">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Welcome, {user.displayName || user.email}</span>
-          <Button variant="outline" size="sm" className="h-6 text-xs py-0" onClick={logout}>Logout</Button>
+          {/* Use muted-foreground for button border/text */}
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-6 text-xs py-0 border-[var(--muted-foreground)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]" 
+            onClick={logout}
+          >
+            Logout
+          </Button>
         </div>
       </header>
 
@@ -1280,7 +1532,7 @@ function DashboardPage() {
                     {/* New Button with Dropdown */}
                     <DropdownMenu modal={false}>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="default" size="sm" className="h-7 px-2.5">
+                        <Button variant="default" size="sm" className="h-7 px-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                           <Plus className="h-3.5 w-3.5 mr-1.5" />
                           <span className="text-xs">New</span>
                         </Button>
@@ -1364,14 +1616,39 @@ function DashboardPage() {
                               >
                                 Date Modified
                               </DropdownMenuCheckboxItem>
+                              <DropdownMenuCheckboxItem
+                                className="capitalize"
+                                checked={true}
+                              >
+                                Date Added
+                              </DropdownMenuCheckboxItem>
                             </>
                           )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     )}
                     
+                    {/* Favorites Dialog Trigger Button */}
+                    <FavoritesDialog
+                      trigger={
+                        <Button variant="outline" size="sm" className="h-9 gap-1 ml-2 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2">
+                          <Star className="h-3.5 w-3.5" />
+                          <span className="sr-only sm:not-sr-only sm:whitespace-nowrap">
+                            Favorites
+                          </span>
+                        </Button>
+                      }
+                      allItems={filesystemItems}
+                      favoriteIds={favoriteIds}
+                      onSelectItem={handleSelectItem}
+                      onFolderClick={handleFolderClick}
+                      handleToggleFavorite={handleToggleFavorite}
+                      togglingFavoriteId={togglingFavoriteId}
+                    />
+                    
                     {/* View Mode Toggle */}
-                    <div className="border-l border-muted-foreground/20 pl-1.5 ml-0.5">
+                    {/* Change border class for better contrast */}
+                    <div className="border-l border-border pl-1.5 ml-0.5">
                       <ToggleGroup 
                         type="single" 
                         defaultValue="list" 
@@ -1449,11 +1726,14 @@ function DashboardPage() {
                           onDeleteFolder={handleDeleteFolder} 
                           initialGrouping={ 
                             groupingOption === 'type' ? ['type'] : 
-                            groupingOption === 'date' ? ['updatedAt'] : 
+                            groupingOption === 'date' ? ['uploadedAt'] : 
                             [] 
                           } 
                           onMoveRow={handleMoveRow} 
                           onDropItemIntoFolder={handleDropItemIntoFolder}
+                          favoriteIds={favoriteIds}
+                          handleToggleFavorite={handleToggleFavorite}
+                          togglingFavoriteId={togglingFavoriteId}
                         />
                       </DndProvider>
                     ) : (
@@ -1467,6 +1747,9 @@ function DashboardPage() {
                         onDeleteFolder={handleDeleteFolder}
                         onMoveClick={handleOpenMoveModal} 
                         onRenameFolder={handleRenameFolder}
+                        favoriteIds={favoriteIds}
+                        handleToggleFavorite={handleToggleFavorite}
+                        togglingFavoriteId={togglingFavoriteId}
                       />
                     )}
                   </div>
