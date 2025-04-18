@@ -338,16 +338,17 @@ const createColumns = (
         const item = row.original;
         let date: Date | null = null;
 
-        if (item.type === 'document' && item.uploadedAt) {
-          // Check if uploadedAt is a Firestore Timestamp and convert
-          if (typeof item.uploadedAt.toDate === 'function') {
-            date = item.uploadedAt.toDate();
+        // Use uploadedAt for documents, createdAt for folders as the 'added' date
+        const dateValue = item.type === 'document' ? item.uploadedAt : item.createdAt;
+
+        if (dateValue) {
+          if (dateValue instanceof Timestamp) {
+            date = dateValue.toDate();
+          } else if (typeof dateValue === 'string') {
+            try { date = parseISO(dateValue); } catch { /* ignore */ }
+          } else if (typeof dateValue === 'number') { // Handle epoch
+            try { date = new Date(dateValue); } catch { /* ignore */ }
           }
-        } else if (item.type === 'folder' && item.createdAt) {
-          // Check if createdAt is a Firestore Timestamp and convert
-          if (typeof item.createdAt.toDate === 'function') {
-            date = item.createdAt.toDate();
-          } 
         }
 
         // Format the date if it's valid
@@ -363,11 +364,17 @@ const createColumns = (
         let dateA: number | null = null;
         let dateB: number | null = null;
 
-        if (itemA.type === 'document' && itemA.uploadedAt?.toDate) dateA = itemA.uploadedAt.toDate().getTime();
-        else if (itemA.type === 'folder' && itemA.createdAt?.toDate) dateA = itemA.createdAt.toDate().getTime();
+        const dateValueA = itemA.type === 'document' ? itemA.uploadedAt : itemA.createdAt;
+        const dateValueB = itemB.type === 'document' ? itemB.uploadedAt : itemB.createdAt;
 
-        if (itemB.type === 'document' && itemB.uploadedAt?.toDate) dateB = itemB.uploadedAt.toDate().getTime();
-        else if (itemB.type === 'folder' && itemB.createdAt?.toDate) dateB = itemB.createdAt.toDate().getTime();
+        if (dateValueA instanceof Timestamp) dateA = dateValueA.toDate().getTime();
+        else if (typeof dateValueA === 'string') try { dateA = parseISO(dateValueA).getTime(); } catch { /* ignore */ }
+        else if (typeof dateValueA === 'number') try { dateA = new Date(dateValueA).getTime(); } catch { /* ignore */ }
+
+        if (dateValueB instanceof Timestamp) dateB = dateValueB.toDate().getTime();
+        else if (typeof dateValueB === 'string') try { dateB = parseISO(dateValueB).getTime(); } catch { /* ignore */ }
+        else if (typeof dateValueB === 'number') try { dateB = new Date(dateValueB).getTime(); } catch { /* ignore */ }
+
 
         if (dateA === null && dateB === null) return 0;
         if (dateA === null) return -1; // Nulls first (or last depending on sort direction)
@@ -376,22 +383,8 @@ const createColumns = (
         return dateA - dateB;
       },
       enableSorting: true, 
-    },
-    {
-      accessorKey: 'contentType',
-      header: 'Content Type',
-      cell: ({ row }) => {
-        const item = row.original;
-        const contentType = item.type === 'document' ? item.contentType : 'Folder'; // Display 'Folder' for folders
- 
-        // Basic content type formatting (can be expanded)
-        const formattedType = contentType?.split('/').pop()?.toUpperCase() || '--';
- 
-        return (
-          <div className="text-sm text-muted-foreground hidden md:table-cell">
-            {contentType === 'Folder' ? contentType : formattedType}
-          </div>
-        );
+      meta: {
+        className: 'hidden md:table-cell', // Ensure it's hidden on smaller screens like others
       },
     },
     {
@@ -453,6 +446,7 @@ const createColumns = (
       }, // End of getGroupingValue function
       enableSorting: true, // Ensure sorting is also enabled if needed
     },
+
     {
       id: 'actions',
       header: () => <div className="text-right pr-2">Actions</div>, 
