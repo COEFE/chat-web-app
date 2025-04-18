@@ -61,7 +61,7 @@ import {
   FileText, 
   FileSpreadsheet, 
   FileImage, 
-  FileVideo, 
+  FileVideo,
   FileAudio,
   FileCode, 
   FileArchive, 
@@ -647,7 +647,7 @@ function DocumentTable({
     [onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, isDeleting, deletingId, favoriteIds, handleToggleFavorite, togglingFavoriteId]
   );
 
-  // Helper function to get appropriate icon based on file type
+  // Helper to get the appropriate icon based on file type
   const getFileIcon = (fileName: string, mimeType?: string): React.ReactNode => {
     if (!fileName) return <File className="h-4 w-4 text-gray-500" />;
     
@@ -699,6 +699,20 @@ function DocumentTable({
     } catch (e) {
       return 'N/A';
     }
+  };
+
+  // Helper function to check favorite status safely
+  const checkIsFavorite = (itemId: string): boolean => {
+    if (favoriteIds === null || favoriteIds === undefined) {
+      return false;
+    }
+    if (favoriteIds instanceof Set) {
+      return favoriteIds.has(itemId);
+    }
+    if (Array.isArray(favoriteIds)) {
+      return (favoriteIds as string[]).includes(itemId); // Use type assertion if narrowing still fails
+    }
+    return false;
   };
 
   const table = useReactTable({
@@ -925,11 +939,11 @@ function DocumentTable({
                               <button
                                 className={cn(
                                   "h-6 w-6 inline-flex items-center justify-center rounded-full",
-                                  (favoriteIds instanceof Set ? favoriteIds.has(row.original.id) : (Array.isArray(favoriteIds) && favoriteIds.length > 0 ? favoriteIds.indexOf(row.original.id) >= 0 : false)) ? "text-yellow-500" : "text-muted-foreground"
+                                  checkIsFavorite(row.original.id) ? "text-yellow-500" : "text-muted-foreground"
                                 )}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleToggleFavorite(row.original.id);
+                                  handleToggleFavorite(row.original.id, checkIsFavorite(row.original.id));
                                 }}
                               >
                                 <Star className="h-4 w-4" />
