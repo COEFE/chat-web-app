@@ -132,7 +132,8 @@ import {
   getExpandedRowModel, 
   useReactTable, 
   Row, 
-  Cell 
+  Cell, 
+  OnChangeFn // Import OnChangeFn
 } from "@tanstack/react-table";
 import { MoveDocumentModal } from '@/components/dashboard/MoveDocumentModal';
 import Breadcrumbs from '@/components/dashboard/Breadcrumbs';
@@ -168,9 +169,9 @@ interface DocumentTableProps {
   onRenameFolder: (folderId: string, currentName: string) => void;
   onDeleteFolder: (folderId: string, folderName: string) => void;
   grouping: GroupingState;
-  onGroupingChange: (grouping: GroupingState) => void;
+  onGroupingChange: OnChangeFn<GroupingState>; // Use OnChangeFn type
   columnVisibility: VisibilityState;
-  onColumnVisibilityChange: (columnVisibility: VisibilityState) => void;
+  onColumnVisibilityChange: OnChangeFn<VisibilityState>; // Use OnChangeFn type
   onMoveRow: (dragIndex: number, hoverIndex: number) => void; 
   onDropItemIntoFolder: (itemId: string, targetFolderId: string) => void; 
   favoriteIds: Set<string>;
