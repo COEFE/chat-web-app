@@ -1,10 +1,11 @@
 'use client';
 
-import * as React from 'react';
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import * as React from 'react'; 
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'; 
 import { useRouter, useSearchParams } from 'next/navigation';
+import { getFunctions, httpsCallable } from 'firebase/functions'; 
 import { useAuth } from '@/context/AuthContext';
-import { db, functionsInstance, storage } from '@/lib/firebaseConfig';
+import { db, functionsInstance, storage, app } from '@/lib/firebaseConfig'; 
 import { 
   collection, 
   query, 
@@ -24,58 +25,76 @@ import {
   arrayRemove
 } from 'firebase/firestore';
 import { ref as storageRef, getMetadata } from 'firebase/storage';
-import { httpsCallable } from 'firebase/functions';
 import Skeleton from 'react-loading-skeleton';
 import 'react-loading-skeleton/dist/skeleton.css';
 import DocumentViewer from '@/components/dashboard/DocumentViewer';
 import { FilesystemItem, MyDocumentData, FolderData, BreadcrumbItem } from '@/types'; 
-import { formatBytes, cn } from '@/lib/utils'; 
+import { formatBytes, cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { 
+  ChevronDown, 
+  ChevronUp, 
+  ChevronRight,
   Folder, 
-  FileText, 
-  Plus, 
+  File, 
   MoreHorizontal, 
-  Eye, 
-  Pencil, 
-  Trash2, 
-  Move, 
   Loader2, 
-  List, 
-  LayoutGrid, 
-  Upload, 
-  FolderPlus, 
+  Star, 
+  SlidersHorizontal, 
+  UploadCloud, 
   RefreshCw, 
-  EyeOff, 
+  ListTree, 
+  Columns, 
+  LayoutGrid, 
+  LayoutList, 
+  Plus, 
+  PlusCircle, 
+  Trash, 
+  Trash2, 
+  Pencil, 
+  X, 
   Maximize2, 
   Minimize2, 
-  ArrowUpDown, 
-  ChevronRight, 
-  ChevronDown, 
+  MoveRight, 
+  Move,
+  FileText, 
+  FileSpreadsheet, 
   FileImage, 
   FileVideo, 
-  FileAudio, 
-  FileSpreadsheet, 
+  FileAudio,
   FileCode, 
   FileArchive, 
-  Columns, 
-  Star, 
+  FileQuestion, 
   Layers as LayersIcon, 
-  SlidersHorizontal 
+  Eye, 
+  EyeOff, 
+  List, 
+  Upload, 
+  FolderPlus, 
+  ArrowUpDown,
+  Menu
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 // Badge component removed
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
+import { 
   Dialog, 
   DialogContent, 
   DialogHeader, 
   DialogTitle, 
   DialogDescription, 
-  DialogFooter, 
-  DialogTrigger
-} from "@/components/ui/dialog"; 
+  DialogTrigger,
+  DialogFooter
+} from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetTrigger,
+  SheetHeader,
+  SheetTitle
+} from "@/components/ui/sheet";
 import { 
   ToggleGroup, 
   ToggleGroupItem, 
@@ -90,10 +109,12 @@ import {
 } from "@/components/ui/card";
 import { 
   Table as ShadcnTable, 
-  TableCell, 
+  TableBody,
+  TableCell,
   TableHead, 
-  TableRow 
-} from "@/components/ui/table";
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { 
   AlertDialog, 
   AlertDialogAction, 
@@ -118,29 +139,28 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import { 
   ColumnDef, 
-  ColumnFiltersState, 
   SortingState, 
   VisibilityState, 
+  ColumnFiltersState, 
   GroupingState, 
   ExpandedState, 
   flexRender, 
   getCoreRowModel, 
-  getFilteredRowModel, 
   getPaginationRowModel, 
   getSortedRowModel, 
+  getFilteredRowModel, 
   getGroupedRowModel, 
   getExpandedRowModel, 
+  PaginationState, // Added PaginationState
   useReactTable, 
-  Row, 
-  Cell, 
-  OnChangeFn // Import OnChangeFn
+  OnChangeFn,
+  Row, // Add Row back to imports
 } from "@tanstack/react-table";
 import { MoveDocumentModal } from '@/components/dashboard/MoveDocumentModal';
 import Breadcrumbs from '@/components/dashboard/Breadcrumbs';
 import DocumentGrid from '@/components/dashboard/DocumentGrid';
 import ChatInterface from '@/components/dashboard/ChatInterface'; 
 import { FileUpload } from '@/components/dashboard/FileUpload';
-import { ListTree } from 'lucide-react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { DraggableRow } from '@/components/dashboard/DraggableRow'; 
@@ -564,100 +584,178 @@ const createColumns = (
   ];
 };
 
-function DocumentTable({ 
-  data, 
-  isLoading, 
-  error, 
-  onSelectItem, 
-  onDeleteDocument, 
-  onFolderClick, 
-  onMoveClick, 
-  onRenameFolder, 
-  onDeleteFolder, 
-  grouping, 
-  onGroupingChange, 
-  columnVisibility, 
-  onColumnVisibilityChange,
-  onMoveRow, 
-  onDropItemIntoFolder, 
-  favoriteIds, 
+function DocumentTable({
+  data,
+  isLoading,
+  error,
+  onSelectItem,
+  onDeleteDocument,
+  onFolderClick,
+  onMoveClick,
+  onRenameFolder,
+  onDeleteFolder,
+  grouping, // State from DashboardPage
+  onGroupingChange, // Handler from DashboardPage
+  columnVisibility, // State from DashboardPage
+  onColumnVisibilityChange, // Handler from DashboardPage
+  onMoveRow,
+  onDropItemIntoFolder,
+  favoriteIds,
   handleToggleFavorite,
   togglingFavoriteId
 }: DocumentTableProps) {
   const [itemToDelete, setItemToDelete] = useState<FilesystemItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null); 
+  const [deletingId, setDeletingId] = useState<string | null>(null); // Track ID during async delete
+
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [rowSelection, setRowSelection] = useState({});
-  const [expanded, setExpanded] = useState<ExpandedState>({}); // Use correct type
+  const [expanded, setExpanded] = useState<ExpandedState>({});
+  // Replace pagination with itemsToShow state for "Load More" functionality
+  const [itemsToShow, setItemsToShow] = useState<number>(20);
+  
+  // Use useMemo to calculate hasMoreItems and slicedData to prevent infinite updates
+  const { hasMoreItems, slicedData } = useMemo(() => {
+    const dataArray = data ?? [];
+    return {
+      hasMoreItems: dataArray.length > itemsToShow,
+      slicedData: dataArray.slice(0, itemsToShow)
+    };
+  }, [data, itemsToShow]);
   const { toast } = useToast();
+  const functionsInstance = getFunctions(app); // Get Functions instance
 
-  useEffect(() => {
-    console.log('[DocumentTable] Data prop updated:', data.map(item => item.name)); // Log names using the 'data' prop
-  }, [data]);
-
-  const handleDeleteClick = (item: FilesystemItem, e: React.MouseEvent) => {
-    e.stopPropagation(); 
-    setItemToDelete(item);
-  };
-
+  // Define columns using the factory function
   const columns = useMemo(
-    () => createColumns(onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, handleDeleteClick, isDeleting, deletingId, favoriteIds, handleToggleFavorite, togglingFavoriteId),
-    [onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, handleDeleteClick, isDeleting, deletingId, favoriteIds, handleToggleFavorite, togglingFavoriteId]
+    () => createColumns(
+      onSelectItem,
+      onFolderClick,
+      onMoveClick,
+      onRenameFolder,
+      onDeleteFolder,
+      (item, e) => { // handleDeleteClick implementation
+        e.stopPropagation(); // Prevent row selection
+        setItemToDelete(item);
+      },
+      isDeleting,
+      deletingId, // Pass deletingId for visual feedback
+      favoriteIds,
+      handleToggleFavorite,
+      togglingFavoriteId
+    ),
+    [onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, isDeleting, deletingId, favoriteIds, handleToggleFavorite, togglingFavoriteId]
   );
 
-  // Set up pagination with 20 items per page
-  const [pagination, setPagination] = useState({
-    pageIndex: 0,
-    pageSize: 20,
-  });
-
-  const table = useReactTable({
-    data, // Use the 'data' prop passed to the component
-    columns,
-    getRowId: (originalRow) => originalRow.id, // Provide a stable row ID
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
-    getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getGroupedRowModel: getGroupedRowModel(), // Add grouped row model
-    getExpandedRowModel: getExpandedRowModel(), // Add expanded row model
-    onColumnVisibilityChange: onColumnVisibilityChange,
-    onRowSelectionChange: setRowSelection,
-    onGroupingChange: onGroupingChange, // Add grouping change handler
-    onExpandedChange: setExpanded, // Add expanded change handler
-    onPaginationChange: setPagination,
-    state: {
-      sorting,
-      columnFilters,
-      columnVisibility,
-      rowSelection,
-      grouping, // Include grouping in state
-      expanded, // Include expanded in state
-      pagination, // Include pagination in state
-    },
-  });
-
-  const handleRowClick = (item: FilesystemItem) => {
-    if (item.type === 'folder') {
-      onFolderClick(item.id, item.name);
-    } else {
-      onSelectItem(item);
+  // Helper function to get appropriate icon based on file type
+  const getFileIcon = (fileName: string, mimeType?: string): React.ReactNode => {
+    if (!fileName) return <File className="h-4 w-4 text-gray-500" />;
+    
+    const extension = fileName.split('.').pop()?.toLowerCase() || '';
+    
+    // Define extension arrays with explicit types
+    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'] as const;
+    const documentExtensions = ['doc', 'docx', 'txt', 'rtf'] as const;
+    const archiveExtensions = ['zip', 'rar', 'tar', 'gz'] as const;
+    const spreadsheetExtensions = ['xlsx', 'xls', 'csv'] as const;
+    
+    // Check for spreadsheet files
+    if (mimeType?.includes('spreadsheet') || 
+        spreadsheetExtensions.some(ext => ext === extension)) {
+      return <FileSpreadsheet className="h-4 w-4 text-green-500" />;
+    } 
+    // Check for PDF files
+    else if (mimeType?.includes('pdf') || extension === 'pdf') {
+      return <FileText className="h-4 w-4 text-red-500" />;
+    } 
+    // Check for image files
+    else if (mimeType?.includes('image') || 
+             imageExtensions.some(ext => ext === extension)) {
+      return <FileImage className="h-4 w-4 text-purple-500" />;
+    } 
+    // Check for document files
+    else if (documentExtensions.some(ext => ext === extension)) {
+      return <FileText className="h-4 w-4 text-blue-500" />;
+    } 
+    // Check for archive files
+    else if (archiveExtensions.some(ext => ext === extension)) {
+      return <FileArchive className="h-4 w-4 text-orange-500" />;
+    }
+    
+    // Default file icon
+    return <File className="h-4 w-4 text-gray-500" />;
+  };
+  
+  // Helper function to format dates safely
+  const formatDate = (dateValue: any): string => {
+    if (!dateValue) return 'N/A';
+    try {
+      // Handle Firebase Timestamp objects
+      if (dateValue.toDate && typeof dateValue.toDate === 'function') {
+        return dateValue.toDate().toLocaleDateString();
+      }
+      // Handle regular Date objects or strings
+      return new Date(dateValue).toLocaleDateString();
+    } catch (e) {
+      return 'N/A';
     }
   };
 
+  const table = useReactTable({
+    // Use the pre-calculated sliced data
+    data: slicedData,
+    columns,
+    getRowId: (originalRow) => originalRow.id,
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    getCoreRowModel: getCoreRowModel(),
+    // No longer using pagination model
+    // getPaginationRowModel: getPaginationRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getGroupedRowModel: getGroupedRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+    onColumnVisibilityChange: onColumnVisibilityChange, // Use prop handler
+    onRowSelectionChange: setRowSelection,
+    onGroupingChange: onGroupingChange, // Use prop handler
+    onExpandedChange: setExpanded,
+    // No longer using pagination
+    // onPaginationChange: setPagination,
+    state: {
+      sorting,
+      columnFilters,
+      columnVisibility, // Use prop state
+      rowSelection,
+      grouping, // Use prop state
+      expanded,
+      // Using manual slicing instead of pagination
+      // pagination,
+    },
+  });
+  
+  // Handler for clicking a row (selects or navigates)
+  const handleRowClick = (row: Row<FilesystemItem>) => {
+    const item = row.original; // Get the item data from the row
+    if (item.type === 'folder') {
+      onFolderClick(item.id, item.name);
+    } else {
+      // Toggle selection or select if not selected
+      onSelectItem(item); // Let parent handle selection logic if needed
+      row.toggleSelected(); // Use row.toggleSelected() instead of table.toggleRowSelected()
+    }
+  };
+  
   if (isLoading) {
     return (
-      <div className="space-y-2 flex-grow overflow-auto pr-2">
-        {Array.from({ length: 8 }).map((_, index) => (
-          <div key={index} className="flex items-center justify-between p-2 border rounded">
-            <div className="flex items-center space-x-2 flex-grow">
-              <Skeleton circle={true} height={24} width={24} />
-              <Skeleton height={20} width={`80%`} />
-            </div>
+      <div className="p-4 space-y-2">
+        {[...Array(5)].map((_, i) => (
+          <div key={i} className="flex items-center space-x-4">
+            <Skeleton height={20} width={20} />
+            <Skeleton height={20} width={200} />
+            <Skeleton height={20} width={100} />
+            <Skeleton height={20} width={80} />
+            <Skeleton height={20} width={150} />
+            <Skeleton height={20} width={150} />
             <Skeleton height={20} width={60} />
           </div>
         ))}
@@ -670,172 +768,202 @@ function DocumentTable({
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-200px)] overflow-auto"> 
-      {/* Table Toolbar with Column Toggle and Grouping Controls */}
-      <div className="flex items-center justify-between py-2 px-1 mb-2">
+    <div className="flex flex-col">
+      {/* Table Toolbar with Column Toggle - Reduced spacing */}
+      <div className="flex items-center justify-between py-1 px-1 mb-1">
         <div className="flex flex-1 items-center space-x-2">
-          {/* Group By Dropdown */}
+          {/* Filter Input */}
+           <Input
+             placeholder="Filter items..."
+             value={(table.getColumn('name')?.getFilterValue() as string) ?? ''}
+             onChange={(event) =>
+               table.getColumn('name')?.setFilterValue(event.target.value)
+             }
+             className="h-8 max-w-sm" // Adjusted height
+           />
+          {/* Columns Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
+              {/* Using SlidersHorizontal icon as per removed code */}
               <Button variant="outline" size="sm" className="h-8 border-dashed">
-                <LayersIcon className="mr-2 h-4 w-4" />
-                Group
-                {table.getState().grouping.length > 0 && (
-                  <span className="ml-2 bg-secondary text-secondary-foreground rounded-sm px-1 text-xs">
-                    {table.getState().grouping.length}
-                  </span>
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuLabel>Group by column</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {table
-                .getAllColumns() // Use getAllColumns to get defined columns
-                .filter((column) => column.getCanGroup()) // Filter by columns that can be grouped
-                .map((column) => {
-                  return (
-                    <DropdownMenuCheckboxItem
-                      key={column.id}
-                      className="capitalize"
-                      checked={column.getIsGrouped()}
-                      onCheckedChange={(value) => {
-                        // If checking the box, set grouping to this column.
-                        // If unchecking, clear grouping.
-                        table.setGrouping(value ? [column.id] : []); 
-                      }}
-                    >
-                      {/* Use a friendlier display name */}
-                      {column.id === 'type' ? 'Type' : 
-                       column.id === 'updatedAt' ? 'Date Modified' : 
-                       column.id === 'uploadedAt' ? 'Date Added' : 
-                       column.id}
-                    </DropdownMenuCheckboxItem>
-                  );
-                })}
-              {table.getState().grouping.length > 0 && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={() => table.setGrouping([])}
-                    className="justify-center text-xs"
-                  >
-                    Reset
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Column Visibility Toggle */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-8 border-dashed">
-                <SlidersHorizontal className="mr-2 h-4 w-4" />
+                <SlidersHorizontal className="mr-2 h-4 w-4" /> 
                 Columns
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {table.getAllLeafColumns().filter(column => column.getCanHide()).map(column => (
-                <DropdownMenuCheckboxItem
-                  key={column.id}
-                  className="capitalize"
-                  checked={column.getIsVisible()}
-                  onCheckedChange={(value) => {
-                    console.log(`Toggling visibility of ${column.id} to ${value} via column.toggleVisibility`);
-                    column.toggleVisibility(!!value); // Use table's method
-                  }}
-                >
-                  {/* Use a friendlier display name if available, else the ID */}
-                  {column.id === 'type' ? 'Type' : 
-                   column.id === 'size' ? 'Size' :
-                   column.id === 'updatedAt' ? 'Date Modified' : 
-                   column.id === 'uploadedAt' ? 'Date Added' : 
-                   column.id}
-                </DropdownMenuCheckboxItem>
-              ))}
+              {table
+                .getAllLeafColumns() // Use leaf columns for toggling
+                .filter((column) => column.getCanHide()) // Filter by columns that can be hidden
+                .map((column) => {
+                  // Determine a user-friendly display name
+                  const displayName =
+                    column.id === 'name' ? 'Name' :
+                    column.id === 'type' ? 'Type' :
+                    column.id === 'size' ? 'Size' :
+                    column.id === 'uploadedAt' ? 'Date Added' :
+                    column.id === 'updatedAt' ? 'Date Modified' :
+                    column.id; // Fallback to id
+
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={column.id}
+                      className="capitalize"
+                      checked={column.getIsVisible()}
+                      onCheckedChange={(value) =>
+                        column.toggleVisibility(!!value) // Correctly use toggleVisibility
+                      }
+                    >
+                      {displayName}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
 
-      {/* TanStack Table Rendering */} 
-      {/* Use more contrasting border */}
-      <div className="rounded-md border border-[var(--muted-foreground)]"> 
-        <ShadcnTable className="min-w-full">
-          {/* Use more contrasting border */}
-          <thead className={cn("[&_tr]:border-b [&_tr]:border-[var(--muted-foreground)]")}> 
-            {table.getHeaderGroups().map((headerGroup) => ( 
+      {/* Shadcn Table - Single scrollable container */}
+      <div className="rounded-md border flex-grow flex flex-col overflow-hidden">
+        <ShadcnTable className="min-w-full table-fixed">
+          {/* Fixed header */}
+          <TableHeader className="sticky top-0 bg-background z-10">
+            {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => {
-                  const meta = header.column.columnDef.meta as { className?: string } | undefined;
-                  return (
-                    <TableHead key={header.id} className={meta?.className}>
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(
-                            header.column.columnDef.header,
-                            header.getContext()
-                          )}
-                    </TableHead>
-                  );
-                })}
+                {headerGroup.headers.map((header) => (
+                  <TableHead key={header.id} style={{ width: header.getSize() }}>
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(
+                          header.column.columnDef.header,
+                          header.getContext()
+                        )}
+                  </TableHead>
+                ))}
               </TableRow>
             ))}
-          </thead> 
-          <tbody className={cn("[&_tr:last-child]:border-0")}> 
+          </TableHeader>
+          {/* Table body - no longer needs its own scroll */}
+          <TableBody>
             {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => { 
+              table.getRowModel().rows.map((row: Row<FilesystemItem>) => {
+                // Check if the row is a grouping row
                 if (row.getIsGrouped()) {
-                  // Render group header row
                   return (
-                    <TableRow key={row.id} className="bg-muted/50 hover:bg-muted/80 font-medium">
-                      <TableCell colSpan={columns.length} className="py-2 px-4">
-                        <div className="flex items-center gap-2">
+                    <TableRow key={row.id}>
+                      <TableCell colSpan={row.getVisibleCells().length} className="font-medium bg-muted/50">
+                        <div className="flex items-center space-x-2">
                           <button
-                            onClick={row.getToggleExpandedHandler()}
-                            style={{ cursor: 'pointer' }}
-                            className="p-1 rounded hover:bg-accent"
+                            {...{
+                              onClick: row.getToggleExpandedHandler(),
+                              style: { cursor: 'pointer' },
+                            }}
                           >
-                            {row.getIsExpanded() ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
+                            {row.getIsExpanded() ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                           </button>
-                          {/* Display the formatted group value - uses accessorKey of grouping column */} 
-                          <span>{String(row.groupingValue ?? 'Other')}</span>
+                          {/* Render the grouping cell content */}
+                          {flexRender(
+                            // @ts-ignore // Accessing internal group cell might need ts-ignore
+                            row.getVisibleCells()[0].column.columnDef.cell,
+                            row.getVisibleCells()[0].getContext()
+                          )}
                           <span className="text-xs text-muted-foreground">({row.subRows.length})</span>
                         </div>
                       </TableCell>
                     </TableRow>
                   );
                 }
-                
+
                 // Render normal data row (only if expanded or not part of a group)
                 if (!row.getIsGrouped() && (row.depth === 0 || row.getParentRow()?.getIsExpanded())) {
                   return (
                     <DraggableRow key={row.id} row={row} onMoveRow={onMoveRow} onDropItemIntoFolder={onDropItemIntoFolder}>
+                      {/* Desktop view - standard table cells */}
                       {row.getVisibleCells().map((cell) => (
-                        <TableCell 
-                          key={cell.id} 
+                        <TableCell
+                          key={cell.id}
                           className={cn(
-                            (cell.column.columnDef.meta as { className?: string })?.className, // Type assertion for meta
+                            'py-2 hidden sm:table-cell', // Hide on mobile, show on desktop
+                            (cell.column.columnDef.meta as { className?: string })?.className,
                             {'cursor-pointer hover:bg-muted/50': cell.column.id !== 'actions' && cell.column.id !== 'select'},
-                            {'bg-blue-100 dark:bg-blue-900': row.getIsSelected()} 
+                            {'bg-blue-100 dark:bg-blue-900': row.getIsSelected()}
                           )}
-                          style={{ width: cell.column.getSize() }} 
-                          onClick={(e) => handleRowClick(row.original)} 
+                          style={{ width: cell.column.getSize(), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} // Prevent text wrap
+                          onClick={(e) => {
+                             if (cell.column.id !== 'actions' && cell.column.id !== 'select') {
+                               handleRowClick(row); // Pass the row object
+                             }
+                           }}
                         >
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </TableCell>
                       ))}
+                      
+                      {/* Mobile view - card-like layout with all important info */}
+                      <TableCell 
+                        colSpan={row.getVisibleCells().length}
+                        className="sm:hidden p-3 block"
+                        onClick={() => handleRowClick(row)}
+                      >
+                        <div className="flex flex-col gap-1">
+                          {/* Main row with name and actions */}
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-2 font-medium">
+                              {/* Icon based on file type */}
+                              {row.original.type === 'folder' ? (
+                                <Folder className="h-4 w-4 text-blue-500" />
+                              ) : getFileIcon(row.original.name, row.original.type === 'document' ? (row.original as MyDocumentData).contentType : '')}
+                              
+                              {/* File/folder name */}
+                              <span className="truncate max-w-[180px]">{row.original.name}</span>
+                            </div>
+                            
+                            {/* Actions (favorite, etc) */}
+                            <div className="flex items-center gap-1">
+                              {/* Favorite star */}
+                              <button
+                                className={cn(
+                                  "h-6 w-6 inline-flex items-center justify-center rounded-full",
+                                  (favoriteIds instanceof Set ? favoriteIds.has(row.original.id) : (Array.isArray(favoriteIds) && favoriteIds.length > 0 ? favoriteIds.indexOf(row.original.id) >= 0 : false)) ? "text-yellow-500" : "text-muted-foreground"
+                                )}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleFavorite(row.original.id);
+                                }}
+                              >
+                                <Star className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                          
+                          {/* Details row with type, size, dates */}
+                          <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-muted-foreground mt-1">
+                            <div className="flex items-center gap-1">
+                              <span className="font-medium">Type:</span> 
+                              <span>{row.original.type === 'folder' ? 'Folder' : (row.original.type === 'document' ? ((row.original as MyDocumentData).contentType?.split('/')[1] || 'File') : 'File')}</span>
+                            </div>
+                            {row.original.type !== 'folder' && (
+                              <div className="flex items-center gap-1">
+                                <span className="font-medium">Size:</span> 
+                                <span>{formatBytes(row.original.type === 'document' ? (row.original as MyDocumentData).size || 0 : 0, 2)}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1">
+                              <span className="font-medium">Added:</span> 
+                              <span>{formatDate(row.original.type === 'document' ? (row.original as MyDocumentData).uploadedAt : undefined)}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="font-medium">Modified:</span> 
+                              <span>{formatDate(row.original.type === 'document' ? (row.original as MyDocumentData).updatedAt || (row.original as MyDocumentData).uploadedAt : undefined)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
                     </DraggableRow>
                   );
                 }
-                
+
                 return null; // Don't render hidden sub-rows
               })
             ) : (
@@ -845,40 +973,24 @@ function DocumentTable({
                 </TableCell>
               </TableRow>
             )}
-          </tbody> 
+          </TableBody>
         </ShadcnTable>
-        
-        {/* Pagination Controls */}
-        <div className="flex items-center justify-between px-4 py-2 border-t border-[var(--muted-foreground)]">
-          <div className="flex-1 text-sm text-muted-foreground">
-            Showing {table.getFilteredRowModel().rows.length > 0 ? table.getState().pagination.pageIndex * table.getState().pagination.pageSize + 1 : 0} to {Math.min((table.getState().pagination.pageIndex + 1) * table.getState().pagination.pageSize, table.getFilteredRowModel().rows.length)} of {table.getFilteredRowModel().rows.length} items
-          </div>
-          <div className="flex items-center space-x-6 lg:space-x-8">
-            <div className="flex items-center space-x-2">
-              {/* Use more contrasting border/text */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => table.previousPage()}
-                disabled={!table.getCanPreviousPage()}
-                className="border-[var(--muted-foreground)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]"
-              >
-                Previous
-              </Button>
-              {/* Use more contrasting border/text */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => table.nextPage()}
-                disabled={!table.getCanNextPage()}
-                className="border-[var(--muted-foreground)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]"
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        </div>
       </div>
+
+      {/* Load More Button */}
+      {hasMoreItems && (
+        <div className="flex justify-center py-4 border-t">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setItemsToShow(prev => prev + 20)}
+            className="w-40"
+          >
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Load More
+          </Button>
+        </div>
+      )}
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={itemToDelete !== null} onOpenChange={(open: boolean) => !open && setItemToDelete(null)}>
@@ -889,55 +1001,44 @@ function DocumentTable({
               This action cannot be undone. This will permanently delete the {itemToDelete?.type === 'folder' ? 'folder' : 'document'}
               {' '}
               <span className="font-medium">'{itemToDelete?.name}'</span>.
-              {itemToDelete?.type === 'folder' && ' All contents within this folder will also be deleted.'} 
+              {itemToDelete?.type === 'folder' && ' All contents within this folder will also be deleted.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel 
-              onClick={() => setItemToDelete(null)} 
+            <AlertDialogCancel
+              onClick={() => setItemToDelete(null)}
               disabled={isDeleting}
-              className="border-[var(--muted-foreground)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]"
             >
               Cancel
             </AlertDialogCancel>
-            <AlertDialogAction onClick={() => {
+            <AlertDialogAction onClick={async () => { // Make async for potential await
               if (!itemToDelete) return;
 
-              setDeletingId(itemToDelete.id);
+              setDeletingId(itemToDelete.id); // Set ID for visual feedback
               setIsDeleting(true);
 
-              if (itemToDelete.type === 'document') {
-                onDeleteDocument(itemToDelete.id)
-                  .catch((error: unknown) => {
-                    console.error(`Error deleting document ${itemToDelete.id}:`, error);
-                    const message = error instanceof Error ? error.message : 'An unknown error occurred.';
-                    toast({ variant: "destructive", title: "Error", description: `Failed to delete document '${itemToDelete.name}'. ${message}` });
-                  })
-                  .finally(() => {
-                    setIsDeleting(false);
-                    setItemToDelete(null); 
-                  });
-              } else if (itemToDelete.type === 'folder') {
-                const deleteFolderFunction = httpsCallable(functionsInstance, 'deleteFolder');
-                deleteFolderFunction({ folderId: itemToDelete.id })
-                  .then((result) => {
-                    const responseData = result.data as { success: boolean; message?: string };
-
-                    if (responseData.success) {
-                      toast({ title: "Success", description: `Folder '${itemToDelete.name}' and its contents deleted successfully.` });
-                    } else {
-                      throw new Error(responseData.message || 'Unknown error from function.');
-                    }
-                  })
-                  .catch((error: unknown) => {
-                    console.error(`Error calling deleteFolder function for ${itemToDelete.id}:`, error);
-                    const message = error instanceof Error ? error.message : 'An unknown error occurred.';
-                    toast({ variant: "destructive", title: "Error", description: `Failed to delete folder '${itemToDelete.name}'. ${message}` });
-                  })
-                  .finally(() => {
-                    setIsDeleting(false);
-                    setItemToDelete(null); 
-                  });
+              try {
+                if (itemToDelete.type === 'document') {
+                  await onDeleteDocument(itemToDelete.id); // Await the prop function
+                  toast({ title: "Success", description: `Document '${itemToDelete.name}' deleted.` });
+                } else if (itemToDelete.type === 'folder') {
+                  const deleteFolderFunction = httpsCallable(functionsInstance, 'deleteFolder');
+                  const result = await deleteFolderFunction({ folderId: itemToDelete.id });
+                  const responseData = result.data as { success: boolean; message?: string };
+                  if (responseData.success) {
+                    toast({ title: "Success", description: `Folder '${itemToDelete.name}' and its contents deleted successfully.` });
+                  } else {
+                    throw new Error(responseData.message || 'Unknown error from function.');
+                  }
+                }
+              } catch (error: unknown) {
+                 console.error(`Error deleting ${itemToDelete.type} ${itemToDelete.id}:`, error);
+                 const message = error instanceof Error ? error.message : 'An unknown error occurred.';
+                 toast({ variant: "destructive", title: "Error", description: `Failed to delete ${itemToDelete.type} '${itemToDelete.name}'. ${message}` });
+              } finally {
+                 setIsDeleting(false);
+                 setDeletingId(null); // Clear deleting ID
+                 setItemToDelete(null); // Close dialog
               }
             }} disabled={isDeleting} className="bg-red-600 hover:bg-red-700 text-white">
               {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -1372,8 +1473,8 @@ function DashboardPage() {
     console.log(`Delete folder requested: ${folderName} (${folderId})`);
   };
 
-  const handleGroupingChange = (value: string) => { // Accept string from radio group
-    setGroupingOption(value as 'type' | 'date' | 'none'); // Update accepted types
+  const handleGroupingChange = (value: string) => {
+    setGroupingOption(value as 'type' | 'date' | 'none');
   };
 
   const handleMoveRow = useCallback((dragIndex: number, hoverIndex: number) => {
@@ -1613,30 +1714,67 @@ function DashboardPage() {
   }, [groupingOption]);
 
   return (
-    <div className="flex h-screen flex-col bg-muted/40">
-      {/* Remove border-b, update link color, update button classes */}
-      <header className="sticky top-0 z-30 flex h-8 items-center gap-4 bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-1">
+    <div className="flex h-screen flex-col bg-muted/40 overflow-hidden">
+      {/* Fixed header - Mobile optimized */}
+      <header className="sticky top-0 z-40 flex h-8 items-center gap-2 sm:gap-4 bg-background px-2 sm:px-4 border-b border-border/40 py-1">
         <h1 className="text-base font-semibold whitespace-nowrap">My Documents</h1>
-        {/* Use primary color for link */}
-        <Link href="/chat-history" className="text-sm text-[var(--primary)] hover:underline">
-          Chat History
-        </Link>
-        <div className="ml-auto flex items-center gap-3">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Welcome, {user.displayName || user.email}</span>
-          {/* Use muted-foreground for button border/text */}
+        
+        {/* Desktop navigation */}
+        <div className="hidden sm:flex items-center gap-4">
+          <Link href="/chat-history" className="text-sm text-[var(--primary)] hover:underline">
+            Chat History
+          </Link>
+        </div>
+        
+        <div className="ml-auto flex items-center gap-2 sm:gap-3">
+          {/* Welcome message - Simplified on mobile */}
+          <span className="text-xs text-muted-foreground whitespace-nowrap hidden sm:inline-block">Welcome, {user.displayName || user.email}</span>
+          <span className="text-xs text-muted-foreground whitespace-nowrap sm:hidden">{user.displayName?.split(' ')[0] || user.email?.split('@')[0]}</span>
+          
+          {/* Desktop logout button */}
           <Button 
             variant="outline" 
-            size="sm" 
-            className="h-6 text-xs py-0 border-[var(--muted-foreground)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]" 
+            size="sm"
+            className="h-6 text-xs py-0 border-[var(--muted-foreground)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)] hidden sm:flex" 
             onClick={logout}
           >
             Logout
           </Button>
+          
+          {/* Mobile menu */}
+          <Sheet>
+            <SheetTrigger asChild className="sm:hidden">
+              <Button variant="ghost" size="icon" className="h-7 w-7 p-0">
+                <Menu className="h-4 w-4" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-[200px] sm:w-[300px]">
+              <SheetHeader>
+                <SheetTitle>Menu</SheetTitle>
+              </SheetHeader>
+              <div className="flex flex-col gap-4">
+                <Link href="/chat-history" className="text-sm font-medium hover:underline flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Chat History
+                </Link>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className="w-full justify-start" 
+                  onClick={logout}
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Logout
+                </Button>
+              </div>
+            </SheetContent>
+          </Sheet>
         </div>
       </header>
 
-      <main className="flex-1 overflow-hidden p-4 pt-2">
-        <div className="mb-2 text-xs text-muted-foreground">
+      <main className="flex-1 flex flex-col p-4 pt-2 overflow-hidden">
+        {/* Fixed breadcrumbs navigation */}
+        <div className="sticky top-8 z-30 bg-muted/40 pt-1 pb-2 -mx-4 px-4 text-xs text-muted-foreground">
           <FolderBreadcrumbs 
             currentFolderId={currentFolderId}
             folders={availableFolders}
@@ -1644,7 +1782,8 @@ function DashboardPage() {
           />
         </div>
 
-        <div className="flex h-full flex-col">
+        {/* Scrollable content area */}
+        <div className="flex-1 overflow-auto" style={{ height: 'calc(100vh - 80px)' }}>
           {selectedDocument && (
             <>
               <div className="flex justify-end mb-2 gap-2">
@@ -1713,12 +1852,30 @@ function DashboardPage() {
                       <RefreshCw className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                                    {/* Right side - View Controls */}
+                  {/* Right side - View Controls */}
                   <div className="flex items-center space-x-1.5">
-                    {/* Grouping Control */}
+                    {/* Favorites Dialog Trigger Button - Now First */}
+                    <FavoritesDialog
+                      trigger={
+                        <Button variant="outline" size="sm" className="h-9 gap-1 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2">
+                        <Star className="h-3.5 w-3.5" />
+                        <span className="sr-only sm:not-sr-only sm:whitespace-nowrap">
+                          Favorites
+                        </span>
+                      </Button>
+                      }
+                      allItems={filesystemItems}
+                      favoriteIds={favoriteIds}
+                      onSelectItem={handleSelectItem}
+                      onFolderClick={handleFolderClick}
+                      handleToggleFavorite={handleToggleFavorite}
+                      togglingFavoriteId={togglingFavoriteId}
+                    />
+                    
+                    {/* Grouping Control - Now Second */}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-7 px-2">
+                        <Button variant="ghost" size="sm" className="h-7 px-2 ml-2">
                           <ListTree className="h-3.5 w-3.5 mr-1.5" /> 
                           <span className="text-xs">
                             {groupingOption === 'type' ? 'By Type' : groupingOption === 'date' ? 'By Date' : 'No Groups'}
@@ -1735,75 +1892,6 @@ function DashboardPage() {
                         </DropdownMenuRadioGroup>
                       </DropdownMenuContent>
                     </DropdownMenu>
-                    
-                    {/* Columns Control - Moved here */}
-                    {viewMode === 'list' && (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-7 px-2">
-                            <Columns className="h-3.5 w-3.5 mr-1.5" />
-                            <span className="text-xs">Columns</span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuLabel>Toggle Columns</DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-                          {viewMode === 'list' && filesystemItems.length > 0 && (
-                            <>
-                              {/* This is a placeholder for column visibility toggles */}
-                              <DropdownMenuCheckboxItem
-                                className="capitalize"
-                                checked={true}
-                              >
-                                Name
-                              </DropdownMenuCheckboxItem>
-                              <DropdownMenuCheckboxItem
-                                className="capitalize"
-                                checked={true}
-                              >
-                                Type
-                              </DropdownMenuCheckboxItem>
-                              <DropdownMenuCheckboxItem
-                                className="capitalize"
-                                checked={true}
-                              >
-                                Size
-                              </DropdownMenuCheckboxItem>
-                              <DropdownMenuCheckboxItem
-                                className="capitalize"
-                                checked={true}
-                              >
-                                Date Modified
-                              </DropdownMenuCheckboxItem>
-                              <DropdownMenuCheckboxItem
-                                className="capitalize"
-                                checked={true}
-                              >
-                                Date Added
-                              </DropdownMenuCheckboxItem>
-                            </>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
-                    
-                    {/* Favorites Dialog Trigger Button */}
-                    <FavoritesDialog
-                      trigger={
-                        <Button variant="outline" size="sm" className="h-9 gap-1 ml-2 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2">
-                        <Star className="h-3.5 w-3.5" />
-                        <span className="sr-only sm:not-sr-only sm:whitespace-nowrap">
-                          Favorites
-                        </span>
-                      </Button>
-                      }
-                      allItems={filesystemItems}
-                      favoriteIds={favoriteIds}
-                      onSelectItem={handleSelectItem}
-                      onFolderClick={handleFolderClick}
-                      handleToggleFavorite={handleToggleFavorite}
-                      togglingFavoriteId={togglingFavoriteId}
-                    />
                     
                     {/* View Mode Toggle */}
                     {/* Change border class for better contrast */}
@@ -1850,15 +1938,7 @@ function DashboardPage() {
                 </DialogContent>
               </Dialog>
               
-              {/* Document Section Header - More Compact */}
-              <div className="flex justify-between items-center mb-1 mt-2 flex-shrink-0">                <div className="flex items-center">
-                  <h2 className="text-sm font-medium">Documents</h2>
-                  <span className="text-xs text-muted-foreground ml-2">
-                    ({folderPath.length > 0 ? folderPath[folderPath.length - 1].name : 'Home'}) • 
-                    {filesystemItems.length} {filesystemItems.length === 1 ? 'item' : 'items'}
-                  </span>
-                </div>
-              </div>
+              {/* Document Section Header removed to create more space */}
               {loadingDocs ? (
                 <div className="flex items-center justify-center p-4">
                   <Loader2 className="h-5 w-5 animate-spin mr-2" />
@@ -1884,7 +1964,7 @@ function DashboardPage() {
                           onRenameFolder={handleRenameFolder} 
                           onDeleteFolder={handleDeleteFolder} 
                           grouping={grouping}
-                          onGroupingChange={setGrouping}
+                          onGroupingChange={setGrouping} // Ensure this is setGrouping
                           columnVisibility={columnVisibility}
                           onColumnVisibilityChange={setColumnVisibility}
                           onMoveRow={handleMoveRow} 

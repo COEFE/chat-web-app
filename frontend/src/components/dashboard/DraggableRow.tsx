@@ -22,19 +22,23 @@ interface DragItem {
 }
 
 // Define the props for the DraggableRow component
-interface DraggableRowProps {
+// Extend React.ComponentProps<'tr'> to include standard <tr> attributes
+interface DraggableRowProps extends React.ComponentProps<'tr'> {
   row: Row<FilesystemItem>;
-  children: React.ReactNode;
+  // children is already included in ComponentProps<'tr'>, but keeping it explicit is fine
+  children: React.ReactNode; 
   onMoveRow: (dragIndex: number, hoverIndex: number) => void;
   onDropItemIntoFolder: (itemId: string, targetFolderId: string) => void; // New prop
 }
 
-export const DraggableRow: React.FC<DraggableRowProps> = ({
+// Remove React.FC as it's often discouraged and ComponentProps handles children
+export const DraggableRow = ({
   row,
   children,
   onMoveRow,
   onDropItemIntoFolder, // Destructure new prop
-}) => {
+  ...props // Spread remaining props (like className, style, etc.) onto the <tr>
+}: DraggableRowProps) => {
   const ref = useRef<HTMLTableRowElement>(null);
   const item = row.original; // Get the original item data
 
@@ -177,6 +181,7 @@ export const DraggableRow: React.FC<DraggableRowProps> = ({
         !isDragging ? 'hover:bg-muted/50' : '', // Normal hover effect when not dragging
         backgroundColor // Apply drop target highlight
       )}
+      {...props} // Spread the rest of the props onto the <tr> element
     >
       {children}
     </tr>
