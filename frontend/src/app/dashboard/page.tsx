@@ -332,74 +332,37 @@ const createColumns = (
       enableSorting: true, // Allow sorting by size
     },
     {
-      accessorKey: 'uploadedAt',
+      accessorKey: 'createdAt',
       header: 'Date Added',
-      cell: ({ row }) => {
+      cell: ({ row }: { row: Row<FilesystemItem> }) => {
         const item = row.original;
-        let date: Date | null = null;
+        if (!item.createdAt) return <span>-</span>;
 
-        if (item.type === 'document' && item.uploadedAt) {
-          // Check if uploadedAt is a Firestore Timestamp and convert
-          if (typeof item.uploadedAt.toDate === 'function') {
-            date = item.uploadedAt.toDate();
+        let dateString: string;
+        if (item.createdAt instanceof Timestamp) {
+          dateString = formatDistanceToNow(item.createdAt.toDate(), { addSuffix: true });
+        } else if (typeof item.createdAt === 'string') {
+          try {
+            dateString = formatDistanceToNow(parseISO(item.createdAt), { addSuffix: true });
+          } catch {
+            dateString = 'Invalid Date';
           }
-        } else if (item.type === 'folder' && item.createdAt) {
-          // Check if createdAt is a Firestore Timestamp and convert
-          if (typeof item.createdAt.toDate === 'function') {
-            date = item.createdAt.toDate();
-          } 
+        } else {
+          dateString = '-';
         }
-
-        // Format the date if it's valid
-        return date && isValid(date) ? (
-          <div className="text-sm text-muted-foreground hidden md:table-cell">{format(date, 'MMM d, yyyy')}</div>
-        ) : (
-          <div className="text-sm text-muted-foreground hidden md:table-cell">--</div>
-        );
+        return <span>{dateString}</span>;
       },
-      sortingFn: (rowA, rowB, columnId) => {
-        const itemA = rowA.original;
-        const itemB = rowB.original;
-        let dateA: number | null = null;
-        let dateB: number | null = null;
-
-        if (itemA.type === 'document' && itemA.uploadedAt?.toDate) dateA = itemA.uploadedAt.toDate().getTime();
-        else if (itemA.type === 'folder' && itemA.createdAt?.toDate) dateA = itemA.createdAt.toDate().getTime();
-
-        if (itemB.type === 'document' && itemB.uploadedAt?.toDate) dateB = itemB.uploadedAt.toDate().getTime();
-        else if (itemB.type === 'folder' && itemB.createdAt?.toDate) dateB = itemB.createdAt.toDate().getTime();
-
-        if (dateA === null && dateB === null) return 0;
-        if (dateA === null) return -1; // Nulls first (or last depending on sort direction)
-        if (dateB === null) return 1;
-
-        return dateA - dateB;
+      meta: {
+        className: 'hidden lg:table-cell', // Show on large screens
       },
-      enableSorting: true, 
-    },
-    {
-      accessorKey: 'contentType',
-      header: 'Content Type',
-      cell: ({ row }) => {
-        const item = row.original;
-        const contentType = item.type === 'document' ? item.contentType : 'Folder'; // Display 'Folder' for folders
- 
-        // Basic content type formatting (can be expanded)
-        const formattedType = contentType?.split('/').pop()?.toUpperCase() || '--';
- 
-        return (
-          <div className="text-sm text-muted-foreground hidden md:table-cell">
-            {contentType === 'Folder' ? contentType : formattedType}
-          </div>
-        );
-      },
+      enableGrouping: true, // Enable grouping by Date
     },
     {
       accessorKey: 'updatedAt',
       header: 'Date Modified',
       cell: ({ row }: { row: Row<FilesystemItem> }) => {
         const item = row.original;
-        if (!item.updatedAt) return <span className="text-sm text-muted-foreground">-</span>;
+        if (!item.updatedAt) return <span>-</span>;
 
         let dateString: string;
         // Check if updatedAt is Firebase Timestamp or ISO string
@@ -415,7 +378,7 @@ const createColumns = (
           dateString = '-';
         }
 
-        return <span className="text-sm text-muted-foreground">{dateString}</span>;
+        return <span>{dateString}</span>;
       },
       meta: {
         className: 'hidden md:table-cell', 
@@ -452,6 +415,23 @@ const createColumns = (
         return format(date, 'yyyy'); // Or 'Older', or 'yyyy-MM' for monthly grouping
       }, // End of getGroupingValue function
       enableSorting: true, // Ensure sorting is also enabled if needed
+    },
+    {
+      accessorKey: 'contentType',
+      header: 'Content Type',
+      cell: ({ row }) => {
+        const item = row.original;
+        const contentType = item.type === 'document' ? item.contentType : 'Folder'; // Display 'Folder' for folders
+ 
+        // Basic content type formatting (can be expanded)
+        const formattedType = contentType?.split('/').pop()?.toUpperCase() || '--';
+ 
+        return (
+          <div className="text-sm text-muted-foreground hidden md:table-cell">
+            {contentType === 'Folder' ? contentType : formattedType}
+          </div>
+        );
+      },
     },
     {
       id: 'actions',
