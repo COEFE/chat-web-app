@@ -643,6 +643,11 @@ function DocumentTable({
   // Replace pagination with itemsToShow state for "Load More" functionality
   const [itemsToShow, setItemsToShow] = useState<number>(20);
   
+  // Touch handling state
+  const [touchStartTime, setTouchStartTime] = useState<number>(0);
+  const [touchStartPosition, setTouchStartPosition] = useState<{x: number, y: number} | null>(null);
+  const [isTouchMoved, setIsTouchMoved] = useState<boolean>(false);
+  
   // Use useMemo to calculate hasMoreItems and slicedData to prevent infinite updates
   const { hasMoreItems, slicedData } = useMemo(() => {
     const dataArray = data ?? [];
@@ -785,6 +790,40 @@ function DocumentTable({
       onSelectItem(item); // Let parent handle selection logic if needed
       row.toggleSelected(); // Use row.toggleSelected() instead of table.toggleRowSelected()
     }
+  };
+  
+  // Touch event handlers to distinguish between scrolling and tapping
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartTime(Date.now());
+    setTouchStartPosition({
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY
+    });
+    setIsTouchMoved(false);
+  };
+  
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStartPosition) return;
+    
+    const deltaX = Math.abs(e.touches[0].clientX - touchStartPosition.x);
+    const deltaY = Math.abs(e.touches[0].clientY - touchStartPosition.y);
+    
+    // If the touch has moved more than 10px in any direction, consider it a scroll
+    if (deltaX > 10 || deltaY > 10) {
+      setIsTouchMoved(true);
+    }
+  };
+  
+  const handleTouchEnd = (row: Row<FilesystemItem>) => (e: React.TouchEvent) => {
+    const touchDuration = Date.now() - touchStartTime;
+    
+    // Only trigger click if the touch was brief (< 300ms) and didn't move much
+    if (touchDuration < 300 && !isTouchMoved) {
+      handleRowClick(row);
+    }
+    
+    // Reset touch state
+    setTouchStartPosition(null);
   };
   
   if (isLoading) {
@@ -962,10 +1001,17 @@ function DocumentTable({
                             )}
                             style={{ width: cell.column.getSize(), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} // Prevent text wrap
                             onClick={(e) => {
-                               if (cell.column.id !== 'actions' && cell.column.id !== 'select') {
-                                 handleRowClick(row); // Pass the row object
-                               }
-                             }}
+                              // Only handle click events on desktop
+                              if (window.matchMedia('(min-width: 768px)').matches && 
+                                  cell.column.id !== 'actions' && 
+                                  cell.column.id !== 'select') {
+                                handleRowClick(row);
+                              }
+                            }}
+                            onTouchStart={handleTouchStart}
+                            onTouchMove={handleTouchMove}
+                            onTouchEnd={cell.column.id !== 'actions' && cell.column.id !== 'select' ? 
+                              handleTouchEnd(row) : undefined}
                           >
                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
                           </TableCell>
