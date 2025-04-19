@@ -3,13 +3,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Maximize2, Minimize2, Plus } from 'lucide-react';
+import { ArrowLeft, Maximize2, Minimize2, Plus, MessageSquare, X } from 'lucide-react';
 import DocumentViewer from '@/components/dashboard/DocumentViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
 import { useAuth } from '@/context/AuthContext';
 import { getFirestore, doc, getDoc } from 'firebase/firestore';
 import AddDocumentModal from '@/components/dashboard/AddDocumentModal';
 import { MyDocumentData } from '@/types';
+import { useMediaQuery } from '@/hooks/use-media-query';
+import { cn } from '@/lib/utils';
 
 export default function DocumentChatPage() {
   const params = useParams();
@@ -20,8 +22,10 @@ export default function DocumentChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [isAddDocumentModalOpen, setIsAddDocumentModalOpen] = useState(false);
+  const [isChatVisibleMobile, setIsChatVisibleMobile] = useState(false);
   const [activeDocumentId, setActiveDocumentId] = useState<string>('');
   const documentId = params?.documentId as string || '';
+  const isMobile = useMediaQuery('(max-width: 768px)');
   
   // Define document title state that will be updated when documents/activeDocumentId change
   const [documentTitle, setDocumentTitle] = useState<string>('Document Viewer');
@@ -168,6 +172,11 @@ export default function DocumentChatPage() {
     }
   };
 
+  // Toggle mobile chat visibility
+  const toggleChatVisibility = () => {
+    setIsChatVisibleMobile(prev => !prev);
+  };
+
   // Show a more detailed loading state during authentication
   if (authLoading) {
     return (
@@ -206,40 +215,59 @@ export default function DocumentChatPage() {
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back
         </Button>
-        <h1 className="text-base font-semibold truncate flex-1">
-          {documents.length > 0 ? documents[0].name : ''}
-          {documents.length > 1 ? ` and ${documents.length - 1} more` : ''}
+        <h1 className="text-base font-semibold truncate flex-1 md:ml-auto">
+          {documentTitle} 
         </h1>
         
-        {/* Add Document Button */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleAddDocument}
-          title="Add another document to chat"
-          className="ml-auto mr-2"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 mr-1">
-            <path d="M5 12h14"></path>
-            <path d="M12 5v14"></path>
-          </svg>
-          Add Document
-        </Button>
-        
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => setIsMaximized(prev => !prev)}
-          title={isMaximized ? "Exit full screen" : "Full screen"}
-        >
-          {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-        </Button>
+        {/* Button Group (Aligned Right) */}
+        <div className="ml-auto flex items-center gap-2">
+          {/* Add Document Button - Icon only on mobile */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleAddDocument}
+            title="Add another document to chat"
+            // Removed ml-auto, handled by parent div
+          >
+            <Plus className="h-4 w-4 md:mr-1" /> {/* Keep icon, add margin only on desktop */} 
+            <span className="hidden md:inline">Add Document</span> {/* Text only on desktop */} 
+          </Button>
+
+          {/* Chat Toggle Button (Mobile Only, inside group) */} 
+          {isMobile && !isMaximized && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleChatVisibility}
+              title={isChatVisibleMobile ? "Hide Chat" : "Show Chat"}
+              className="md:hidden" // Removed ml-2, gap handled by parent div
+            >
+              {isChatVisibleMobile ? <X className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}
+            </Button>
+          )}
+          {/* Maximize/Minimize Button - Render only if not mobile */}
+          {!isMobile && (
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setIsMaximized(prev => !prev)}
+              title={isMaximized ? "Exit full screen" : "Full screen"}
+            >
+              {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </Button>
+          )}
+        </div>
       </header>
 
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 overflow-hidden relative"> {/* Add relative positioning for absolute chat panel */}
         <div className="flex h-full">
-          {/* Document Viewer (70%) */}
-          <div className={`${isMaximized ? 'w-full' : 'w-[70%]'} h-full border-r flex flex-col`}>
+          {/* Document Viewer Container */}
+          {/* Takes full width on mobile unless chat is open */}
+          <div className={cn(
+            "h-full flex flex-col transition-all duration-300 ease-in-out",
+            isMaximized ? 'w-full' :
+            isMobile ? 'w-full' : 'w-[70%] border-r' 
+          )}>
             {/* Document Tabs */}
             <div className="flex border-b bg-muted/30 overflow-x-auto">
               {documents.map(doc => (
@@ -265,10 +293,7 @@ export default function DocumentChatPage() {
                       }}
                       title="Remove from chat"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                      </svg>
+                      <X className="h-5 w-5" />
                     </button>
                   )}
                 </div>
@@ -283,14 +308,39 @@ export default function DocumentChatPage() {
             </div>
           </div>
 
-          {/* Chat Interface (30%) */}
-          <div className={`${isMaximized ? 'hidden' : 'w-[30%]'} h-full flex flex-col`}>
+          {/* Chat Interface Container */}
+          {/* Desktop: Takes 30%, Mobile: Fixed overlay panel */}
+          <div className={cn(
+            "h-full flex flex-col transition-transform duration-300 ease-in-out",
+            isMaximized ? 'hidden' :
+            isMobile ? [
+              'fixed top-14 right-0 bottom-0 z-40 w-full max-w-md bg-background border-l shadow-lg',
+              isChatVisibleMobile ? 'translate-x-0' : 'translate-x-full'
+            ] :
+            'w-[30%]'
+          )}>
+            {/* Optional: Add a close button inside the chat panel for mobile */} 
+            {isMobile && (
+              <div className="flex justify-end p-2 border-b md:hidden">
+                <Button variant="ghost" size="icon" onClick={toggleChatVisibility} title="Close Chat">
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+            )}
             <ChatInterface 
               documentId={activeDocumentId} 
               document={documents.find(doc => doc.id === activeDocumentId)!} 
               additionalDocuments={documents.filter(doc => doc.id !== activeDocumentId)}
             />
           </div>
+          
+          {/* Mobile Chat Overlay (closes chat when clicking outside) */}
+          {isMobile && isChatVisibleMobile && !isMaximized && (
+            <div 
+              className="fixed inset-0 z-30 bg-black/30 md:hidden"
+              onClick={toggleChatVisibility}
+            />
+          )}
         </div>
       </main>
       
