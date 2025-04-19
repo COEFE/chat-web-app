@@ -19,9 +19,10 @@ interface ChatInterfaceProps {
   document?: MyDocumentData;
   // Optional additional properties for multi-document support
   additionalDocuments?: MyDocumentData[];
+  isReadOnly?: boolean; // Add optional read-only prop
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, additionalDocuments = [] }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, additionalDocuments = [], isReadOnly = false }) => {
   // Combine primary document with additional documents for context
   const allDocuments = document ? [document, ...additionalDocuments] : additionalDocuments;
   // Get all document IDs for the API call
@@ -287,13 +288,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
           <Textarea
             value={input}
             onChange={handleInputChange}
-            placeholder="Type your message..."
-            disabled={isLoading}
+            placeholder={isReadOnly ? "Chat is read-only" : "Type your message..."} // Change placeholder when read-only
+            disabled={isLoading || isReadOnly} // Disable input if read-only
             onKeyDown={handleKeyDown} // Add keydown handler
             className="flex-1 resize-none" // Use resize-none for now
             rows={1} // Start with a single row
           />
-          <Button ref={submitButtonRef} type="submit" size="icon" disabled={isLoading || !input.trim()} aria-label="Send message">
+          <Button ref={submitButtonRef} type="submit" size="icon" disabled={isLoading || !input.trim() || isReadOnly} aria-label="Send message">
             <Send className="h-4 w-4" />
           </Button>
         </form>

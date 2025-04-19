@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch"; // Ensure this path is correct for Shadcn switch
 import { useState, useEffect, useRef } from "react";
 import { createShareLink } from "@/lib/firebase/shares"; // Path relative to src
-import { ShareOptions } from "@/types/share"; // Path relative to src
+import { ShareOptions, CreateShareInput } from "@/types/share"; // Path relative to src
 import { Copy, Loader2, Share2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -27,6 +27,7 @@ interface ShareDialogProps {
 
 export function ShareDialog({ documentId, documentName, open, onOpenChange }: ShareDialogProps) {
   const [includeChat, setIncludeChat] = useState(false);
+  const [isChatActive, setIsChatActive] = useState(false); // New state for interactive chat
   const [accessType, setAccessType] = useState<"view" | "comment">("view");
   const [expirationDays, setExpirationDays] = useState<number | null>(7); // Default 7 days
   const [password, setPassword] = useState<string>("");
@@ -42,6 +43,7 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
       setShareLink(null);
       setPassword("");
       setIncludeChat(false);
+      setIsChatActive(false);
       setExpirationDays(7);
     }
   }, [open, documentId]);
@@ -59,9 +61,10 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
     setError(null);
     setShareLink(null);
 
-    const options: ShareOptions = {
+    const options: CreateShareInput = {
       documentId,
       includeChat,
+      isChatActive: includeChat ? isChatActive : false, // Pass new state (only if includeChat is true)
       accessType,
       expirationDays,
       password: password || undefined, // Send undefined if empty
@@ -117,11 +120,31 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
             <Switch
               id="include-chat"
               checked={includeChat}
-              onCheckedChange={setIncludeChat}
+              onCheckedChange={(checked) => {
+                setIncludeChat(checked);
+                if (!checked) {
+                  setIsChatActive(false); // Reset active chat if include chat is turned off
+                }
+              }}
               className="col-span-3"
             />
           </div>
-          {/* Add Access Type Select here later if needed */}
+
+          {/* Conditional Toggle for Active Chat */}
+          {includeChat && (
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="enable-chat-interaction" className="text-right col-span-1 whitespace-nowrap">
+                Enable Chat Interaction
+              </Label>
+              <Switch
+                id="enable-chat-interaction"
+                checked={isChatActive}
+                onCheckedChange={setIsChatActive}
+                className="col-span-3"
+              />
+            </div>
+          )}
+
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="expiration" className="text-right col-span-1">
               Expires in (days)

@@ -7,12 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, FileText, Lock, MessageSquare } from 'lucide-react';
+import { Loader2, FileText, Lock } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import PDFViewer from '@/components/dashboard/PDFViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
 import Link from 'next/link';
-import { Switch } from '@/components/ui/switch';
 
 // Error boundary component for handling rendering errors
 class ErrorBoundary extends React.Component<
@@ -50,6 +49,7 @@ interface ShareDetails {
   includeChat: boolean;
   accessType: 'view' | 'comment';
   password: boolean | null;
+  isChatActive: boolean;
 }
 
 export default function SharedDocumentPage() {
@@ -65,7 +65,6 @@ export default function SharedDocumentPage() {
   const [verifyingPassword, setVerifyingPassword] = useState(false);
   const [accessGranted, setAccessGranted] = useState(false);
   const [documentUrl, setDocumentUrl] = useState<string | null>(null);
-  const [showChat, setShowChat] = useState(false);
 
   // Fetch share details
   useEffect(() => {
@@ -89,7 +88,8 @@ export default function SharedDocumentPage() {
           expiresAt: details.expiresAt,
           includeChat: details.includeChat,
           accessType: details.accessType as 'view' | 'comment',
-          password: details.password
+          password: details.password,
+          isChatActive: details.isChatActive
         };
         setShareDetails(shareDetails);
         
@@ -220,28 +220,14 @@ export default function SharedDocumentPage() {
   // Document viewer
   return (
     <div className="flex flex-col min-h-screen">
-      <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">
-        <div className="container flex h-14 items-center justify-between">
-          <div className="flex items-center gap-2 mr-4">
+      <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="container flex h-14 items-center">
+          <div className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
-            <h1 className="text-lg font-semibold truncate">
+            <h1 className="text-lg font-semibold">
               {shareDetails?.documentName || 'Shared Document'}
             </h1>
           </div>
-          {/* --- Chat Toggle (NEW) --- */}
-          {accessGranted && shareDetails?.includeChat && (
-            <div className="flex items-center space-x-2">
-              <Switch 
-                id="chat-toggle"
-                checked={showChat}
-                onCheckedChange={setShowChat}
-              />
-              <Label htmlFor="chat-toggle" className="text-sm font-medium whitespace-nowrap">
-                Show Chat
-              </Label>
-              <MessageSquare className="h-4 w-4 text-muted-foreground" />
-            </div>
-          )}
         </div>
       </header>
       
@@ -281,14 +267,14 @@ export default function SharedDocumentPage() {
           </div>
         )}
         
-        {accessGranted && shareDetails?.includeChat && showChat && shareDetails.documentId && (
-          <div className="border rounded-lg mt-4"> 
-            <h2 className="text-lg font-semibold p-4 border-b">Chat History</h2>
-            <ChatInterface documentId={shareDetails.documentId} />
-          </div>
+        {accessGranted && shareDetails?.includeChat && shareDetails.documentId && (
+          <ChatInterface 
+            documentId={shareDetails.documentId} 
+            isReadOnly={!shareDetails.isChatActive} 
+          />
         )}
         
-        {!documentUrl && !passwordProtected && (
+        {!documentUrl && (
           <div className="flex items-center justify-center h-[calc(100vh-8rem)]">
             <Card>
               <CardHeader>

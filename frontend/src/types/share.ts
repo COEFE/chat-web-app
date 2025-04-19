@@ -39,6 +39,7 @@ export interface ShareDetails {
   documentId: string;
   originalDocumentName: string;
   includeChat: boolean;
+  isChatActive: boolean; // Added required field
   accessType: "view" | "comment";
   createdAt: number; // Timestamp converted to milliseconds since epoch for client
   expiresAt: number | null; // Timestamp converted to milliseconds or null
@@ -46,7 +47,9 @@ export interface ShareDetails {
 }
 
 // Input type for the 'createShare' Cloud Function
-export interface CreateShareInput extends ShareOptions {}
+export interface CreateShareInput extends ShareOptions {
+  isChatActive?: boolean; // Added optional field
+}
 
 // Output type for the 'createShare' Cloud Function
 export interface CreateShareOutput {
@@ -78,6 +81,7 @@ export interface GetShareDetailsOutput {
   documentPath: string;
   expiresAt: number | null;
   includeChat: boolean;
+  isChatActive: boolean; // Added required field
   accessType: "view" | "comment";
   password: boolean | null;
 }

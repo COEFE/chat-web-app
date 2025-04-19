@@ -274,6 +274,7 @@ interface RenameFolderRequestData {
 export interface CreateShareRequestData {
   documentId: string;
   includeChat: boolean;
+  isChatActive?: boolean; // Added optional field
   accessType: "view" | "comment";
   expirationDays: number | null;
   password?: string;
@@ -423,7 +424,7 @@ export const createShare = onCall(async (request: CallableRequest<CreateShareReq
     throw new HttpsError("unauthenticated", "User must be logged in");
   }
 
-  const {documentId, includeChat, accessType, expirationDays, password} = request.data;
+  const {documentId, includeChat, isChatActive, accessType, expirationDays, password} = request.data;
   const userId = request.auth.uid;
 
   try {
@@ -465,6 +466,7 @@ export const createShare = onCall(async (request: CallableRequest<CreateShareReq
       expiresAt,
       accessType,
       includeChat,
+      isChatActive: isChatActive ?? false, // Add the field, default to false
       accessedBy: {},
       // For password protection, we'll use a separate function to handle this securely
       password: password ? true : null, // Just store a boolean flag indicating password protection
