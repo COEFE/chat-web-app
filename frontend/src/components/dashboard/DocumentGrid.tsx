@@ -157,9 +157,8 @@ const DocumentGrid: React.FC<DocumentGridProps> = ({
                         onOpenShareDialog({ id: item.id, name: item.name }); // Call the prop handler
                       }, 100); // 100ms delay
                     }}
-                    className="cursor-pointer flex items-center gap-2"
                   >
-                    <Share2 className="h-4 w-4" />
+                    <Share2 className="mr-2 h-4 w-4" />
                     <span>Share</span>
                   </DropdownMenuItem>
                 )}
