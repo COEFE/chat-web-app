@@ -195,7 +195,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
   };
 
   return (
-    <Card className="flex flex-col h-full w-full">
+    <Card className="flex flex-col h-full w-full"> {/* Restored h-full, needed for proper layout */}
       <CardHeader className="p-3 sm:p-4"> {/* Responsive padding */}
         <CardTitle 
           className="truncate" 
@@ -213,7 +213,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
         )}
       </CardHeader>
       <CardContent className="flex-1 overflow-hidden p-0 min-h-0"> {/* Use flex-1 and min-h-0 */}
-        <ScrollArea ref={scrollAreaRef} className="h-full">
+        <ScrollArea ref={scrollAreaRef} className="h-full"> {/* Restored h-full for proper scrolling */}
           <div className="p-3 sm:p-4"> {/* Responsive padding for scroll area content */}
             {/* Placeholder for empty chat */}
             {!isLoading && messages.length === 0 && (
