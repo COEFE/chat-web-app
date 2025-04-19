@@ -212,7 +212,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
           <CardDescription>Active Sheet: {activeSheet}</CardDescription>
         )}
       </CardHeader>
-      <CardContent className="flex-grow overflow-hidden p-0">
+      <CardContent className="flex-1 overflow-hidden p-0 min-h-0"> {/* Use flex-1 and min-h-0 */}
         <ScrollArea ref={scrollAreaRef} className="h-full">
           <div className="p-3 sm:p-4"> {/* Responsive padding for scroll area content */}
             {/* Placeholder for empty chat */}
