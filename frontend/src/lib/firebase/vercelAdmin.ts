@@ -40,22 +40,22 @@ export function initVercelFirebaseAdmin() {
     }
     
     // Try to use service account key if available
-    const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
 
-    console.log(`[VercelAdmin] Checking FIREBASE_SERVICE_ACCOUNT_KEY: Defined=${!!serviceAccountKey}, Length=${serviceAccountKey?.length ?? 0}`);
+    console.log(`[VercelAdmin] Checking FIREBASE_SERVICE_ACCOUNT: Defined=${!!serviceAccountJson}, Length=${serviceAccountJson?.length ?? 0}`);
 
-    if (serviceAccountKey) {
+    if (serviceAccountJson) {
       try {
-        console.log('[VercelAdmin] Found service account key, attempting to parse...');
-        const serviceAccount = JSON.parse(serviceAccountKey);
+        console.log('[VercelAdmin] Found service account JSON, attempting to parse...');
+        const serviceAccount = JSON.parse(serviceAccountJson);
         appConfig.credential = cert(serviceAccount);
-        console.log('[VercelAdmin] Successfully parsed service account key');
+        console.log('[VercelAdmin] Successfully parsed service account JSON');
       } catch (parseError) {
-        console.error('[VercelAdmin] Error parsing service account key:', parseError);
+        console.error('[VercelAdmin] Error parsing service account JSON:', parseError);
         // Continue without the credential - will use Application Default Credentials
       }
     } else {
-      console.log('[VercelAdmin] No service account key found, using Application Default Credentials');
+      console.log('[VercelAdmin] No service account JSON found, using Application Default Credentials');
     }
     
     // Initialize the app
