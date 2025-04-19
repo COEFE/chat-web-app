@@ -1773,12 +1773,12 @@ function DashboardPage() {
   return (
     <div className="flex h-screen flex-col bg-muted/40 overflow-hidden">
       {/* Fixed header - Mobile optimized */}
-      <header className="sticky top-0 z-40 flex h-7 items-center gap-2 sm:gap-4 bg-background px-2 sm:px-4 border-b border-border/40">
-        <h1 className="text-lg font-semibold whitespace-nowrap">My Documents</h1>
+      <header className="sticky top-0 z-40 flex h-9 items-center gap-2 sm:gap-4 bg-background px-2 sm:px-4 border-b border-border/40">
+        <h1 className="text-xl font-semibold whitespace-nowrap">My Documents</h1>
         
         {/* Desktop navigation */}
         <div className="hidden sm:flex items-center gap-4">
-          <Link href="/chat-history" className="text-sm text-[var(--primary)] hover:underline">
+          <Link href="/chat-history" className="text-base font-medium text-[var(--primary)] hover:underline">
             Chat History
           </Link>
         </div>
@@ -1810,8 +1810,8 @@ function DashboardPage() {
                 <SheetTitle>Menu</SheetTitle>
               </SheetHeader>
               <div className="flex flex-col gap-4">
-                <Link href="/chat-history" className="text-sm font-medium hover:underline flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
+                <Link href="/chat-history" className="text-base font-medium hover:underline flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
                   Chat History
                 </Link>
                 <Button 
