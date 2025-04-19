@@ -314,14 +314,14 @@ export default function DocumentChatPage() {
             "transition-transform duration-300 ease-in-out",
             isMaximized ? 'hidden' :
             isMobile ? [
-              'fixed inset-y-14 right-0 z-40 w-full max-w-md bg-background border-l shadow-lg flex flex-col', 
+              'fixed top-14 bottom-0 right-0 z-40 w-full max-w-md bg-background border-l shadow-lg flex flex-col', 
               isChatVisibleMobile ? 'translate-x-0' : 'translate-x-full'
             ] :
             'h-full w-[30%] flex flex-col'
           )}>
             {/* Optional: Add a close button inside the chat panel for mobile */} 
             {isMobile && (
-              <div className="flex justify-end p-2 border-b md:hidden">
+              <div className="flex justify-end p-0 border-b md:hidden">
                 <Button variant="ghost" size="icon" onClick={toggleChatVisibility} title="Close Chat">
                   <X className="h-5 w-5" />
                 </Button>

@@ -196,7 +196,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
 
   return (
     <Card className="flex flex-col h-full w-full"> {/* Restored h-full, needed for proper layout */}
-      <CardHeader className="p-3 sm:p-4"> {/* Responsive padding */}
+      <CardHeader className="p-0"> {/* Removed padding */}
         <CardTitle 
           className="truncate" 
           title={document?.name ? `Chat with ${document.name}${additionalDocuments.length > 0 ? ` (+${additionalDocuments.length} more)` : ''}` : 'Chat'}
