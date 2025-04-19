@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Loader2, FileText, Lock } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import PDFViewer from '@/components/dashboard/PDFViewer';
+import ChatInterface from '@/components/dashboard/ChatInterface';
 import Link from 'next/link';
 
 // Error boundary component for handling rendering errors
@@ -262,6 +263,10 @@ export default function SharedDocumentPage() {
               </ErrorBoundary>
             )}
           </div>
+        )}
+        
+        {accessGranted && shareDetails?.includeChat && (
+          <ChatInterface documentId={shareDetails.documentId} />
         )}
         
         {!documentUrl && (
