@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils'; 
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
+import { ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 
 // Use the locally served worker file
 pdfjsLib.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs`;
@@ -31,7 +32,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number>(0);
-  const [currentPage, setCurrentPage] = useState<number>(1); 
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [rotation, setRotation] = useState<number>(0); // 0, 90, 180, 270 degrees
+  const [zoomLevel, setZoomLevel] = useState<number>(1); // 1 = 100%
   const pagesRef = useRef<HTMLDivElement>(null);
   const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
   const pdfDocRef = useRef<PDFDocumentProxy | null>(null); 
@@ -122,10 +125,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             throw new Error('Could not get canvas context');
           }
 
-          // Calculate scale to fit width
-          const viewport = page.getViewport({ scale: 1 }); 
-          const scale = maxWidth / viewport.width;
-          const scaledViewport = page.getViewport({ scale });
+          // Calculate scale to fit width and apply rotation
+          const viewport = page.getViewport({ scale: 1, rotation }); 
+          const scale = (maxWidth / viewport.width) * zoomLevel;
+          const scaledViewport = page.getViewport({ scale, rotation });
 
           // Set canvas dimensions
           canvas.width = Math.floor(scaledViewport.width * (window.devicePixelRatio || 1));
@@ -157,13 +160,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
     renderAllPages();
 
-  }, [pdfDocRef, numPages]); 
+  }, [pdfDocRef, numPages, rotation, zoomLevel]); 
+
+  const [pageInputValue, setPageInputValue] = useState<string>('');
 
   const scrollToPage = (pageNumber: number) => {
-    const pageElement = document.getElementById(`pdf-page-${pageNumber}`);
+    const validPage = Math.max(1, Math.min(numPages, pageNumber));
+    const pageElement = document.getElementById(`pdf-page-${validPage}`);
     if (pageElement) {
       pageElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setCurrentPage(pageNumber);
+      setCurrentPage(validPage);
+      setPageInputValue('');
     }
   };
 
@@ -177,37 +184,130 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     scrollToPage(newPage);
   };
 
+  const handlePageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Allow only numbers
+    const value = e.target.value.replace(/[^0-9]/g, '');
+    setPageInputValue(value);
+  };
+
+  const handlePageInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      const pageNum = parseInt(pageInputValue);
+      if (!isNaN(pageNum) && pageNum > 0) {
+        scrollToPage(pageNum);
+      }
+    }
+  };
+
   return (
     <div className={cn(
       'flex flex-col w-full h-full bg-white dark:bg-gray-900 rounded-md shadow-md overflow-hidden',
       className
     )}>
       {/* Header with controls */}
-      <div className="flex items-center justify-end p-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+      <div className="flex flex-wrap items-center justify-center gap-0.5 p-1 sm:p-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         {/* Controls */}
-        <div className="flex items-center space-x-1">
+        <div className="flex flex-wrap items-center gap-0.5 sm:gap-1">
+          {/* Zoom Controls */}
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => setZoomLevel(prev => Math.max(0.5, prev - 0.1))}
+            title="Zoom Out"
+            disabled={zoomLevel <= 0.5}
+            className="h-6 w-6 sm:h-8 sm:w-8 p-0"
+          >
+            <ZoomOut className="h-3 w-3 sm:h-4 sm:w-4" />
+          </Button>
+
+          <span className="text-[10px] sm:text-xs font-medium hidden xs:inline">
+            {Math.round(zoomLevel * 100)}%
+          </span>
+
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => setZoomLevel(prev => Math.min(2, prev + 0.1))}
+            title="Zoom In"
+            disabled={zoomLevel >= 2}
+            className="h-6 w-6 sm:h-8 sm:w-8 p-0"
+          >
+            <ZoomIn className="h-3 w-3 sm:h-4 sm:w-4" />
+          </Button>
+
+          {/* Rotate Button */}
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => setRotation(prev => (prev + 90) % 360)}
+            title="Rotate 90°"
+            className="h-6 w-6 sm:h-8 sm:w-8 p-0"
+          >
+            <RotateCw className="h-3 w-3 sm:h-4 sm:w-4" />
+          </Button>
+          
+          <div className="w-px h-5 sm:h-6 bg-gray-300 dark:bg-gray-700 mx-0.5 sm:mx-1"></div>
+          
+          {/* Page Navigation Controls */}
+          <button
+            onClick={goToPreviousPage}
+            disabled={currentPage <= 1 || isLoading}
+            className="p-1 sm:p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            title="Previous page"
+            aria-label="Previous page"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 sm:w-5 sm:h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+          </button>
+          
+          <div className="flex items-center gap-1 sm:gap-2">
+            <input
+              type="text"
+              value={pageInputValue}
+              onChange={handlePageInputChange}
+              onKeyDown={handlePageInputKeyDown}
+              placeholder={`${currentPage}`}
+              className="w-8 sm:w-10 h-7 text-center text-sm rounded border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              aria-label="Go to page"
+            />
+            <span className="text-sm font-medium text-gray-700">
+              / {numPages}
+            </span>
+          </div>
+          
+          <button
+            onClick={goToNextPage}
+            disabled={currentPage >= numPages || isLoading}
+            className="p-1 sm:p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            title="Next page"
+            aria-label="Next page"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 sm:w-5 sm:h-5"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+          </button>
+          
+          <div className="w-px h-5 sm:h-6 bg-gray-300 dark:bg-gray-700 mx-0.5 sm:mx-1"></div>
+          
           <a
             href={fileUrl}
             download={fileName || 'document.pdf'}
-            className="inline-flex items-center justify-center h-8 w-8 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground"
+            className="inline-flex items-center justify-center h-6 w-6 sm:h-8 sm:w-8 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground"
             title="Download PDF"
           >
-            <Download className="h-4 w-4" />
+            <Download className="h-3 w-3 sm:h-4 sm:w-4" />
           </a>
           
           <a
             href={fileUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center justify-center h-8 w-8 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground"
+            className="inline-flex items-center justify-center h-6 w-6 sm:h-8 sm:w-8 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground"
             title="Open in New Tab"
           >
-            <ExternalLink className="h-4 w-4" />
+            <ExternalLink className="h-3 w-3 sm:h-4 sm:w-4" />
           </a>
           
           {onClose && (
-            <Button variant="ghost" size="icon" onClick={onClose} title="Close Viewer">
-              <X className="h-4 w-4" />
+            <Button variant="ghost" size="icon" onClick={onClose} title="Close Viewer" className="h-6 w-6 sm:h-8 sm:w-8 p-0">
+              <X className="h-3 w-3 sm:h-4 sm:w-4" />
             </Button>
           )}
         </div>
@@ -255,47 +355,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           ))}
         </div>
         
-        {/* Pagination Controls */}
-        {numPages > 0 && (
-          <div className="sticky bottom-0 left-0 right-0 p-2 bg-gray-100 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
-            <button
-              onClick={goToPreviousPage}
-              disabled={currentPage <= 1 || isLoading}
-              className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-              title="Previous page"
-              aria-label="Previous page"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
-            </button>
-            
-            {/* Page Selector */}
-            <div className="flex items-center">
-              <select 
-                value={currentPage}
-                onChange={(e) => scrollToPage(parseInt(e.target.value))}
-                className="h-8 w-16 text-sm rounded border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 mr-1"
-                aria-label="Select page"
-              >
-                {Array.from({ length: numPages }, (_, i) => i + 1).map((page) => (
-                  <option key={page} value={page}>Page {page}</option>
-                ))}
-              </select>
-              <span className="text-sm font-medium text-gray-700">
-                of {numPages}
-              </span>
-            </div>
-            
-            <button
-              onClick={goToNextPage}
-              disabled={currentPage >= numPages || isLoading}
-              className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-              title="Next page"
-              aria-label="Next page"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
-            </button>
-          </div>
-        )}
+
       </div>
     </div>
   );
