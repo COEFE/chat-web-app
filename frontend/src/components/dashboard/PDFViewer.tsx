@@ -1,11 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Download, X, ExternalLink, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import PDFViewerCore from './PDFViewerCore';
 
 interface PDFViewerProps {
   fileUrl: string;
@@ -24,6 +23,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ fileUrl, fileName = 'document.pdf
   const [rotation, setRotation] = useState(0); // Add state for rotation
   const [currentPage, setCurrentPage] = useState(1); // Current page number
   const [totalPages, setTotalPages] = useState(0); // Total number of pages
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   
   // Detect mobile devices
   useEffect(() => {
@@ -141,23 +141,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ fileUrl, fileName = 'document.pdf
   };
   
   // Page navigation functions
+  // Note: These won't work with the iframe approach, but we'll keep them for UI consistency
   const goToNextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(currentPage + 1);
-    }
+    // Not functional with iframe
   };
   
   const goToPrevPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage(currentPage - 1);
-    }
+    // Not functional with iframe
   };
   
-  // Handle document loaded event
-  const handleDocumentLoaded = (numPages: number) => {
-    setTotalPages(numPages);
-    setCurrentPage(1); // Reset to first page when a new document is loaded
-  };
+  // We don't have access to document loaded event with iframe
+  // So we'll use a simpler approach for page navigation
   
   // State for page input field
   const [pageInputValue, setPageInputValue] = useState('1');
@@ -234,48 +228,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ fileUrl, fileName = 'document.pdf
             </svg>
           </Button>
           
-          {/* Page navigation */}
-          {totalPages > 0 && (
-            <div className="flex items-center space-x-1 ml-2 mr-2 border-l border-r px-2 border-gray-300 dark:border-gray-700">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={goToPrevPage}
-                disabled={currentPage <= 1 || isLoading || !!error}
-                title="Previous Page"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                  <path d="M15 18l-6-6 6-6"/>
-                </svg>
-              </Button>
-              
-              <div className="flex items-center">
-                <input
-                  type="text"
-                  value={pageInputValue}
-                  onChange={handlePageInputChange}
-                  onKeyDown={handlePageInputSubmit}
-                  onBlur={handlePageInputSubmit}
-                  className="w-8 h-6 text-center text-xs bg-transparent border border-gray-300 dark:border-gray-700 rounded"
-                  disabled={isLoading || !!error}
-                />
-                <span className="text-xs mx-1">of</span>
-                <span className="text-xs">{totalPages}</span>
-              </div>
-              
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={goToNextPage}
-                disabled={currentPage >= totalPages || isLoading || !!error}
-                title="Next Page"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                  <path d="M9 18l6-6-6-6"/>
-                </svg>
-              </Button>
-            </div>
-          )}
+          {/* Removed page navigation as it's not functional with iframe */}
           
           {/* Open in new tab button */}
           <Button
@@ -349,18 +302,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ fileUrl, fileName = 'document.pdf
           </div>
         )}
         
-        {/* PDF viewer using PDFViewerCore */}
+        {/* PDF viewer using iframe */}
         {!isLoading && !error && objectUrl && (
-          <PDFViewerCore
-            fileUrl={objectUrl}
-            fileName={fileName}
-            onClose={onClose}
-            className="h-full w-full"
-            scale={scale} /* Pass scale to PDFViewerCore */
-            rotation={rotation} /* Pass rotation to PDFViewerCore */
-            onDocumentLoaded={handleDocumentLoaded} /* Get notified when document is loaded */
-            currentPage={currentPage} /* Control current page */
-            onPageChange={setCurrentPage} /* Get notified when page changes */
+          <iframe
+            ref={iframeRef}
+            src={objectUrl}
+            className="h-full w-full border-none"
+            title={fileName}
+            style={{
+              transform: `scale(${scale}) rotate(${rotation}deg)`,
+              transformOrigin: 'center center',
+            }}
           />
         )}
       </div>
