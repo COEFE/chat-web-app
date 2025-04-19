@@ -2,8 +2,8 @@
 import React from 'react';
 
 // Simple mock for the PDFViewer component
-const PDFViewerMock = ({ documentUrl }) => {
-  return <div data-testid="pdf-viewer-mock">Mock PDF Viewer for: {documentUrl}</div>;
+const PDFViewerMock = ({ fileUrl, fileName }) => {
+  return <div data-testid="pdf-viewer-mock">Mock PDF Viewer for: {fileName || 'Document'} ({fileUrl})</div>;
 };
 
 export default PDFViewerMock;

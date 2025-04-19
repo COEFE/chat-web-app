@@ -442,7 +442,10 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
 
       {/* PDF Viewer */} 
       {!isLoading && !error && isPdf && document?.storagePath && (
-        <PDFViewer documentUrl={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}&v=${refreshKey}`} />
+        <PDFViewer 
+          fileUrl={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}&v=${refreshKey}`}
+          fileName={document.name || 'Document'}
+        />
       )}
 
       {/* Text Viewer */}
