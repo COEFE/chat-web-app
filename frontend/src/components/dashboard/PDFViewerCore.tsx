@@ -7,9 +7,10 @@ import { Download, X, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Document, Page, pdfjs } from 'react-pdf';
 
-// Configure PDF.js worker to use CDN-hosted version
+// Configure PDF.js worker to use CDN-hosted version with exact version
 if (typeof window !== 'undefined') {
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
+  // Use the exact version 3.4.120 which is known to be available
+  pdfjs.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js';
 }
 
 interface PDFViewerProps {
