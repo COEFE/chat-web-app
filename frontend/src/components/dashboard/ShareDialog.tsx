@@ -104,19 +104,16 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
         }
       }}
     >
-      <DialogContent className="sm:max-w-[480px]" ref={dialogContentRef}>
+      <DialogContent className="sm:max-w-[525px]" ref={dialogContentRef}>
         <DialogHeader>
-          <DialogTitle>Share "{documentName}"</DialogTitle>
+          <DialogTitle>Share Document: {documentName || "Document"}</DialogTitle>
           <DialogDescription>
-            Configure the settings and generate a shareable link.
+            Configure settings and generate a shareable link.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-6 py-4">
-          {/* Share Options Form */}
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="include-chat" className="text-right col-span-1">
-              Include Chat
-            </Label>
+        <div className="space-y-4 py-4">
+          {/* Include Chat Toggle */}
+          <div className="flex items-center justify-between gap-4">            
             <Switch
               id="include-chat"
               checked={includeChat}
@@ -126,22 +123,23 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
                   setIsChatActive(false); // Reset active chat if include chat is turned off
                 }
               }}
-              className="col-span-3"
             />
+            <Label htmlFor="include-chat" className="flex-grow"> 
+              Include Chat
+            </Label>
           </div>
 
           {/* Conditional Toggle for Active Chat */}
           {includeChat && (
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="enable-chat-interaction" className="text-right col-span-1 whitespace-nowrap">
-                Enable Chat Interaction
-              </Label>
+            <div className="flex items-center justify-between gap-4"> 
               <Switch
                 id="enable-chat-interaction"
                 checked={isChatActive}
                 onCheckedChange={setIsChatActive}
-                className="col-span-3"
               />
+              <Label htmlFor="enable-chat-interaction" className="flex-grow whitespace-nowrap"> 
+                Enable Chat Interaction
+              </Label>
             </div>
           )}
 
