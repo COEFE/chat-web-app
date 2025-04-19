@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { getShareDetails, verifySharePassword } from '@/lib/firebase/shares';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,33 @@ import { Loader2, FileText, Lock } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import PDFViewer from '@/components/dashboard/PDFViewer';
 import Link from 'next/link';
+
+// Error boundary component for handling rendering errors
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; fallback: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('Error in component:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+
+    return this.props.children;
+  }
+}
 
 // This interface should match the response from our API
 interface ShareDetails {

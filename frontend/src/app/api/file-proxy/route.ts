@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminStorage } from '@/lib/firebaseAdminConfig';
+import { getVercelStorage, initVercelFirebaseAdmin } from '@/lib/firebase/vercelAdmin';
 
 // CORS headers for all responses
 const corsHeaders = {
@@ -29,9 +29,10 @@ export async function GET(request: NextRequest) {
 
     console.log(`[file-proxy] Request for file: ${filePath}, userId: ${userId || 'not provided'}`);
 
-    // Use getAdminStorage() to get the correctly initialized storage instance
-    const storage = getAdminStorage();
-    const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app';
+    // Initialize Firebase Admin specifically for Vercel environment
+    initVercelFirebaseAdmin();
+    const storage = getVercelStorage();
+    const bucketName = process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com';
     console.log(`[file-proxy] Using bucket name: ${bucketName}`);
     const bucket = storage.bucket(bucketName);
     
