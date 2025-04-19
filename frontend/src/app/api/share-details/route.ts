@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { initializeFirebaseAdmin, getAdminDb } from '../../../lib/firebase/adminConfig';
+import { getVercelFirestore, initVercelFirebaseAdmin } from '../../../lib/firebase/vercelAdmin';
 
 // Set up CORS headers for all responses
 const corsHeaders = {
@@ -9,14 +9,14 @@ const corsHeaders = {
 };
 
 // Initialize Firebase Admin with try/catch for better error handling
-let db: FirebaseFirestore.Firestore;
+let db: FirebaseFirestore.Firestore | null = null;
 try {
-  console.log('[share-details] Initializing Firebase Admin...');
-  initializeFirebaseAdmin();
-  db = getAdminDb();
-  console.log('[share-details] Firebase Admin initialized successfully');
+  console.log('[share-details] Initializing Firebase Admin for Vercel...');
+  initVercelFirebaseAdmin();
+  db = getVercelFirestore();
+  console.log('[share-details] Firebase Admin initialized successfully for Vercel');
 } catch (error) {
-  console.error('[share-details] Error initializing Firebase Admin:', error);
+  console.error('[share-details] Error initializing Firebase Admin for Vercel:', error);
   // We'll handle this in the route handler
 }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { initializeFirebaseAdmin, getAdminDb } from '../../../lib/firebase/adminConfig';
+import { getVercelFirestore, initVercelFirebaseAdmin } from '../../../lib/firebase/vercelAdmin';
 import { randomBytes } from 'crypto';
 
 // Set up CORS headers for all responses
@@ -10,14 +10,14 @@ const corsHeaders = {
 };
 
 // Initialize Firebase Admin with try/catch for better error handling
-let db: FirebaseFirestore.Firestore;
+let db: FirebaseFirestore.Firestore | null = null;
 try {
-  console.log('[verify-password] Initializing Firebase Admin...');
-  initializeFirebaseAdmin();
-  db = getAdminDb();
-  console.log('[verify-password] Firebase Admin initialized successfully');
+  console.log('[verify-password] Initializing Firebase Admin for Vercel...');
+  initVercelFirebaseAdmin();
+  db = getVercelFirestore();
+  console.log('[verify-password] Firebase Admin initialized successfully for Vercel');
 } catch (error) {
-  console.error('[verify-password] Error initializing Firebase Admin:', error);
+  console.error('[verify-password] Error initializing Firebase Admin for Vercel:', error);
   // We'll handle this in the route handler
 }
 
