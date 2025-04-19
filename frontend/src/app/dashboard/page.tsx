@@ -73,7 +73,8 @@ import {
   Upload, 
   FolderPlus, 
   ArrowUpDown,
-  Menu
+  Menu,
+  Share2, // Add Share2
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 // Badge component removed
@@ -178,6 +179,8 @@ import {
   isThisMonth, 
   parse 
 } from 'date-fns'; // Restore necessary date-fns imports
+import { ShareDialog } from '@/components/dashboard/ShareDialog'; // Add this
+import { usePathname } from 'next/navigation';
 
 interface DocumentTableProps {
   data: FilesystemItem[];
@@ -198,6 +201,7 @@ interface DocumentTableProps {
   favoriteIds: Set<string>;
   handleToggleFavorite: (itemId: string, currentStatus: boolean) => Promise<void>;
   togglingFavoriteId: string | null;
+  onOpenShareDialog: (doc: { id: string; name: string }) => void; // Add the missing prop
 }
 
 const createColumns = (
@@ -211,7 +215,8 @@ const createColumns = (
   deletingId: string | null,
   favoriteIds: Set<string>,
   handleToggleFavorite: (itemId: string, currentStatus: boolean) => Promise<void>,
-  togglingFavoriteId: string | null
+  togglingFavoriteId: string | null,
+  onOpenShareDialog: (doc: { id: string; name: string }) => void // Add the missing prop
 ): ColumnDef<FilesystemItem>[] => {
   // Helper to get the appropriate icon based on item type and content type
   const getFileTypeIcon = (item: FilesystemItem) => {
@@ -457,12 +462,6 @@ const createColumns = (
             console.error("Error parsing date string:", dateValue, e);
             return 'Invalid Date Format';
           }
-        } else if (typeof dateValue === 'number') {
-          try {
-            date = new Date(dateValue);
-          } catch (e) {
-            return 'Invalid Date Format';
-          }
         } else {
           return 'Unknown Date Type';
         }
@@ -601,6 +600,23 @@ const createColumns = (
                       ? 'Remove from Favorites' 
                       : 'Add to Favorites'}
                 </DropdownMenuItem>
+                {/* --- Add Share Item Here --- */}
+                {item.type === 'document' && (
+                  <DropdownMenuItem
+                    onClick={(e) => { 
+                      e.stopPropagation(); // Prevent click-through
+                      // Delay opening the dialog to avoid focus conflicts
+                      setTimeout(() => {
+                        onOpenShareDialog({ id: item.id, name: item.name });
+                      }, 100); // 100ms delay
+                    }}
+                    className="cursor-pointer flex items-center gap-2 p-0"
+                  >
+                    <Share2 className="h-4 w-4" />
+                    <span>Share</span>
+                  </DropdownMenuItem>
+                )}
+                {/* --- End Share Item --- */}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -630,7 +646,8 @@ function DocumentTable({
   onDropItemIntoFolder,
   favoriteIds,
   handleToggleFavorite,
-  togglingFavoriteId
+  togglingFavoriteId,
+  onOpenShareDialog // Add the missing prop
 }: DocumentTableProps) {
   const [itemToDelete, setItemToDelete] = useState<FilesystemItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -675,9 +692,10 @@ function DocumentTable({
       deletingId, // Pass deletingId for visual feedback
       favoriteIds,
       handleToggleFavorite,
-      togglingFavoriteId
+      togglingFavoriteId,
+      onOpenShareDialog // Pass the handler
     ),
-    [onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, isDeleting, deletingId, favoriteIds, handleToggleFavorite, togglingFavoriteId]
+    [onSelectItem, onFolderClick, onMoveClick, onRenameFolder, onDeleteFolder, isDeleting, deletingId, favoriteIds, handleToggleFavorite, togglingFavoriteId, onOpenShareDialog]
   );
 
   // Helper to get the appropriate icon based on file type
@@ -1770,6 +1788,28 @@ function DashboardPage() {
     );
   }, [groupingOption]);
 
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [sharingDocument, setSharingDocument] = useState<{ id: string; name: string } | null>(null);
+
+  const handleOpenShareDialog = (doc: { id: string; name: string }) => {
+    setSharingDocument(doc);
+    setIsShareDialogOpen(true);
+  };
+
+  const handleCloseShareDialog = () => {
+    setIsShareDialogOpen(false);
+    setSharingDocument(null); // Clear immediately
+  };
+
+  const pathname = usePathname();
+
+  useEffect(() => {
+    if (isShareDialogOpen) {
+      handleCloseShareDialog();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]); // Dependency array includes pathname
+
   return (
     <div className="flex h-screen flex-col bg-muted/40 overflow-hidden">
       {/* Fixed header - Mobile optimized */}
@@ -1916,7 +1956,7 @@ function DashboardPage() {
                     {/* Favorites Dialog Trigger Button - Now First */}
                     <FavoritesDialog
                       trigger={
-                        <Button variant="outline" size="sm" className="h-9 gap-1 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2">
+                        <Button variant="outline" size="sm" className="h-9 gap-1 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0">
                         <Star className="h-3.5 w-3.5" />
                         <span className="sr-only sm:not-sr-only sm:whitespace-nowrap">
                           Favorites
@@ -2045,6 +2085,7 @@ function DashboardPage() {
                           favoriteIds={favoriteIds}
                           handleToggleFavorite={handleToggleFavorite}
                           togglingFavoriteId={togglingFavoriteId}
+                          onOpenShareDialog={handleOpenShareDialog} // Pass the handler
                         />
                       </DndProvider>
                     ) : (
@@ -2061,6 +2102,7 @@ function DashboardPage() {
                         favoriteIds={favoriteIds}
                         handleToggleFavorite={handleToggleFavorite}
                         togglingFavoriteId={togglingFavoriteId}
+                        onOpenShareDialog={handleOpenShareDialog} // Pass the handler
                       />
                     )}
                   </div>
@@ -2167,6 +2209,20 @@ function DashboardPage() {
         onConfirmMove={handleMoveConfirm} 
         isLoadingFolders={isLoadingFolders}
       />
+      {sharingDocument && (
+        <ShareDialog
+          documentId={sharingDocument.id}
+          documentName={sharingDocument.name}
+          open={isShareDialogOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              handleCloseShareDialog();
+            } else {
+              setIsShareDialogOpen(true);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

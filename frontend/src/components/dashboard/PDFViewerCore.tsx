@@ -7,10 +7,12 @@ import { Download, X, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Document, Page, pdfjs } from 'react-pdf';
 
-// Configure PDF.js worker to use CDN-hosted version with exact version
+// Set worker source to avoid version mismatch
 if (typeof window !== 'undefined') {
-  // Use the exact version 4.8.69 to match the installed pdfjs-dist package
-  pdfjs.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@4.8.69/build/pdf.worker.min.js';
+  // Use a CDN version of the worker that matches our PDF.js version (4.8.69)
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@4.8.69/build/pdf.worker.min.js`;
+  console.log('PDF.js version:', pdfjs.version);
+  console.log('Worker source:', pdfjs.GlobalWorkerOptions.workerSrc);
 }
 
 interface PDFViewerProps {
@@ -27,9 +29,8 @@ interface PDFViewerProps {
 
 // Default PDF.js options (stable identity)
 const defaultPdfOptions = Object.freeze({
-  cMapUrl: 'https://unpkg.com/pdfjs-dist@4.8.69/cmaps/',
+  // Let react-pdf handle the URLs based on the installed version
   cMapPacked: true,
-  standardFontDataUrl: 'https://unpkg.com/pdfjs-dist@4.8.69/standard_fonts/',
 });
 
 const PDFViewerCore: React.FC<PDFViewerProps> = ({ 

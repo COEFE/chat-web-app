@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(resource) {
+      return resource.data.ownerId == request.auth.uid;
+    }
+    
+    function hasShareAccess(documentId) {
+      return exists(/databases/$(database)/documents/shares/{shareId}) && 
+        get(/databases/$(database)/documents/shares/{shareId}).data.documentId == documentId;
+    }
+    
+    // Shares collection
+    match /shares/{shareId} {
+      // Only authenticated users can create shares
+      allow create: if isSignedIn();
+      
+      // Only the creator can update or delete shares
+      allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      
+      // Anyone with the link can read (we'll check expiration in the app)
+      allow read: if isSignedIn();
+    }
+    
+    // Documents collection
+    match /documents/{documentId} {
+      // Normal document access rules
+      allow read, write: if isSignedIn() && isOwner(resource);
+      
+      // Allow read if user has access via shares collection
+      allow read: if isSignedIn() && hasShareAccess(documentId);
+    }
+    
+    // Chats collection
+    match /chats/{chatId} {
+      // Normal chat access rules
+      allow read, write: if isSignedIn() && isOwner(resource);
+      
+      // Allow read if user has access via shares with chat history included
+      allow read: if isSignedIn() && 
+        exists(/databases/$(database)/documents/shares/{shareId}) && 
+        get(/databases/$(database)/documents/shares/{shareId}).data.includeChat == true &&
+        get(/databases/$(database)/documents/shares/{shareId}).data.documentId == resource.data.documentId;
+    }
+  }
+}

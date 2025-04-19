@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Folder, FileText, Loader2, Star, MoreHorizontal, Pencil, Move, Trash2 } from 'lucide-react';
+import { Folder, FileText, Loader2, Star, MoreHorizontal, Pencil, Move, Trash2, Share2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FilesystemItem } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,7 @@ interface DocumentGridProps {
   favoriteIds: Set<string>;
   handleToggleFavorite: (itemId: string, currentStatus: boolean) => Promise<void>;
   togglingFavoriteId: string | null;
+  onOpenShareDialog: (doc: { id: string; name: string }) => void; // Add prop for opening dialog
 }
 
 const DocumentGrid: React.FC<DocumentGridProps> = ({
@@ -43,6 +44,7 @@ const DocumentGrid: React.FC<DocumentGridProps> = ({
   favoriteIds,
   handleToggleFavorite,
   togglingFavoriteId,
+  onOpenShareDialog, // Destructure the new prop
 }) => {
 
   if (isLoading) {
@@ -146,6 +148,21 @@ const DocumentGrid: React.FC<DocumentGridProps> = ({
                       ? 'Remove from Favorites' 
                       : 'Add to Favorites'}
                 </DropdownMenuItem>
+                {item.type === 'document' && (
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation(); // Prevent click from bubbling to the grid item
+                      // Delay opening the dialog to avoid focus conflicts
+                      setTimeout(() => {
+                        onOpenShareDialog({ id: item.id, name: item.name }); // Call the prop handler
+                      }, 100); // 100ms delay
+                    }}
+                    className="cursor-pointer flex items-center gap-2"
+                  >
+                    <Share2 className="h-4 w-4" />
+                    <span>Share</span>
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
             <Button
