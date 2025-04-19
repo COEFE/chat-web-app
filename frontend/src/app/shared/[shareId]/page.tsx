@@ -12,6 +12,7 @@ import { useToast } from '@/components/ui/use-toast';
 import PDFViewer from '@/components/dashboard/PDFViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
 import Link from 'next/link';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 
 // Error boundary component for handling rendering errors
 class ErrorBoundary extends React.Component<
@@ -217,7 +218,6 @@ export default function SharedDocumentPage() {
     );
   }
   
-  // Document viewer
   return (
     <div className="flex flex-col min-h-screen">
       <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -231,60 +231,94 @@ export default function SharedDocumentPage() {
         </div>
       </header>
       
-      <main className="flex-1 container py-6">
-        {documentUrl && (
-          <div className="border rounded-lg overflow-hidden h-[calc(100vh-8rem)]">
-            {shareDetails?.documentPath?.toLowerCase().endsWith('.pdf') ? (
-              <ErrorBoundary fallback={
-                <div className="flex flex-col items-center justify-center p-8 text-center h-full">
-                  <FileText className="h-16 w-16 text-gray-400 mb-4" />
-                  <h3 className="text-lg font-medium">Unable to load PDF</h3>
-                  <p className="text-sm text-gray-500 mt-2">
-                    There was an error loading this document. It may be unavailable or require special permissions.
-                  </p>
-                </div>
-              }>
-                <PDFViewer fileUrl={documentUrl} />
-              </ErrorBoundary>
-            ) : (
-              <ErrorBoundary fallback={
-                <div className="flex flex-col items-center justify-center p-8 text-center h-full">
-                  <FileText className="h-16 w-16 text-gray-400 mb-4" />
-                  <h3 className="text-lg font-medium">Unable to load document</h3>
-                  <p className="text-sm text-gray-500 mt-2">
-                    There was an error loading this document. It may be unavailable or require special permissions.
-                  </p>
-                </div>
-              }>
-                <iframe 
-                  src={documentUrl}
-                  className="w-full h-full"
-                  title={shareDetails?.documentName || 'Shared Document'}
-                  onError={() => console.error('Error loading document iframe')}
-                />
-              </ErrorBoundary>
-            )}
-          </div>
-        )}
-        
-        {accessGranted && shareDetails?.includeChat && shareDetails.documentId && (
-          <ChatInterface 
-            documentId={shareDetails.documentId} 
-            isReadOnly={!shareDetails.isChatActive} 
-          />
-        )}
-        
-        {!documentUrl && (
-          <div className="flex items-center justify-center h-[calc(100vh-8rem)]">
-            <Card>
+      <main className="flex-1 flex flex-col container py-4"> 
+        {error && (
+          <div className="flex items-center justify-center flex-1">
+            <Card className="w-full max-w-md">
               <CardHeader>
-                <CardTitle>Document Unavailable</CardTitle>
+                <CardTitle>Error Loading Document</CardTitle>
               </CardHeader>
               <CardContent>
-                <p>The document content could not be loaded.</p>
+                <p>{error}</p>
               </CardContent>
             </Card>
           </div>
+        )}
+        
+        {accessGranted && !error && (
+          shareDetails?.includeChat ? (
+            // Split View: Document + Chat
+            <ResizablePanelGroup 
+              direction="horizontal"
+              className="flex-1 rounded-lg border overflow-hidden" 
+            >
+              <ResizablePanel defaultSize={60} minSize={30}> 
+                <div className="flex h-full items-center justify-center p-1"> 
+                  {documentUrl ? (
+                    shareDetails?.documentPath?.toLowerCase().endsWith('.pdf') ? (
+                      <ErrorBoundary fallback={<div>Error loading PDF.</div>}> 
+                        <PDFViewer fileUrl={documentUrl} />
+                      </ErrorBoundary>
+                    ) : (
+                      <ErrorBoundary fallback={<div>Error loading document.</div>}> 
+                        <iframe 
+                          src={documentUrl}
+                          className="w-full h-full"
+                          title={shareDetails?.documentName || 'Shared Document'}
+                          onError={() => console.error('Error loading document iframe')}
+                        />
+                      </ErrorBoundary>
+                    )
+                  ) : (
+                    <div className="flex items-center justify-center h-full"> 
+                      <Card>
+                        <CardHeader><CardTitle>Document Unavailable</CardTitle></CardHeader>
+                        <CardContent><p>Content could not be loaded.</p></CardContent>
+                      </Card>
+                    </div>
+                  )}
+                </div>
+              </ResizablePanel>
+              <ResizableHandle withHandle />
+              <ResizablePanel defaultSize={40} minSize={25}> 
+                <div className="flex h-full flex-col"> 
+                  {shareDetails.documentId && (
+                    <ChatInterface 
+                      documentId={shareDetails.documentId} 
+                      isReadOnly={!shareDetails.isChatActive}
+                    />
+                  )}
+                </div>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          ) : (
+            // Document Only View
+            <div className="flex-1 border rounded-lg overflow-hidden"> 
+              {documentUrl ? (
+                shareDetails?.documentPath?.toLowerCase().endsWith('.pdf') ? (
+                  <ErrorBoundary fallback={<div>Error loading PDF.</div>}> 
+                    <PDFViewer fileUrl={documentUrl} />
+                  </ErrorBoundary>
+                ) : (
+                  <ErrorBoundary fallback={<div>Error loading document.</div>}> 
+                    <iframe 
+                      src={documentUrl}
+                      className="w-full h-full"
+                      title={shareDetails?.documentName || 'Shared Document'}
+                      onError={() => console.error('Error loading document iframe')}
+                    />
+                  </ErrorBoundary>
+                )
+              ) : (
+                <div className="flex items-center justify-center h-full"> 
+                  <Card>
+                    <CardHeader><CardTitle>Document Unavailable</CardTitle></CardHeader>
+                    <CardContent><p>Content could not be loaded.</p></CardContent>
+                  </Card>
+                </div>
+              )}
+            </div>
+          )
         )}
       </main>
     </div>
