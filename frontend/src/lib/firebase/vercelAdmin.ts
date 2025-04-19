@@ -41,6 +41,9 @@ export function initVercelFirebaseAdmin() {
     
     // Try to use service account key if available
     const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+
+    console.log(`[VercelAdmin] Checking FIREBASE_SERVICE_ACCOUNT_KEY: Defined=${!!serviceAccountKey}, Length=${serviceAccountKey?.length ?? 0}`);
+
     if (serviceAccountKey) {
       try {
         console.log('[VercelAdmin] Found service account key, attempting to parse...');
