@@ -7,6 +7,9 @@ import { signInWithGoogleEnhanced } from '@/lib/customAuthProvider';
 import { auth } from '@/lib/firebaseConfig'; // Import the initialized auth instance
 import { Button } from '@/components/ui/button'; // Using Shadcn Button
 import { useAuth } from '@/context/AuthContext'; // Import the useAuth hook
+import EmailPasswordForm from '@/components/auth/EmailPasswordForm';
+import { Separator } from '@/components/ui/separator';
+import { FcGoogle } from 'react-icons/fc';
 
 export default function LoginPage() {
   const router = useRouter(); // Initialize the router hook
@@ -71,11 +74,11 @@ export default function LoginPage() {
 
   // Render login form only if not loading and not logged in
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center">
-      <div className="w-full max-w-md p-8 space-y-8 rounded-xl shadow-md">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-muted/30">
+      <div className="w-full max-w-md p-8 space-y-6 rounded-xl shadow-md bg-card">
         <div className="text-center">
           <h1 className="text-2xl font-bold">Welcome</h1>
-          <p className="mt-2 text-gray-600">Sign in to your account</p>
+          <p className="mt-2 text-muted-foreground">Sign in to your account</p>
         </div>
         
         {error && (
@@ -84,13 +87,27 @@ export default function LoginPage() {
           </div>
         )}
         
+        {/* Email/Password Authentication Form */}
+        <EmailPasswordForm />
+        
+        <div className="relative my-4">
+          <div className="absolute inset-0 flex items-center">
+            <Separator className="w-full" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+          </div>
+        </div>
+        
+        {/* Google Sign In Button */}
         <Button 
           onClick={handleGoogleSignIn}
-          className="w-full flex items-center justify-center"
+          variant="outline"
+          className="w-full flex items-center justify-center gap-2"
         >
+          <FcGoogle className="h-5 w-5" />
           Sign in with Google
         </Button>
-        {/* TODO: Add other login methods if needed (e.g., Email/Password) */}
       </div>
     </div>
   );
