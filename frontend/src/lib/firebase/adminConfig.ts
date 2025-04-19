@@ -15,6 +15,7 @@ export function initializeFirebaseAdmin(): admin.app.App {
   }
 
   try {
+    // Initialize with default configuration for Next.js
     firebaseApp = admin.initializeApp({
       projectId: process.env.FIREBASE_PROJECT_ID || 'web-chat-app-fa7f0',
       storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com'
@@ -58,3 +59,5 @@ export function getAdminAuth(): admin.auth.Auth {
   const app = getFirebaseAdmin();
   return app.auth();
 }
+
+export default admin;

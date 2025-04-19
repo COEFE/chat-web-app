@@ -70,7 +70,7 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
     try {
       // Assuming createShareLink returns an object like { id: 'shareId' }
       const result = await createShareLink(options);
-      const generatedLink = `${window.location.origin}/share/${result.id}`;
+      const generatedLink = `${window.location.origin}/shared/${result.id}`;
       setShareLink(generatedLink);
     } catch (err: any) {
       console.error("Error creating share link:", err);

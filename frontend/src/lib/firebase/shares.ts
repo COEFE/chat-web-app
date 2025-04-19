@@ -52,73 +52,79 @@ export const createShareLink = async (
 };
 
 /**
- * Calls the 'verifySharePassword' Firebase Cloud Function.
+ * Verifies a share password using the server-side API route.
  */
 export const verifySharePassword = async (
     shareId: string,
     passwordAttempt: string
 ): Promise<VerifySharePasswordOutput> => {
-    if (!functionsInstance) throw new Error("Firebase Functions not initialized.");
-
-    const verifyPasswordFunction = httpsCallable<VerifySharePasswordInput, VerifySharePasswordOutput>(
-        functionsInstance,
-        'verifySharePassword' // MUST match deployed function name
-    );
-
     try {
         console.log(`Calling verifySharePassword for shareId: ${shareId}`);
-        const result = await verifyPasswordFunction({ shareId, passwordAttempt });
-        console.log("verifySharePassword result:", result.data);
-
-        if (!result.data) {
-            throw new Error("Invalid response from verifySharePassword function.");
+        
+        // Use our server-side API route instead of calling the Cloud Function directly
+        const response = await fetch('/api/verify-share-password', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ shareId, password: passwordAttempt }),
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.log("Verification failed with message:", errorData.error);
+            return {
+                accessGranted: false,
+            };
         }
+        
+        const data = await response.json();
+        console.log("verifySharePassword result:", data);
+        
         // Returns { accessGranted: boolean, token?: string }
-        return result.data;
+        return data;
     } catch (error: any) {
         console.error("Error calling verifySharePassword function:", error);
-        // Return access denied on error to be safe, maybe include error message?
-        // Check if the error structure includes a specific message from the function
-        const message = error.details?.message || error.message || 'Verification failed';
+        const message = error.message || 'Verification failed';
         console.log("Verification failed with message:", message);
         return {
             accessGranted: false,
-            // Pass the error message back if available
-            // error: message
-         };
+        };
     }
 };
 
 
 /**
- * Calls the 'getShareDetails' Firebase Cloud Function.
+ * Gets share details using the server-side API route.
  * Handles password verification implicitly if needed via passwordToken.
  */
 export const getShareDetails = async (
     shareId: string,
     passwordToken?: string
 ): Promise<GetShareDetailsOutput> => {
-     if (!functionsInstance) throw new Error("Firebase Functions not initialized.");
-
-     const getDetailsFunction = httpsCallable<GetShareDetailsInput, GetShareDetailsOutput>(
-         functionsInstance,
-         'getShareDetails' // MUST match deployed function name
-     );
-
      try {
-         console.log(`Calling getShareDetails for shareId: ${shareId} ${passwordToken ? 'with token' : ''}`);
-         const result = await getDetailsFunction({ shareId, passwordToken });
-         console.log("getShareDetails result:", result.data);
-
-         if (!result.data || !result.data.id) {
-            throw new Error("Invalid response from getShareDetails function.");
+         console.log(`Calling getShareDetails for shareId: ${shareId}`);
+         
+         // Use our server-side API route instead of calling the Cloud Function directly
+         const response = await fetch('/api/share-details', {
+             method: 'POST',
+             headers: {
+                 'Content-Type': 'application/json',
+             },
+             body: JSON.stringify({ shareId, passwordToken }),
+         });
+         
+         if (!response.ok) {
+             const errorData = await response.json();
+             throw new Error(errorData.error || 'Failed to get share details');
          }
-
-         return result.data; // Contains ShareDetails + requiresPassword
+         
+         const data = await response.json();
+         console.log("getShareDetails result:", data);
+         
+         return data;
      } catch (error: any) {
          console.error("Error calling getShareDetails function:", error);
-         // Rethrow or handle specific errors (e.g., 'not-found', 'permission-denied', 'invalid-password-token')
-         // Let the caller handle the error based on code/message
          throw error;
      }
- };
+};

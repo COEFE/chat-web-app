@@ -427,8 +427,8 @@ export const createShare = onCall(async (request: CallableRequest<CreateShareReq
   const userId = request.auth.uid;
 
   try {
-    // Verify document exists
-    const docRef = db.collection("documents").doc(documentId);
+    // Verify document exists - look in the user's documents subcollection
+    const docRef = db.collection("users").doc(userId).collection("documents").doc(documentId);
     const docSnap = await docRef.get();
 
     if (!docSnap.exists) {
@@ -441,7 +441,7 @@ export const createShare = onCall(async (request: CallableRequest<CreateShareReq
     }
 
     // Verify document ownership
-    if (docData.ownerId !== userId) {
+    if (docData.userId !== userId) {
       throw new HttpsError(
         "permission-denied",
         "You do not have permission to share this document"
@@ -459,7 +459,7 @@ export const createShare = onCall(async (request: CallableRequest<CreateShareReq
       id: shareId,
       documentId,
       documentName: docData.name,
-      documentPath: docData.path,
+      documentPath: docData.storagePath, // Changed from path to storagePath to match document structure
       createdBy: userId,
       createdAt: Date.now(),
       expiresAt,

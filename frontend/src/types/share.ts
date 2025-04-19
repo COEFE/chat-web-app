@@ -72,6 +72,12 @@ export interface GetShareDetailsInput {
 }
 
 // Output type for the 'getShareDetails' Cloud Function
-export interface GetShareDetailsOutput extends ShareDetails {
-    // May include other non-sensitive fields relevant for the shared view
+export interface GetShareDetailsOutput {
+  documentId: string;
+  documentName: string;
+  documentPath: string;
+  expiresAt: number | null;
+  includeChat: boolean;
+  accessType: "view" | "comment";
+  password: boolean | null;
 }
