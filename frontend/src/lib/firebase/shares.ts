@@ -52,6 +52,21 @@ export const createShareLink = async (
 };
 
 /**
+ * Gets the base URL for API calls, ensuring it works in both development and production
+ */
+const getBaseUrl = () => {
+    // Check if we're in the browser
+    if (typeof window !== 'undefined') {
+        // Use the current window location as the base
+        return window.location.origin;
+    }
+    // Fallback for server-side rendering
+    return process.env.NEXT_PUBLIC_VERCEL_URL ? 
+        `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : 
+        'http://localhost:3000';
+};
+
+/**
  * Verifies a share password using the server-side API route.
  */
 export const verifySharePassword = async (
@@ -61,8 +76,11 @@ export const verifySharePassword = async (
     try {
         console.log(`Calling verifySharePassword for shareId: ${shareId}`);
         
+        const baseUrl = getBaseUrl();
+        console.log(`Using base URL: ${baseUrl}`);
+        
         // Use our server-side API route instead of calling the Cloud Function directly
-        const response = await fetch('/api/verify-share-password', {
+        const response = await fetch(`${baseUrl}/api/verify-share-password`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -105,8 +123,11 @@ export const getShareDetails = async (
      try {
          console.log(`Calling getShareDetails for shareId: ${shareId}`);
          
+         const baseUrl = getBaseUrl();
+         console.log(`Using base URL for share details: ${baseUrl}`);
+         
          // Use our server-side API route instead of calling the Cloud Function directly
-         const response = await fetch('/api/share-details', {
+         const response = await fetch(`${baseUrl}/api/share-details`, {
              method: 'POST',
              headers: {
                  'Content-Type': 'application/json',
