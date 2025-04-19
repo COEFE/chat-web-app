@@ -20,9 +20,10 @@ interface ChatInterfaceProps {
   // Optional additional properties for multi-document support
   additionalDocuments?: MyDocumentData[];
   isReadOnly?: boolean; // Add optional read-only prop
+  className?: string; // Add optional className prop
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, additionalDocuments = [], isReadOnly = false }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, additionalDocuments = [], isReadOnly = false, className }) => {
   // Combine primary document with additional documents for context
   const allDocuments = document ? [document, ...additionalDocuments] : additionalDocuments;
   // Get all document IDs for the API call
@@ -195,7 +196,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
   };
 
   return (
-    <Card className="flex flex-col h-full w-full"> {/* Restored h-full, needed for proper layout */}
+    <Card className={cn("flex flex-col h-full w-full bg-background", className)}> {/* Combined changes */}
       <CardHeader className="p-0"> {/* Removed padding */}
         <CardTitle 
           className="truncate" 
