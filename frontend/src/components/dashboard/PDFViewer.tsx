@@ -1,319 +1,258 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useAuth } from '@/context/AuthContext';
+import { 
+  Download, 
+  ExternalLink, 
+  X,
+  AlertCircle
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Download, X, ExternalLink, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn } from '@/lib/utils'; 
+import * as pdfjsLib from 'pdfjs-dist';
+import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
+
+// Use the locally served worker file
+pdfjsLib.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs`;
 
 interface PDFViewerProps {
-  fileUrl: string;
+  fileUrl: string; 
   fileName?: string;
   onClose?: () => void;
   className?: string;
 }
 
-const PDFViewer: React.FC<PDFViewerProps> = ({ fileUrl, fileName = 'document.pdf', onClose, className }) => {
-  const { user } = useAuth();
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+const PDFViewer: React.FC<PDFViewerProps> = ({
+  fileUrl,
+  fileName,
+  onClose,
+  className,
+}) => {
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
-  const [scale, setScale] = useState(1.0); // Add state for zoom level
-  const [rotation, setRotation] = useState(0); // Add state for rotation
-  const [currentPage, setCurrentPage] = useState(1); // Current page number
-  const [totalPages, setTotalPages] = useState(0); // Total number of pages
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  
-  // Detect mobile devices
+  const [numPages, setNumPages] = useState<number>(0);
+  const [currentPage, setCurrentPage] = useState<number>(1); 
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pdfDocRef = useRef<PDFDocumentProxy | null>(null); 
+  const renderTaskRef = useRef<RenderTask | null>(null); 
+
   useEffect(() => {
-    const checkMobile = () => {
-      const userAgent = navigator.userAgent.toLowerCase();
-      const isMobileDevice = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
-      setIsMobile(isMobileDevice);
-    };
-    
-    checkMobile();
-  }, []);
+    const loadPdf = async () => {
+      setIsLoading(true);
+      setError(null);
+      setNumPages(0);
+      setCurrentPage(1);
 
-  // Effect to fetch PDF and create object URL - only runs when fileUrl changes
-  useEffect(() => {
-    if (!fileUrl) {
-      setError("No file URL provided");
-      return;
-    }
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel();
+        renderTaskRef.current = null;
+      }
 
-    let isMounted = true;
-    setIsLoading(true);
-    setError(null);
+      if (pdfDocRef.current) {
+        await pdfDocRef.current.destroy();
+        pdfDocRef.current = null;
+      }
 
-    // Clean up any existing object URL before creating a new one
-    if (objectUrl) {
-      URL.revokeObjectURL(objectUrl);
-      setObjectUrl(null);
-    }
-
-    const fetchPdf = async () => {
       try {
-        console.log('Fetching PDF from:', fileUrl);
+        console.log(`Fetching PDF from: ${fileUrl}`);
         const response = await fetch(fileUrl);
-        
         if (!response.ok) {
-          throw new Error(`Failed to fetch PDF: ${response.status} ${response.statusText}`);
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
+        const pdfData = await response.arrayBuffer();
 
-        const contentType = response.headers.get('content-type');
-        console.log('Content type:', contentType);
-        
-        if (!contentType || !contentType.includes('application/pdf')) {
-          console.warn(`Expected PDF but got ${contentType}`);
-        }
-
-        const blob = await response.blob();
-        console.log('Blob size:', blob.size, 'bytes');
-        
-        if (!isMounted) return;
-        
-        // Create object URL from blob
-        const url = URL.createObjectURL(blob);
-        console.log('Created object URL for PDF:', url);
-        setObjectUrl(url);
+        console.log('Loading PDF document...');
+        const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+        const pdf = await loadingTask.promise;
+        pdfDocRef.current = pdf; 
+        console.log(`PDF loaded with ${pdf.numPages} pages.`);
+        setNumPages(pdf.numPages);
         setIsLoading(false);
-      } catch (err) {
-        console.error('Error fetching PDF:', err);
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : 'Failed to load PDF');
-          setIsLoading(false);
+
+      } catch (err: any) {
+        console.error('Failed to load or render PDF:', err);
+        setError(
+          `Failed to load PDF: ${err.message || 'Unknown error'}. Please try downloading or opening in a new tab.`
+        );
+        setIsLoading(false);
+        setNumPages(0);
+      }
+    };
+
+    loadPdf();
+
+    return () => {
+        if (renderTaskRef.current) {
+            renderTaskRef.current.cancel();
+            renderTaskRef.current = null;
+        }
+        pdfDocRef.current?.destroy();
+        pdfDocRef.current = null;
+    };
+  }, [fileUrl]); 
+
+  useEffect(() => {
+    const renderPage = async () => {
+      if (!pdfDocRef.current || !canvasRef.current || numPages === 0) {
+        return; 
+      }
+
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel();
+      }
+
+      try {
+        const pageNumber = Math.max(1, Math.min(currentPage, numPages)); 
+        console.log(`Rendering page ${pageNumber}...`);
+        const page: PDFPageProxy = await pdfDocRef.current.getPage(pageNumber);
+
+        const canvas = canvasRef.current;
+        const context = canvas.getContext('2d');
+        if (!context) {
+          throw new Error('Could not get canvas context');
+        }
+
+        const desiredWidth = canvas.parentElement?.clientWidth || 800; 
+        const viewport = page.getViewport({ scale: 1 }); 
+        const scale = desiredWidth / viewport.width;
+        const scaledViewport = page.getViewport({ scale });
+
+        canvas.width = Math.floor(scaledViewport.width * (window.devicePixelRatio || 1));
+        canvas.height = Math.floor(scaledViewport.height * (window.devicePixelRatio || 1));
+        canvas.style.width = `${Math.floor(scaledViewport.width)}px`;
+        canvas.style.height = `${Math.floor(scaledViewport.height)}px`;
+
+        const transform = (window.devicePixelRatio || 1) !== 1 ? [window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0] : undefined;
+
+        const renderContext = {
+          canvasContext: context,
+          viewport: scaledViewport,
+          transform: transform, 
+        };
+        
+        renderTaskRef.current = page.render(renderContext);
+        await renderTaskRef.current.promise;
+        renderTaskRef.current = null; 
+        console.log(`Page ${pageNumber} rendered.`);
+
+      } catch (err: any) {
+        if (err.name !== 'RenderingCancelledException') {
+            console.error(`Failed to render page ${currentPage}:`, err);
+            setError(`Failed to render page ${currentPage}: ${err.message}`);
         }
       }
     };
 
-    fetchPdf();
+    renderPage();
 
-    // Cleanup function
-    return () => {
-      isMounted = false;
-      if (objectUrl) {
-        console.log('Cleanup: Revoking object URL');
-        URL.revokeObjectURL(objectUrl);
-      }
-    };
-  }, [fileUrl]); // Only depend on fileUrl, not objectUrl
+  }, [pdfDocRef, currentPage, numPages, canvasRef]); 
 
-  const handleDownload = () => {
-    if (fileUrl) {
-      // For download, use the original fileUrl with download=true parameter
-      const downloadUrl = fileUrl.includes('?') 
-        ? `${fileUrl}&download=true` 
-        : `${fileUrl}?download=true`;
-      
-      console.log('Attempting download via URL:', downloadUrl);
-      window.open(downloadUrl, '_blank');
-    } else {
-      console.error('Cannot download: fileUrl is missing');
-    }
+  const goToPreviousPage = () => {
+    setCurrentPage((prev) => Math.max(1, prev - 1));
   };
 
-  const handleOpenInNewTab = () => {
-    // Always use the original fileUrl for opening in a new tab
-    // as blob URLs won't work in a new tab context
-    if (fileUrl) {
-      window.open(fileUrl, '_blank');
-    }
-  };
-  
-  // Zoom functions
-  const zoomIn = () => {
-    setScale(prevScale => Math.min(prevScale + 0.2, 3.0)); // Limit max zoom to 3x
-  };
-
-  const zoomOut = () => {
-    setScale(prevScale => Math.max(prevScale - 0.2, 0.5)); // Limit min zoom to 0.5x
-  };
-
-  const resetZoom = () => {
-    setScale(1.0);
-  };
-  
-  // Rotation function
-  const rotate = () => {
-    setRotation(prevRotation => (prevRotation + 90) % 360); // Rotate 90 degrees clockwise (0, 90, 180, 270, 0, ...)
-  };
-  
-  // Page navigation functions
-  // Note: These won't work with the iframe approach, but we'll keep them for UI consistency
   const goToNextPage = () => {
-    // Not functional with iframe
-  };
-  
-  const goToPrevPage = () => {
-    // Not functional with iframe
-  };
-  
-  // We don't have access to document loaded event with iframe
-  // So we'll use a simpler approach for page navigation
-  
-  // State for page input field
-  const [pageInputValue, setPageInputValue] = useState('1');
-  
-  // Update page input when current page changes
-  useEffect(() => {
-    setPageInputValue(currentPage.toString());
-  }, [currentPage]);
-  
-  // Handle page input change
-  const handlePageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Allow any input, even if temporarily invalid
-    setPageInputValue(e.target.value);
-  };
-  
-  // Handle page input blur or enter key
-  const handlePageInputSubmit = (e: React.KeyboardEvent<HTMLInputElement> | React.FocusEvent<HTMLInputElement>) => {
-    if (e.type === 'keydown' && (e as React.KeyboardEvent<HTMLInputElement>).key !== 'Enter') {
-      return; // Only process on Enter key for keydown events
-    }
-    
-    const value = parseInt(pageInputValue);
-    if (!isNaN(value) && value >= 1 && value <= totalPages) {
-      console.log('Navigating to page:', value);
-      setCurrentPage(value);
-    } else {
-      // Reset to current page if invalid input
-      setPageInputValue(currentPage.toString());
-    }
+    setCurrentPage((prev) => Math.min(numPages, prev + 1));
   };
 
   return (
-    <div className={cn('relative flex flex-col h-full w-full bg-gray-100 dark:bg-gray-900', className)}>
+    <div className={cn(
+      'flex flex-col w-full h-full bg-white dark:bg-gray-900 rounded-md shadow-md overflow-hidden',
+      className
+    )}>
       {/* Header with controls */}
-      <div className="flex items-center justify-between p-2 bg-gray-200 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-700">
-        <div className="flex-1"></div> {/* Empty div to push controls to the right */}
+      <div className="flex items-center justify-between p-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        <div className="text-sm font-medium truncate flex-grow px-2">
+          {fileName || 'PDF Document'}
+        </div>
+        
+        {/* Right Controls */}
         <div className="flex items-center space-x-1">
-          {/* Zoom controls */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={zoomOut}
-            title="Zoom Out"
-            disabled={isLoading || !!error}
+          <a
+            href={fileUrl}
+            download={fileName || 'document.pdf'}
+            className="inline-flex items-center justify-center h-8 w-8 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground"
+            title="Download PDF"
           >
-            <ZoomOut className="h-4 w-4" />
-          </Button>
+            <Download className="h-4 w-4" />
+          </a>
           
-          <span className="text-xs font-medium px-1 min-w-[40px] text-center">
-            {Math.round(scale * 100)}%
-          </span>
-          
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={zoomIn}
-            title="Zoom In"
-            disabled={isLoading || !!error}
-          >
-            <ZoomIn className="h-4 w-4" />
-          </Button>
-          
-          {/* Rotate button */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={rotate}
-            title="Rotate 90°"
-            disabled={isLoading || !!error}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-              <path d="M3 3v5h5"></path>
-            </svg>
-          </Button>
-          
-          {/* Removed page navigation as it's not functional with iframe */}
-          
-          {/* Open in new tab button */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleOpenInNewTab}
+          <a
+            href={fileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center h-8 w-8 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground"
             title="Open in New Tab"
           >
             <ExternalLink className="h-4 w-4" />
-          </Button>
+          </a>
           
-          {/* Download button */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleDownload}
-            title="Download PDF"
-            disabled={isLoading}
-          >
-            <Download className="h-4 w-4" />
-          </Button>
-          
-          {/* Close button */}
           {onClose && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              title="Close Viewer"
-            >
+            <Button variant="ghost" size="icon" onClick={onClose} title="Close Viewer">
               <X className="h-4 w-4" />
             </Button>
           )}
         </div>
       </div>
-
-      {/* PDF content area */}
-      <div className="flex-grow relative overflow-y-auto bg-gray-500">
-        {/* Loading state */}
+      
+      {/* Main content area */}
+      <div className="flex-grow relative">
         {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center text-white">
-            <div className="text-center">
-              <div className="mb-2">Loading PDF...</div>
-              <div className="text-sm text-gray-300">This may take a moment</div>
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-50 dark:bg-gray-900 z-10">
+            <div className="text-center p-4">
+              <div className="animate-spin h-8 w-8 border-4 border-gray-300 dark:border-gray-600 border-t-blue-600 rounded-full mx-auto mb-2"></div>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Loading PDF...</p>
             </div>
           </div>
         )}
         
-        {/* Error state */}
         {error && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-white p-4">
-            <p className="mb-4">Error loading PDF: {error}</p>
-            <div className="flex flex-col md:flex-row space-y-2 md:space-y-0 md:space-x-4">
-              <Button 
-                variant="outline" 
-                onClick={handleOpenInNewTab}
-                className="bg-gray-700 hover:bg-gray-600"
-              >
-                <ExternalLink className="mr-2 h-4 w-4" />
-                Open in New Tab
-              </Button>
-              <Button 
-                variant="outline" 
-                onClick={handleDownload}
-                className="bg-gray-700 hover:bg-gray-600"
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Download
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-50 dark:bg-gray-900 z-10">
+            <div className="text-center p-4 max-w-md">
+              <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-2" />
+              <p className="text-sm text-red-600 dark:text-red-400 mb-2">{error}</p>
+              <Button variant="outline" size="sm" onClick={() => window.open(fileUrl, '_blank')}>
+                Try Opening Directly
               </Button>
             </div>
           </div>
         )}
         
-        {/* PDF viewer using iframe */}
-        {!isLoading && !error && objectUrl && (
-          <iframe
-            ref={iframeRef}
-            src={objectUrl}
-            className="h-full w-full border-none"
-            title={fileName}
-            style={{
-              transform: `scale(${scale}) rotate(${rotation}deg)`,
-              transformOrigin: 'center center',
-            }}
-          />
+        {/* PDF Canvas */}
+        <canvas 
+          ref={canvasRef}
+          className={`w-full h-full border-0 ${isLoading || error ? 'hidden' : 'block'}`}
+          style={{ 
+            display: 'block',
+            backgroundColor: '#f5f5f5'
+          }}
+        />
+        
+        {/* Pagination Controls */}
+        {numPages > 0 && (
+          <div className="absolute bottom-0 left-0 right-0 p-2 bg-gray-100 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <button
+              onClick={goToPreviousPage}
+              disabled={currentPage <= 1 || isLoading}
+              className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              title="Previous page"
+              aria-label="Previous page"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+            </button>
+            <span className="text-sm font-medium text-gray-700 w-16 text-center">
+              {currentPage} / {numPages}
+            </span>
+            <button
+              onClick={goToNextPage}
+              disabled={currentPage >= numPages || isLoading}
+              className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              title="Next page"
+              aria-label="Next page"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+            </button>
+          </div>
         )}
       </div>
     </div>
