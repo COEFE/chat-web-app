@@ -9,8 +9,8 @@ import { Document, Page, pdfjs } from 'react-pdf';
 
 // Configure PDF.js worker to use CDN-hosted version with exact version
 if (typeof window !== 'undefined') {
-  // Use the exact version 3.4.120 which is known to be available
-  pdfjs.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js';
+  // Use the exact version 4.8.69 to match the installed pdfjs-dist package
+  pdfjs.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@4.8.69/build/pdf.worker.min.js';
 }
 
 interface PDFViewerProps {
@@ -27,9 +27,9 @@ interface PDFViewerProps {
 
 // Default PDF.js options (stable identity)
 const defaultPdfOptions = Object.freeze({
-  cMapUrl: 'https://unpkg.com/pdfjs-dist@3.4.120/cmaps/',
+  cMapUrl: 'https://unpkg.com/pdfjs-dist@4.8.69/cmaps/',
   cMapPacked: true,
-  standardFontDataUrl: 'https://unpkg.com/pdfjs-dist@3.4.120/standard_fonts/',
+  standardFontDataUrl: 'https://unpkg.com/pdfjs-dist@4.8.69/standard_fonts/',
 });
 
 const PDFViewerCore: React.FC<PDFViewerProps> = ({ 
