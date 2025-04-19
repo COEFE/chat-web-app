@@ -283,7 +283,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
           </div> {/* End padding div */}
         </ScrollArea>
       </CardContent>
-      <CardFooter className="p-3 sm:p-4"> {/* Responsive padding */}
+      <CardFooter className="p-2 sm:p-3 border-t"> {/* Reduced padding for more compact footer */}
         <form onSubmit={handleSubmit} className="flex w-full items-center space-x-2">
           <Textarea
             value={input}
@@ -291,7 +291,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
             placeholder={isReadOnly ? "Chat is read-only" : "Type your message..."} // Change placeholder when read-only
             disabled={isLoading || isReadOnly} // Disable input if read-only
             onKeyDown={handleKeyDown} // Add keydown handler
-            className="flex-1 resize-none" // Use resize-none for now
+            className="flex-1 resize-none min-h-[40px] max-h-[80px] py-2" // Constrained height, reduced padding
             rows={1} // Start with a single row
           />
           <Button ref={submitButtonRef} type="submit" size="icon" disabled={isLoading || !input.trim() || isReadOnly} aria-label="Send message">

@@ -207,7 +207,7 @@ export default function DocumentChatPage() {
 
   // Get the active document for rendering
   const activeDocument = documents.find(doc => doc.id === activeDocumentId);
-  
+
   return (
     <div className="flex h-screen flex-col bg-muted/40">
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:px-6">
@@ -311,13 +311,13 @@ export default function DocumentChatPage() {
           {/* Chat Interface Container */}
           {/* Desktop: Takes 30%, Mobile: Fixed overlay panel */}
           <div className={cn(
-            "h-full flex flex-col transition-transform duration-300 ease-in-out",
+            "transition-transform duration-300 ease-in-out",
             isMaximized ? 'hidden' :
             isMobile ? [
-              'fixed top-14 right-0 bottom-0 z-40 w-full max-w-md bg-background border-l shadow-lg',
+              'fixed inset-y-14 right-0 z-40 w-full max-w-md bg-background border-l shadow-lg flex flex-col', 
               isChatVisibleMobile ? 'translate-x-0' : 'translate-x-full'
             ] :
-            'w-[30%]'
+            'h-full w-[30%] flex flex-col'
           )}>
             {/* Optional: Add a close button inside the chat panel for mobile */} 
             {isMobile && (
@@ -327,11 +327,13 @@ export default function DocumentChatPage() {
                 </Button>
               </div>
             )}
-            <ChatInterface 
-              documentId={activeDocumentId} 
-              document={documents.find(doc => doc.id === activeDocumentId)!} 
-              additionalDocuments={documents.filter(doc => doc.id !== activeDocumentId)}
-            />
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+              <ChatInterface 
+                documentId={activeDocumentId} 
+                document={documents.find(doc => doc.id === activeDocumentId)!} 
+                additionalDocuments={documents.filter(doc => doc.id !== activeDocumentId)}
+              />
+            </div>
           </div>
           
           {/* Mobile Chat Overlay (closes chat when clicking outside) */}
