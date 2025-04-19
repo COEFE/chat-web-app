@@ -156,7 +156,10 @@ export async function POST(req: NextRequest) {
   const db = getAdminDb();
   const storage = getAdminStorage();
   const auth = getAdminAuth();
-  const bucket = storage.bucket(); // Default bucket
+  // Explicitly get bucket by name
+  const bucketName = process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app'; // Match file-proxy logic
+  console.log(`[Chat API] Using bucket name: ${bucketName}`);
+  const bucket = storage.bucket(bucketName);
 
   // 1. Authentication
   const authorizationHeader = req.headers.get("Authorization");
@@ -218,10 +221,13 @@ export async function POST(req: NextRequest) {
       const addFileType = addFileName?.split('.').pop()?.toLowerCase() || null;
       
       try {
-        const file: GoogleCloudFile = bucket.file(addDoc.storagePath);
+        // Decode the storage path
+        const decodedPath = decodeURIComponent(addDoc.storagePath);
+        console.log(`[Chat API] Decoded additional path: ${decodedPath}`);
+        const file: GoogleCloudFile = bucket.file(decodedPath); // Use decoded path
         const [exists] = await file.exists();
         if (!exists) {
-          console.warn(`Additional file not found at path: ${addDoc.storagePath}`);
+          console.warn(`Additional file not found at path: ${decodedPath}`);
           continue; // Skip this document but continue processing others
         }
         
@@ -332,10 +338,13 @@ export async function POST(req: NextRequest) {
     console.log(`Primary file type determined as: ${primaryFileType}`);
 
     try {
-      const file: GoogleCloudFile = bucket.file(currentDocument.storagePath);
+      // Decode the storage path
+      const decodedPath = decodeURIComponent(currentDocument.storagePath);
+      console.log(`[Chat API] Decoded primary path: ${decodedPath}`);
+      const file: GoogleCloudFile = bucket.file(decodedPath); // Use decoded path
       const [exists] = await file.exists();
       if (!exists) {
-        console.error(`Primary file not found at path: ${currentDocument.storagePath}`);
+        console.error(`Primary file not found at path: ${decodedPath}`);
         return NextResponse.json(
           { error: "Primary document file not found in storage." },
           { status: 404 }
