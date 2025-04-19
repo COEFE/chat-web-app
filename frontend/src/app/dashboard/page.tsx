@@ -610,10 +610,9 @@ const createColumns = (
                         onOpenShareDialog({ id: item.id, name: item.name });
                       }, 100); // 100ms delay
                     }}
-                    className="cursor-pointer flex items-center gap-2 p-0"
                   >
-                    <Share2 className="h-4 w-4" />
-                    <span>Share</span>
+                    <Share2 className="mr-2 h-4 w-4" />
+                    Share
                   </DropdownMenuItem>
                 )}
                 {/* --- End Share Item --- */}

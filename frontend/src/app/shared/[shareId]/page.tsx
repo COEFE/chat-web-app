@@ -232,13 +232,34 @@ export default function SharedDocumentPage() {
         {documentUrl && (
           <div className="border rounded-lg overflow-hidden h-[calc(100vh-8rem)]">
             {shareDetails?.documentPath?.toLowerCase().endsWith('.pdf') ? (
-              <PDFViewer fileUrl={documentUrl} />
+              <ErrorBoundary fallback={
+                <div className="flex flex-col items-center justify-center p-8 text-center h-full">
+                  <FileText className="h-16 w-16 text-gray-400 mb-4" />
+                  <h3 className="text-lg font-medium">Unable to load PDF</h3>
+                  <p className="text-sm text-gray-500 mt-2">
+                    There was an error loading this document. It may be unavailable or require special permissions.
+                  </p>
+                </div>
+              }>
+                <PDFViewer fileUrl={documentUrl} />
+              </ErrorBoundary>
             ) : (
-              <iframe 
-                src={documentUrl}
-                className="w-full h-full"
-                title={shareDetails?.documentName || 'Shared Document'}
-              />
+              <ErrorBoundary fallback={
+                <div className="flex flex-col items-center justify-center p-8 text-center h-full">
+                  <FileText className="h-16 w-16 text-gray-400 mb-4" />
+                  <h3 className="text-lg font-medium">Unable to load document</h3>
+                  <p className="text-sm text-gray-500 mt-2">
+                    There was an error loading this document. It may be unavailable or require special permissions.
+                  </p>
+                </div>
+              }>
+                <iframe 
+                  src={documentUrl}
+                  className="w-full h-full"
+                  title={shareDetails?.documentName || 'Shared Document'}
+                  onError={() => console.error('Error loading document iframe')}
+                />
+              </ErrorBoundary>
             )}
           </div>
         )}
