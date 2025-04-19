@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useDropzone, FileRejection } from 'react-dropzone';
 import { getStorage, ref, uploadBytesResumable as firebaseUploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { useAuth } from '@/context/AuthContext';
@@ -47,7 +47,7 @@ export function FileUpload({
   const [rejectedFiles, setRejectedFiles] = useState<File[]>([]);
   const { user } = useAuth();
 
-  const handleUpload = useCallback(async (filesToProcess: UploadingFile[]) => {
+  const handleUpload = useCallback(async (filesToProcess: UploadingFile[]): Promise<void> => {
     console.log('======== FILE UPLOAD ATTEMPT (Sequential with Direct State) ========');
     console.log('Auth state:', user ? 'Authenticated' : 'Not authenticated');
     console.log('User info:', user);
@@ -140,24 +140,43 @@ export function FileUpload({
 
     console.log(`Finished processing all ${filesToProcess.length} files sequentially. All succeeded: ${allSucceeded}`);
 
-    // Call onUploadComplete immediately to close the dialog
+    // Only call onUploadComplete after all uploads have actually completed
     if (allSucceeded && onUploadComplete) {
-      console.log('Calling onUploadComplete callback immediately');
-      onUploadComplete();
+      // Check if all files have been uploaded successfully
+      const allFilesUploaded = uploadingFiles.every(file => 
+        // Either this file wasn't in our batch, or it completed successfully
+        !filesToProcess.some(f => f.id === file.id) || file.status === 'success'
+      );
       
-      // We'll still wait a moment to refresh the document list, but the UI won't be blocked
-      setTimeout(() => {
-        console.log('Refreshing document list after short delay');
-        // The dialog is already closed, so this just refreshes the list
-      }, 2000);  // Reduced to 2-second delay
+      if (allFilesUploaded) {
+        console.log('All files uploaded successfully, calling onUploadComplete callback');
+        // Add a small delay to ensure UI updates before closing
+        setTimeout(() => {
+          onUploadComplete();
+          console.log('Upload dialog closed, refreshing document list');
+        }, 500);
+      } else {
+        console.log('Not all files have completed uploading yet, keeping dialog open');
+      }
     }
 
   }, [user, onUploadComplete, currentFolderId]); 
+
+  // Simple state to track if any uploads are in progress
+  const [isUploading, setIsUploading] = useState(false);
 
   const onDrop = useCallback(
     (acceptedFiles: File[], fileRejections: FileRejection[]) => {
       console.log('Accepted files:', acceptedFiles);
       console.log('Rejected files:', fileRejections);
+
+      if (acceptedFiles.length === 0) {
+        console.log('No accepted files to upload');
+        return;
+      }
+
+      // Set uploading state to true
+      setIsUploading(true);
  
       const newUploadingFilesState: UploadingFile[] = acceptedFiles.map(file => ({
         file,
@@ -173,9 +192,22 @@ export function FileUpload({
         ...fileRejections.map((rejection) => rejection.file),
       ]);
 
+      // Start upload immediately
       if (newUploadingFilesState.length > 0) {
-           console.log('Calling handleUpload directly with new file states...');
-           handleUpload(newUploadingFilesState); 
+        console.log('Starting upload process...');
+        handleUpload(newUploadingFilesState)
+          .finally(() => {
+            // Mark upload as complete
+            console.log('Upload process completed');
+            setIsUploading(false);
+            
+            // Notify parent component
+            if (onUploadComplete) {
+              onUploadComplete();
+            }
+          });
+      } else {
+        setIsUploading(false);
       }
     },
     [handleUpload] 

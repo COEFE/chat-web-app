@@ -5,7 +5,7 @@ import { ChevronRight } from 'lucide-react';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { Fragment } from 'react';
+import { Fragment, memo, useMemo } from 'react';
 
 interface FolderBreadcrumbsProps {
   currentFolderId: string | null;
@@ -13,52 +13,43 @@ interface FolderBreadcrumbsProps {
   onNavigate: (folderId: string | null) => void;
 }
 
-export default function FolderBreadcrumbs({ currentFolderId, folders, onNavigate }: FolderBreadcrumbsProps) {
-  console.log('[FolderBreadcrumbs] Rendering with:', { currentFolderId, folderCount: folders.length });
-  // Function to get folder path (from root to current folder)
+// Define the component
+function FolderBreadcrumbsBase({ currentFolderId, folders, onNavigate }: FolderBreadcrumbsProps) {
+  // Function to get folder path (from root to current folder) - no logging
   const getFolderPath = (folderId: string | null, allFolders: FolderData[]): FolderData[] => {
-    console.log('[FolderBreadcrumbs] Getting path for folder:', folderId);
-    console.log('[FolderBreadcrumbs] All folders count:', allFolders.length);
-    
     // If no folder ID or empty folders array, return empty path
     if (!folderId || allFolders.length === 0) {
-      console.log('[FolderBreadcrumbs] No folder ID or empty folders array');
       return [];
     }
     
     const folder = allFolders.find(f => f.id === folderId);
-    console.log('[FolderBreadcrumbs] Found folder:', folder);
     
     // If folder not found in the array, return empty path
     if (!folder) {
-      console.log('[FolderBreadcrumbs] Folder not found in array');
       return [];
     }
     
     // Build the path recursively from the current folder to the root
     const parentPath = folder.parentFolderId ? getFolderPath(folder.parentFolderId, allFolders) : [];
-    const result = [...parentPath, folder];
-    console.log('[FolderBreadcrumbs] Path result:', result.map(f => ({ id: f.id, name: f.name })));
-    return result;
+    return [...parentPath, folder];
   };
 
-  // Get the current folder path
-  const folderPath = getFolderPath(currentFolderId, folders);
+  // Get the current folder path - memoized to prevent recalculation on every render
+  const folderPath = useMemo(() => {
+    return getFolderPath(currentFolderId, folders);
+  }, [currentFolderId, folders]);
   
-  // Get siblings for a given folder (folders with the same parent)
-  const getSiblings = (folderId: string | null, parentFolderId: string | null, allFolders: FolderData[]): FolderData[] => {
-    console.log('[FolderBreadcrumbs] Getting siblings for folder:', folderId, 'with parent:', parentFolderId);
-    
-    // If empty folders array, return empty siblings
-    if (allFolders.length === 0) {
-      console.log('[FolderBreadcrumbs] Empty folders array, no siblings');
-      return [];
-    }
-    
-    const siblings = allFolders.filter(f => f.parentFolderId === parentFolderId && f.id !== folderId);
-    console.log('[FolderBreadcrumbs] Found siblings:', siblings.map(f => ({ id: f.id, name: f.name })));
-    return siblings;
-  };
+  // Get siblings for a given folder (folders with the same parent) - memoized
+  const getSiblings = useMemo(() => {
+    return (folderId: string | null, parentFolderId: string | null): FolderData[] => {
+      // If empty folders array, return empty siblings
+      if (folders.length === 0) {
+        return [];
+      }
+      
+      return folders.filter(f => f.parentFolderId === parentFolderId && f.id !== folderId);
+    };
+  }, [folders]);
 
   return (
     <Breadcrumb className="mb-4">
@@ -69,8 +60,7 @@ export default function FolderBreadcrumbs({ currentFolderId, folders, onNavigate
               variant="ghost" 
               className="p-0 h-auto font-normal hover:bg-transparent hover:underline"
               onClick={() => {
-                console.log('[FolderBreadcrumbs] Navigating to Home (null)');
-                console.log('[FolderBreadcrumbs] Current folder path:', folderPath.map(f => ({ id: f.id, name: f.name })));
+                // Navigate to home folder
                 onNavigate(null);
               }}
             >
@@ -81,7 +71,7 @@ export default function FolderBreadcrumbs({ currentFolderId, folders, onNavigate
         
         {folderPath.map((folder, index) => {
           const isLast = index === folderPath.length - 1;
-          const siblings = getSiblings(folder.id, folder.parentFolderId, folders);
+          const siblings = getSiblings(folder.id, folder.parentFolderId);
           
           return (
             <Fragment key={folder.id}>
@@ -145,4 +135,8 @@ export default function FolderBreadcrumbs({ currentFolderId, folders, onNavigate
     </Breadcrumb>
   );
 }
+
+// Export a memoized version of the component to prevent unnecessary re-renders
+const FolderBreadcrumbs = memo(FolderBreadcrumbsBase);
+export default FolderBreadcrumbs;
 

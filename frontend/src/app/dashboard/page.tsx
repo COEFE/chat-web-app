@@ -53,7 +53,7 @@ import {
   Trash, 
   Trash2, 
   Pencil, 
-  X, 
+  X as XIcon, 
   Maximize2, 
   Minimize2, 
   MoveRight, 
@@ -175,7 +175,8 @@ import {
   isToday, 
   isYesterday, 
   isThisWeek, 
-  isThisMonth 
+  isThisMonth, 
+  parse 
 } from 'date-fns'; // Restore necessary date-fns imports
 
 interface DocumentTableProps {
@@ -344,6 +345,33 @@ const createColumns = (
       enableGrouping: true, // Allow grouping by Type
       enableSorting: true, // Allow sorting by type
       enableHiding: true, // Allow hiding this column
+      getGroupingValue: (item: FilesystemItem) => {
+        if (item.type === 'folder') {
+          return 'Folder';
+        } else {
+          // Extract file type from contentType for grouping
+          const contentType = item.contentType || '';
+          
+          // Handle common content types
+          if (contentType.includes('pdf')) return 'PDF';
+          if (contentType.includes('spreadsheet') || contentType.includes('excel') || contentType.includes('ms-excel')) return 'Excel';
+          if (contentType.includes('word') || contentType.includes('document')) return 'Word';
+          if (contentType.includes('presentation') || contentType.includes('powerpoint')) return 'PowerPoint';
+          if (contentType.includes('image/')) return 'Image';
+          if (contentType.includes('text/')) return 'Text';
+          if (contentType.includes('audio/')) return 'Audio';
+          if (contentType.includes('video/')) return 'Video';
+          
+          // For other types, extract the subtype after the slash
+          const parts = contentType.split('/');
+          if (parts.length > 1 && parts[1]) {
+            // Clean up and capitalize the subtype
+            return parts[1].split(';')[0].toUpperCase();
+          }
+          
+          return 'Other';
+        }
+      }
     },
     {
       accessorKey: 'size',
@@ -352,9 +380,9 @@ const createColumns = (
         const item = row.original;
         if (item.type === 'document') {
           // Use the formatBytes utility
-          return <span className="text-sm text-muted-foreground hidden md:table-cell">{formatBytes(item.size)}</span>;
+          return <span className="text-sm text-muted-foreground">{formatBytes(item.size)}</span>;
         } else {
-          return <span className="text-sm text-muted-foreground hidden md:table-cell">-</span>; // Folders don't have a size in this context
+          return <span className="text-sm text-muted-foreground">-</span>; // Folders don't have a size in this context
         }
       },
       enableSorting: true, // Allow sorting by size
@@ -383,9 +411,9 @@ const createColumns = (
 
         // Format the date if it's valid
         return date && isValid(date) ? (
-          <div className="text-sm text-muted-foreground hidden md:table-cell">{format(date, 'MMM d, yyyy')}</div>
+          <div className="text-sm text-muted-foreground">{format(date, 'MMM d, yyyy')}</div>
         ) : (
-          <div className="text-sm text-muted-foreground hidden md:table-cell">--</div>
+          <div className="text-sm text-muted-foreground">--</div>
         );
       },
       sortingFn: (rowA, rowB, columnId) => {
@@ -448,10 +476,10 @@ const createColumns = (
         if (isYesterday(date)) return 'Yesterday';
         if (isThisWeek(date, { weekStartsOn: 1 })) return 'This Week';
         if (isThisMonth(date)) return 'This Month';
-        return format(date, 'yyyy');
+        return format(date, 'yyyy-MM'); // Return date as 'YYYY-MM' string
       },
       meta: {
-        className: 'hidden md:table-cell', // Ensure it's hidden on smaller screens like others
+        className: '', // Ensure it's visible on all screens
       },
       enableHiding: true, // Allow hiding this column
     },
@@ -479,7 +507,7 @@ const createColumns = (
         return <span className="text-sm text-muted-foreground">{dateString}</span>;
       },
       meta: {
-        className: 'hidden md:table-cell', 
+        className: '', // Ensure it's visible on all screens
       },
       enableGrouping: true, // Enable grouping by Date
       getGroupingValue: (item: FilesystemItem) => { // Use item directly
@@ -839,156 +867,125 @@ function DocumentTable({
       </div>
 
       {/* Shadcn Table - Single scrollable container */}
-      <div className="rounded-md border flex-grow flex flex-col overflow-hidden">
-        <ShadcnTable className="min-w-full table-fixed">
-          {/* Fixed header */}
-          <TableHeader className="sticky top-0 bg-background z-10">
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id} style={{ width: header.getSize() }}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          {/* Table body - no longer needs its own scroll */}
-          <TableBody>
-            {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row: Row<FilesystemItem>) => {
-                // Check if the row is a grouping row
-                if (row.getIsGrouped()) {
-                  return (
-                    <TableRow key={row.id}>
-                      <TableCell colSpan={row.getVisibleCells().length} className="font-medium bg-muted/50">
-                        <div className="flex items-center space-x-2">
-                          <button
-                            {...{
-                              onClick: row.getToggleExpandedHandler(),
-                              style: { cursor: 'pointer' },
-                            }}
-                          >
-                            {row.getIsExpanded() ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                          </button>
-                          {/* Render the grouping cell content */}
-                          {flexRender(
-                            // @ts-ignore // Accessing internal group cell might need ts-ignore
-                            row.getVisibleCells()[0].column.columnDef.cell,
-                            row.getVisibleCells()[0].getContext()
+      <div className="rounded-md border flex-grow">
+        <div className="overflow-x-auto"> {/* Add overflow-x-auto here */}
+          <ShadcnTable className="min-w-full table-fixed">
+            {/* Fixed header */}
+            <TableHeader className="sticky top-0 bg-background z-10">
+              {table.getHeaderGroups().map((headerGroup) => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <TableHead key={header.id} style={{ width: header.getSize() }}>
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext()
                           )}
-                          <span className="text-xs text-muted-foreground">({row.subRows.length})</span>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                }
-
-                // Render normal data row (only if expanded or not part of a group)
-                if (!row.getIsGrouped() && (row.depth === 0 || row.getParentRow()?.getIsExpanded())) {
-                  return (
-                    <DraggableRow key={row.id} row={row} onMoveRow={onMoveRow} onDropItemIntoFolder={onDropItemIntoFolder}>
-                      {/* Desktop view - standard table cells */}
-                      {row.getVisibleCells().map((cell) => (
-                        <TableCell
-                          key={cell.id}
-                          className={cn(
-                            'py-2 hidden sm:table-cell', // Hide on mobile, show on desktop
-                            (cell.column.columnDef.meta as { className?: string })?.className,
-                            {'cursor-pointer hover:bg-muted/50': cell.column.id !== 'actions' && cell.column.id !== 'select'},
-                            {'bg-blue-100 dark:bg-blue-900': row.getIsSelected()}
-                          )}
-                          style={{ width: cell.column.getSize(), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} // Prevent text wrap
-                          onClick={(e) => {
-                             if (cell.column.id !== 'actions' && cell.column.id !== 'select') {
-                               handleRowClick(row); // Pass the row object
-                             }
-                           }}
-                        >
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
+            </TableHeader>
+            {/* Table body - no longer needs its own scroll */}
+            <TableBody>
+              {table.getRowModel().rows?.length ? (
+                table.getRowModel().rows.map((row: Row<FilesystemItem>) => {
+                  // Check if the row is a grouping row
+                  if (row.getIsGrouped()) {
+                    return (
+                      <TableRow key={row.id}>
+                        <TableCell colSpan={row.getVisibleCells().length} className="font-medium bg-muted/50">
+                          <div className="flex items-center space-x-2">
+                            <button
+                              {...{
+                                onClick: row.getToggleExpandedHandler(),
+                                style: { cursor: 'pointer' },
+                              }}
+                            >
+                              {row.getIsExpanded() ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            </button>
+                            {/* Render the grouping cell content */}
+                            {row.groupingColumnId === 'uploadedAt' 
+                              ? ((() => {
+                                  // Handle special date strings first
+                                  const specialDateValues = ['Today', 'Yesterday', 'This Week', 'This Month', 'Unknown Date'];
+                                  const dateStr = String(row.groupingValue);
+                                  
+                                  // If it's a special date string, return it directly
+                                  if (specialDateValues.includes(dateStr)) {
+                                    return dateStr;
+                                  }
+                                  
+                                  // Otherwise try to parse it as a yyyy-MM format
+                                  try {
+                                    // Only attempt to parse if it matches yyyy-MM pattern
+                                    if (/^\d{4}-\d{2}$/.test(dateStr)) {
+                                      const parsedDate = parse(dateStr, 'yyyy-MM', new Date());
+                                      if (isValid(parsedDate)) {
+                                        return format(parsedDate, 'MMMM yyyy');
+                                      }
+                                    }
+                                    // If we get here, it's not a valid yyyy-MM string
+                                    return dateStr; // Just return the original string
+                                  } catch (error) {
+                                    console.error(`Error formatting date group value: ${dateStr}`, error);
+                                    return dateStr; // Return original on error
+                                  }
+                                })())
+                              : flexRender(
+                                  // @ts-ignore // Accessing internal group cell might need ts-ignore
+                                  row.getVisibleCells()[0].column.columnDef.cell,
+                                  row.getVisibleCells()[0].getContext()
+                                )
+                            }
+                            <span className="text-xs text-muted-foreground">({row.subRows.length})</span>
+                          </div>
                         </TableCell>
-                      ))}
-                      
-                      {/* Mobile view - card-like layout with all important info */}
-                      <TableCell 
-                        colSpan={row.getVisibleCells().length}
-                        className="sm:hidden p-3 block"
-                        onClick={() => handleRowClick(row)}
-                      >
-                        <div className="flex flex-col gap-1">
-                          {/* Main row with name and actions */}
-                          <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-2 font-medium">
-                              {/* Icon based on file type */}
-                              {row.original.type === 'folder' ? (
-                                <Folder className="h-4 w-4 text-blue-500" />
-                              ) : getFileIcon(row.original.name, row.original.type === 'document' ? (row.original as MyDocumentData).contentType : '')}
-                              
-                              {/* File/folder name */}
-                              <span className="truncate max-w-[180px]">{row.original.name}</span>
-                            </div>
-                            
-                            {/* Actions (favorite, etc) */}
-                            <div className="flex items-center gap-1">
-                              {/* Favorite star */}
-                              <button
-                                className={cn(
-                                  "h-6 w-6 inline-flex items-center justify-center rounded-full",
-                                  checkIsFavorite(row.original.id) ? "text-yellow-500" : "text-muted-foreground"
-                                )}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleToggleFavorite(row.original.id, checkIsFavorite(row.original.id));
-                                }}
-                              >
-                                <Star className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </div>
-                          
-                          {/* Details row with type, size, dates */}
-                          <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-muted-foreground mt-1">
-                            <div className="flex items-center gap-1">
-                              <span className="font-medium">Type:</span> 
-                              <span>{row.original.type === 'folder' ? 'Folder' : (row.original.type === 'document' ? ((row.original as MyDocumentData).contentType?.split('/')[1] || 'File') : 'File')}</span>
-                            </div>
-                            {row.original.type !== 'folder' && (
-                              <div className="flex items-center gap-1">
-                                <span className="font-medium">Size:</span> 
-                                <span>{formatBytes(row.original.type === 'document' ? (row.original as MyDocumentData).size || 0 : 0, 2)}</span>
-                              </div>
-                            )}
-                            <div className="flex items-center gap-1">
-                              <span className="font-medium">Added:</span> 
-                              <span>{formatDate(row.original.type === 'document' ? (row.original as MyDocumentData).uploadedAt : undefined)}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="font-medium">Modified:</span> 
-                              <span>{formatDate(row.original.type === 'document' ? (row.original as MyDocumentData).updatedAt || (row.original as MyDocumentData).uploadedAt : undefined)}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </TableCell>
-                    </DraggableRow>
-                  );
-                }
+                      </TableRow>
+                    );
+                  }
 
-                return null; // Don't render hidden sub-rows
-              })
-            ) : (
-              <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center">
-                  No documents or folders found.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </ShadcnTable>
+                  // Render normal data row (only if expanded or not part of a group)
+                  if (!row.getIsGrouped() && (row.depth === 0 || row.getParentRow()?.getIsExpanded())) {
+                    return (
+                      <DraggableRow key={row.id} row={row} onMoveRow={onMoveRow} onDropItemIntoFolder={onDropItemIntoFolder}>
+                        {/* Desktop view - standard table cells */}
+                        {row.getVisibleCells().map((cell) => (
+                          <TableCell
+                            key={cell.id}
+                            className={cn(
+                              'py-2', // Keep padding, remove hidden sm:table-cell
+                              (cell.column.columnDef.meta as { className?: string })?.className,
+                              {'cursor-pointer hover:bg-muted/50': cell.column.id !== 'actions' && cell.column.id !== 'select'},
+                              {'bg-blue-100 dark:bg-blue-900': row.getIsSelected()}
+                            )}
+                            style={{ width: cell.column.getSize(), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} // Prevent text wrap
+                            onClick={(e) => {
+                               if (cell.column.id !== 'actions' && cell.column.id !== 'select') {
+                                 handleRowClick(row); // Pass the row object
+                               }
+                             }}
+                          >
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </TableCell>
+                        ))}
+                      </DraggableRow>
+                    );
+                  }
+
+                  return null; // Don't render hidden sub-rows
+                })
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={columns.length} className="h-24 text-center">
+                    No documents or folders found.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </ShadcnTable>
+        </div>
       </div>
 
       {/* Load More Button */}
@@ -1092,7 +1089,7 @@ function DashboardPage() {
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list'); 
-  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false); 
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [groupingOption, setGroupingOption] = useState<'none' | 'type' | 'date'>('none'); // Control grouping UI
 
   const panelGroupRef = useRef<any>(null);
@@ -1281,11 +1278,11 @@ function DashboardPage() {
     }
   }, [folderPath, setCurrentFolderId, setFolderPath]);
 
-  const handleUploadSuccess = () => {
-    console.log("Upload complete signal received, refreshing current folder...");
-    triggerRefresh();
-    setIsUploadDialogOpen(false); // Close dialog on success
-  };
+  // Simplified upload success handler - just refreshes the document list
+  const handleUploadSuccess = useCallback(() => {
+    triggerRefresh(); // Restore this call
+    // Note: We're not automatically closing the dialog anymore
+  }, [triggerRefresh]);
 
   const handleDeleteDocument = async (docId: string) => {
     if (!user) {
@@ -1777,7 +1774,7 @@ function DashboardPage() {
                   className="w-full justify-start" 
                   onClick={logout}
                 >
-                  <X className="h-4 w-4 mr-2" />
+                  <XIcon className="h-4 w-4 mr-2" />
                   Logout
                 </Button>
               </div>
@@ -1786,7 +1783,7 @@ function DashboardPage() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col p-4 pt-2 overflow-hidden">
+      <main className="flex-1 flex flex-col p-1 sm:p-2 md:p-4 lg:p-6">
         {/* Fixed breadcrumbs navigation */}
         <div className="sticky top-8 z-30 bg-muted/40 pt-1 pb-2 -mx-4 px-4 text-xs text-muted-foreground">
           <FolderBreadcrumbs 
@@ -1854,7 +1851,9 @@ function DashboardPage() {
                           <FolderPlus className="h-4 w-4 mr-2" />
                           New Folder
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setIsUploadDialogOpen(true)}>
+                        <DropdownMenuItem onClick={() => {
+                          setIsUploadDialogOpen(true);
+                        }}>
                           <Upload className="h-4 w-4 mr-2" />
                           Upload Document
                         </DropdownMenuItem>
@@ -1934,8 +1933,12 @@ function DashboardPage() {
                 </div>
               </div>
               
-              {/* Upload Dialog */}
-              <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen} modal={false}>
+              {/* Simplified Upload Dialog */}
+              <Dialog 
+                open={isUploadDialogOpen} 
+                // REMOVED onOpenChange={setIsUploadDialogOpen}
+                modal={false}
+              >
                 <DialogContent className="sm:max-w-[525px]">
                   <DialogHeader>
                     <DialogTitle>Upload Document</DialogTitle>
@@ -1945,10 +1948,20 @@ function DashboardPage() {
                   </DialogHeader>
                   <div className="pt-4 pb-0"> 
                     <FileUpload
-                      onUploadComplete={handleUploadSuccess} // This should close the dialog
+                      onUploadComplete={handleUploadSuccess}
                       currentFolderId={currentFolderId}
                     />
                   </div>
+                  <DialogFooter>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        setIsUploadDialogOpen(false);
+                      }}
+                    >
+                      Close
+                    </Button>
+                  </DialogFooter>
                 </DialogContent>
               </Dialog>
               
