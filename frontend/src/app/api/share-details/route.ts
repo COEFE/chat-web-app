@@ -1,32 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { initializeFirebaseAdmin, getAdminDb } from '../../../lib/firebase/adminConfig';
 
-// Initialize Firebase Admin
-initializeFirebaseAdmin();
-const db = getAdminDb();
+// Set up CORS headers for all responses
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+// Initialize Firebase Admin with try/catch for better error handling
+let db: FirebaseFirestore.Firestore;
+try {
+  console.log('[share-details] Initializing Firebase Admin...');
+  initializeFirebaseAdmin();
+  db = getAdminDb();
+  console.log('[share-details] Firebase Admin initialized successfully');
+} catch (error) {
+  console.error('[share-details] Error initializing Firebase Admin:', error);
+  // We'll handle this in the route handler
+}
+
+// Handle OPTIONS requests for CORS preflight
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: corsHeaders,
+  });
+}
 
 export async function POST(request: NextRequest) {
+  // Check if Firebase Admin was initialized successfully
+  if (!db) {
+    console.error('[share-details] Firebase Admin not initialized');
+    return NextResponse.json(
+      { error: 'Internal server error: Database not available' },
+      { status: 500, headers: corsHeaders }
+    );
+  }
+  
   try {
-    // Set CORS headers
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    };
-
-    // Handle preflight requests
-    if (request.method === 'OPTIONS') {
-      return new NextResponse(null, {
-        status: 200,
-        headers: corsHeaders,
-      });
-    }
+    console.log('[share-details] Processing share details request...');
 
     // Get the request body
     const body = await request.json();
     const { shareId, passwordToken } = body;
+    
+    console.log(`[share-details] Received request for shareId: ${shareId}`);
 
     if (!shareId) {
+      console.log('[share-details] Missing shareId in request');
       return NextResponse.json(
         { error: 'Share ID is required' },
         { status: 400, headers: corsHeaders }
@@ -34,15 +56,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Get the share document from Firestore
+    console.log(`[share-details] Fetching share document with ID: ${shareId}`);
     const shareRef = db.collection('shares').doc(shareId);
     const shareDoc = await shareRef.get();
 
     if (!shareDoc.exists) {
+      console.log(`[share-details] Share not found: ${shareId}`);
       return NextResponse.json(
         { error: 'Share not found' },
         { status: 404, headers: corsHeaders }
       );
     }
+    
+    console.log(`[share-details] Share document found: ${shareId}`);
 
     const shareData = shareDoc.data();
     
@@ -88,10 +114,10 @@ export async function POST(request: NextRequest) {
       { status: 200, headers: corsHeaders }
     );
   } catch (error) {
-    console.error('Error getting share details:', error);
+    console.error('[share-details] Error getting share details:', error);
     return NextResponse.json(
       { error: 'Failed to get share details' },
-      { status: 500 }
+      { status: 500, headers: corsHeaders }
     );
   }
 }
