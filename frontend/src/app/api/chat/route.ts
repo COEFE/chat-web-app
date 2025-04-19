@@ -332,10 +332,44 @@ export async function POST(req: NextRequest) {
     console.log(`Primary file type determined as: ${primaryFileType}`);
 
     try {
-      const file: GoogleCloudFile = bucket.file(currentDocument.storagePath);
+      // Normalize the path to handle spaces consistently
+      const normalizedPath = currentDocument.storagePath.replace(/\s+/g, ' ');
+      console.log(`Normalized path for primary document: ${normalizedPath}`);
+      
+      // List all files in the user's directory to help diagnose the issue
+      const userDir = normalizedPath.split('/').slice(0, 2).join('/');
+      console.log(`Listing files in user directory: ${userDir}`);
+      
+      try {
+        const [files] = await bucket.getFiles({ prefix: userDir });
+        console.log(`Found ${files.length} files in user directory:`);
+        files.forEach(f => console.log(`- ${f.name}`));
+        
+        // Try to find files with similar names
+        const fileName = normalizedPath.split('/').pop() || '';
+        const similarFiles = files.filter(f => {
+          const name = f.name.split('/').pop() || '';
+          // More flexible matching - look for key parts of the filename
+          return name.toLowerCase().includes(fileName.toLowerCase().replace(/\s+/g, '').substring(0, 5));
+        });
+        
+        console.log(`Found ${similarFiles.length} files with similar names:`);
+        similarFiles.forEach(f => console.log(`- ${f.name}`));
+        
+        // Use the first similar file if found
+        if (similarFiles.length > 0) {
+          console.log(`Using similar file instead: ${similarFiles[0].name}`);
+          return bucket.file(similarFiles[0].name);
+        }
+      } catch (listError) {
+        console.error('Error listing files:', listError);
+      }
+      
+      // If we couldn't find a similar file, try the original path
+      const file: GoogleCloudFile = bucket.file(normalizedPath);
       const [exists] = await file.exists();
       if (!exists) {
-        console.error(`Primary file not found at path: ${currentDocument.storagePath}`);
+        console.error(`Primary file not found at path: ${normalizedPath}`);
         return NextResponse.json(
           { error: "Primary document file not found in storage." },
           { status: 404 }

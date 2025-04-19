@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getVercelStorage, initVercelFirebaseAdmin } from '@/lib/firebase/vercelAdmin';
+import { getAdminStorage } from '@/lib/firebaseAdminConfig';
 
 // CORS headers for all responses
 const corsHeaders = {
@@ -17,10 +17,16 @@ export async function OPTIONS() {
 }
 
 export async function GET(request: NextRequest) {
+  // Define variables at the top level of the function so they're available in catch blocks
+  let filePath: string | null = null;
+  let userId: string | null = null;
+  let decodedPath: string = '';
+  let bucketName: string = '';
+  
   try {
     const { searchParams } = new URL(request.url);
-    const filePath = searchParams.get('path');
-    const userId = searchParams.get('userId');
+    filePath = searchParams.get('path');
+    userId = searchParams.get('userId');
     const download = searchParams.get('download') === 'true';
 
     if (!filePath) {
@@ -29,16 +35,17 @@ export async function GET(request: NextRequest) {
 
     console.log(`[file-proxy] Request for file: ${filePath}, userId: ${userId || 'not provided'}`);
 
-    // Initialize Firebase Admin specifically for Vercel environment
-    initVercelFirebaseAdmin();
-    const storage = getVercelStorage();
-    const bucketName = process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com';
+    // Use getAdminStorage() to get the correctly initialized storage instance
+    const storage = getAdminStorage();
+    bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.firebasestorage.app';
     console.log(`[file-proxy] Using bucket name: ${bucketName}`);
     const bucket = storage.bucket(bucketName);
     
-    // Decode the file path
-    const decodedPath = decodeURIComponent(filePath);
-    console.log(`File path after decoding: ${decodedPath}`);
+    // Decode the file path and normalize spaces
+    decodedPath = decodeURIComponent(filePath);
+    // Ensure consistent space handling (replace multiple spaces with single space)
+    decodedPath = decodedPath.replace(/\s+/g, ' ');
+    console.log(`File path after decoding and normalization: ${decodedPath}`);
     
     // Get the file from Firebase Storage
     const file = bucket.file(decodedPath);
@@ -195,17 +202,47 @@ export async function GET(request: NextRequest) {
     }
   } catch (error: any) {
     console.error('Error in file-proxy:', error);
+    console.error('Error details:', {
+      code: error.code,
+      message: error.message,
+      stack: error.stack,
+      filePath: filePath,
+      userId: userId,
+      bucketName: bucketName
+    });
     
     // Provide more detailed error information
     let errorMessage = error.message || 'Internal server error';
     let statusCode = 500;
     
     if (error.code === 'storage/object-not-found') {
-      errorMessage = 'File not found in storage';
+      errorMessage = 'Primary document file not found in storage';
       statusCode = 404;
+      console.error('[file-proxy] File not found error details:', {
+        filePath: filePath,
+        decodedPath: decodedPath,
+        userId: userId,
+        bucketName: bucketName
+      });
+    } else if (error.code?.startsWith('storage/unauthorized')) {
+      errorMessage = `Storage access denied: ${error.code}`;
+      statusCode = 403;
+      console.error('[file-proxy] Storage access denied error details:', {
+        filePath: filePath,
+        decodedPath: decodedPath,
+        userId: userId,
+        bucketName: bucketName
+      });
     } else if (error.code?.startsWith('storage/')) {
       errorMessage = `Storage error: ${error.code}`;
       statusCode = 400;
+      console.error('[file-proxy] Storage error details:', {
+        code: error.code,
+        filePath: filePath,
+        decodedPath: decodedPath,
+        userId: userId,
+        bucketName: bucketName
+      });
     }
     
     return NextResponse.json(
