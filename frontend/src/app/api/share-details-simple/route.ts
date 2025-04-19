@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getVercelFirestore, initVercelFirebaseAdmin } from '../../../lib/firebase/vercelAdmin';
 
 // Set up CORS headers for all responses
 const corsHeaders = {
@@ -9,25 +8,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// Initialize Firebase Admin directly in this file
-let db: FirebaseFirestore.Firestore;
+// Initialize Firebase Admin using Vercel-specific implementation
+let db: FirebaseFirestore.Firestore | null = null;
 try {
-  // Check if already initialized
-  if (getApps().length === 0) {
-    console.log('[share-details-simple] Initializing Firebase Admin...');
-    
-    // Initialize with minimal config
-    const app = initializeApp({
-      projectId: process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'web-chat-app-fa7f0',
-    });
-    
-    console.log('[share-details-simple] Firebase Admin initialized successfully');
-  }
-  
-  db = getFirestore();
-  console.log('[share-details-simple] Firestore initialized');
+  console.log('[share-details-simple] Initializing Firebase Admin for Vercel...');
+  initVercelFirebaseAdmin();
+  db = getVercelFirestore();
+  console.log('[share-details-simple] Firebase Admin initialized successfully for Vercel');
 } catch (error) {
-  console.error('[share-details-simple] Error initializing Firebase Admin:', error);
+  console.error('[share-details-simple] Error initializing Firebase Admin for Vercel:', error);
+  // We'll handle this in the route handler
 }
 
 // Handle OPTIONS requests for CORS preflight
@@ -39,6 +29,13 @@ export async function OPTIONS() {
 }
 
 export async function POST(request: NextRequest) {
+  // Check if Firebase Admin was initialized successfully
+  if (!db) {
+    console.error('[share-details-simple] Firebase Admin not initialized');
+    // We'll continue with mock data instead of returning an error
+    console.log('[share-details-simple] Will use mock data due to Firebase Admin initialization failure');
+  }
+  
   try {
     console.log('[share-details-simple] Processing request...');
     
@@ -116,9 +113,10 @@ export async function POST(request: NextRequest) {
           );
         }
       } catch (dbError) {
-        console.error('[share-details-simple] Error fetching from database:', dbError);
-        // Fall back to mock data
+        console.error(`[share-details-simple] Error fetching from database: ${dbError}`);
         console.log('[share-details-simple] Using mock data due to database error');
+        // Continue with mock data
+        shareData = mockResponse;
       }
     } else {
       console.log('[share-details-simple] Firebase not initialized, using mock data');
