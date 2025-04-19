@@ -6,13 +6,15 @@ import { getShareDetails, verifySharePassword } from '@/lib/firebase/shares';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, FileText, Lock } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Loader2, FileText, Lock, MessageSquare } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import PDFViewer from '@/components/dashboard/PDFViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
 import Link from 'next/link';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import useMediaQuery from '@/hooks/useMediaQuery';
+import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 // Error boundary component for handling rendering errors
 class ErrorBoundary extends React.Component<
@@ -66,6 +68,8 @@ export default function SharedDocumentPage() {
   const [verifyingPassword, setVerifyingPassword] = useState(false);
   const [accessGranted, setAccessGranted] = useState(false);
   const [documentUrl, setDocumentUrl] = useState<string | null>(null);
+
+  const isMobile = useMediaQuery('(max-width: 768px)');
 
   // Fetch share details
   useEffect(() => {
@@ -246,7 +250,7 @@ export default function SharedDocumentPage() {
         )}
         
         {accessGranted && !error && (
-          shareDetails?.includeChat ? (
+          !isMobile && shareDetails?.includeChat ? (
             // Split View: Document + Chat
             <ResizablePanelGroup 
               direction="horizontal"
@@ -293,7 +297,7 @@ export default function SharedDocumentPage() {
             </ResizablePanelGroup>
           ) : (
             // Document Only View
-            <div className="flex-1 border rounded-lg overflow-hidden"> 
+            <div className="flex-1 border rounded-lg overflow-hidden relative"> 
               {documentUrl ? (
                 shareDetails?.documentPath?.toLowerCase().endsWith('.pdf') ? (
                   <ErrorBoundary fallback={<div>Error loading PDF.</div>}> 
@@ -316,6 +320,31 @@ export default function SharedDocumentPage() {
                     <CardContent><p>Content could not be loaded.</p></CardContent>
                   </Card>
                 </div>
+              )}
+              {isMobile && shareDetails?.includeChat && shareDetails.documentId && (
+                <Sheet>
+                  <SheetTrigger asChild>
+                    <Button 
+                      variant="default" 
+                      size="icon"
+                      className="fixed bottom-6 right-6 z-50 rounded-full shadow-lg h-14 w-14" 
+                      aria-label="Open Chat"
+                    >
+                      <MessageSquare className="h-6 w-6" />
+                    </Button>
+                  </SheetTrigger>
+                  <SheetContent side="bottom" className="h-[75vh] flex flex-col p-0"> 
+                    <SheetHeader className="p-4 border-b">
+                      <SheetTitle>Chat</SheetTitle>
+                    </SheetHeader>
+                    <div className="flex-1 overflow-y-auto"> 
+                      <ChatInterface 
+                        documentId={shareDetails.documentId} 
+                        isReadOnly={!shareDetails.isChatActive}
+                      />
+                    </div>
+                  </SheetContent>
+                </Sheet>
               )}
             </div>
           )
