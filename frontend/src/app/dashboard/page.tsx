@@ -1727,8 +1727,8 @@ function DashboardPage() {
   return (
     <div className="flex h-screen flex-col bg-muted/40 overflow-hidden">
       {/* Fixed header - Mobile optimized */}
-      <header className="sticky top-0 z-40 flex h-8 items-center gap-2 sm:gap-4 bg-background px-2 sm:px-4 border-b border-border/40 py-1">
-        <h1 className="text-base font-semibold whitespace-nowrap">My Documents</h1>
+      <header className="sticky top-0 z-40 flex h-7 items-center gap-2 sm:gap-4 bg-background px-2 sm:px-4 border-b border-border/40">
+        <h1 className="text-lg font-semibold whitespace-nowrap">My Documents</h1>
         
         {/* Desktop navigation */}
         <div className="hidden sm:flex items-center gap-4">
@@ -1755,8 +1755,8 @@ function DashboardPage() {
           {/* Mobile menu */}
           <Sheet>
             <SheetTrigger asChild className="sm:hidden">
-              <Button variant="ghost" size="icon" className="h-7 w-7 p-0">
-                <Menu className="h-4 w-4" />
+              <Button variant="ghost" size="icon" className="h-6 w-6 p-0">
+                <Menu className="h-5 w-5" />
               </Button>
             </SheetTrigger>
             <SheetContent side="right" className="w-[200px] sm:w-[300px]">
@@ -1785,7 +1785,7 @@ function DashboardPage() {
 
       <main className="flex-1 flex flex-col p-1 sm:p-2 md:p-4 lg:p-6">
         {/* Fixed breadcrumbs navigation */}
-        <div className="sticky top-8 z-30 bg-muted/40 pt-1 pb-2 -mx-4 px-4 text-xs text-muted-foreground">
+        <div className="sticky top-7 z-30 bg-muted/40 pt-0 pb-0 -mx-4 px-4 text-[10px] text-muted-foreground">
           <FolderBreadcrumbs 
             currentFolderId={currentFolderId}
             folders={availableFolders}
@@ -1794,7 +1794,7 @@ function DashboardPage() {
         </div>
 
         {/* Scrollable content area */}
-        <div className="flex-1 overflow-auto" style={{ height: 'calc(100vh - 80px)' }}>
+        <div className="flex-1 overflow-auto">
           {selectedDocument && (
             <>
               <div className="flex justify-end mb-2 gap-2">
@@ -1818,7 +1818,7 @@ function DashboardPage() {
               
               {/* Document Viewer and Chat Interface */}
               {isViewerVisible && (
-                <div className={`mb-4 ${isMaximized ? 'fixed inset-0 z-50 bg-background p-6' : 'h-[60vh] overflow-auto border rounded-md'}`}>
+                <div className={`mb-4 ${isMaximized && isViewerVisible ? 'hidden' : ''}`}>
                   <div className="h-full flex flex-col">
                     <DocumentViewer document={selectedDocument} />
                     <ChatInterface documentId={selectedDocument.id} document={selectedDocument} />
@@ -1828,18 +1828,18 @@ function DashboardPage() {
             </>
           )}
           
-          <div className={`flex-1 flex flex-col overflow-hidden ${isMaximized && isViewerVisible ? 'hidden' : ''}`}>
+          <div className={`flex-1 flex flex-col overflow-auto ${isMaximized && isViewerVisible ? 'hidden' : ''}`}>
             {/* Favorites Section removed to simplify UI and reduce whitespace */}
 
             {/* Document List/Grid Section - Takes remaining space */}
-            <div className="flex-1 overflow-hidden p-3"> {/* Container for document section */} 
+            <div className="flex-1 overflow-auto p-3 pt-0"> {/* Container for document section */}
               {/* Document Management Toolbar */} 
-              <div className="mb-2"> {/* Reduced margin-bottom */} 
+              <div className="mb-0 sm:mb-1"> {/* Reduced margin-bottom */} 
                 <div className="flex items-center justify-between bg-muted/30 p-1.5 rounded-md">
                   {/* Left side - Primary Actions */} 
                   <div className="flex items-center space-x-1.5">
                     {/* New Button with Dropdown */}
-                    <DropdownMenu>
+                    <DropdownMenu modal={false}>
                       <DropdownMenuTrigger asChild>
                         <Button variant="default" size="sm" className="h-7 px-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                           <Plus className="h-3.5 w-3.5 mr-1.5" />
@@ -1936,8 +1936,8 @@ function DashboardPage() {
               {/* Simplified Upload Dialog */}
               <Dialog 
                 open={isUploadDialogOpen} 
-                // REMOVED onOpenChange={setIsUploadDialogOpen}
-                modal={false}
+                onOpenChange={setIsUploadDialogOpen}
+                modal={true}
               >
                 <DialogContent className="sm:max-w-[525px]">
                   <DialogHeader>
@@ -1977,7 +1977,7 @@ function DashboardPage() {
                 </div>
               ) : (
                 <>
-                  <div className="h-[calc(100vh-220px)] overflow-auto">
+                  <div className="h-[calc(100vh-160px)] sm:h-[calc(100vh-120px)] overflow-auto">
                     {viewMode === 'list' ? (
                       <DndProvider backend={HTML5Backend}>
                         <DocumentTable 
@@ -2024,7 +2024,7 @@ function DashboardPage() {
           </div>
         </div>
       </main>
-      <Dialog open={showCreateFolderDialog} onOpenChange={setShowCreateFolderDialog} modal={false}>
+      <Dialog open={showCreateFolderDialog} onOpenChange={setShowCreateFolderDialog} modal={true}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>Create New Folder</DialogTitle>

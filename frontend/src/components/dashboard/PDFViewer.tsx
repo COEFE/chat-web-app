@@ -32,7 +32,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1); 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pagesRef = useRef<HTMLDivElement>(null);
+  const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
   const pdfDocRef = useRef<PDFDocumentProxy | null>(null); 
   const renderTaskRef = useRef<RenderTask | null>(null); 
 
@@ -92,67 +93,88 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [fileUrl]); 
 
   useEffect(() => {
-    const renderPage = async () => {
-      if (!pdfDocRef.current || !canvasRef.current || numPages === 0) {
+    const renderAllPages = async () => {
+      if (!pdfDocRef.current || numPages === 0) {
         return; 
       }
 
+      // Cancel any ongoing rendering tasks
       if (renderTaskRef.current) {
         renderTaskRef.current.cancel();
+        renderTaskRef.current = null;
       }
 
       try {
-        const pageNumber = Math.max(1, Math.min(currentPage, numPages)); 
-        console.log(`Rendering page ${pageNumber}...`);
-        const page: PDFPageProxy = await pdfDocRef.current.getPage(pageNumber);
+        console.log(`Rendering all ${numPages} pages...`);
+        const containerWidth = pagesRef.current?.clientWidth || 800;
+        const maxWidth = Math.min(containerWidth - 32, 800); // Account for padding
 
-        const canvas = canvasRef.current;
-        const context = canvas.getContext('2d');
-        if (!context) {
-          throw new Error('Could not get canvas context');
+        // Render each page
+        for (let pageNumber = 1; pageNumber <= numPages; pageNumber++) {
+          const page: PDFPageProxy = await pdfDocRef.current.getPage(pageNumber);
+          
+          // Get the canvas for this page
+          const canvas = document.getElementById(`pdf-page-${pageNumber}`) as HTMLCanvasElement;
+          if (!canvas) continue;
+          
+          const context = canvas.getContext('2d');
+          if (!context) {
+            throw new Error('Could not get canvas context');
+          }
+
+          // Calculate scale to fit width
+          const viewport = page.getViewport({ scale: 1 }); 
+          const scale = maxWidth / viewport.width;
+          const scaledViewport = page.getViewport({ scale });
+
+          // Set canvas dimensions
+          canvas.width = Math.floor(scaledViewport.width * (window.devicePixelRatio || 1));
+          canvas.height = Math.floor(scaledViewport.height * (window.devicePixelRatio || 1));
+          canvas.style.width = `${Math.floor(scaledViewport.width)}px`;
+          canvas.style.height = `${Math.floor(scaledViewport.height)}px`;
+
+          const transform = (window.devicePixelRatio || 1) !== 1 ? [window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0] : undefined;
+
+          const renderContext = {
+            canvasContext: context,
+            viewport: scaledViewport,
+            transform: transform, 
+          };
+          
+          // Render the page
+          const renderTask = page.render(renderContext);
+          await renderTask.promise;
+          console.log(`Page ${pageNumber} rendered.`);
         }
-
-        const desiredWidth = canvas.parentElement?.clientWidth || 800; 
-        const viewport = page.getViewport({ scale: 1 }); 
-        const scale = desiredWidth / viewport.width;
-        const scaledViewport = page.getViewport({ scale });
-
-        canvas.width = Math.floor(scaledViewport.width * (window.devicePixelRatio || 1));
-        canvas.height = Math.floor(scaledViewport.height * (window.devicePixelRatio || 1));
-        canvas.style.width = `${Math.floor(scaledViewport.width)}px`;
-        canvas.style.height = `${Math.floor(scaledViewport.height)}px`;
-
-        const transform = (window.devicePixelRatio || 1) !== 1 ? [window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0] : undefined;
-
-        const renderContext = {
-          canvasContext: context,
-          viewport: scaledViewport,
-          transform: transform, 
-        };
-        
-        renderTaskRef.current = page.render(renderContext);
-        await renderTaskRef.current.promise;
-        renderTaskRef.current = null; 
-        console.log(`Page ${pageNumber} rendered.`);
 
       } catch (err: any) {
         if (err.name !== 'RenderingCancelledException') {
-            console.error(`Failed to render page ${currentPage}:`, err);
-            setError(`Failed to render page ${currentPage}: ${err.message}`);
+            console.error(`Failed to render PDF:`, err);
+            setError(`Failed to render PDF: ${err.message}`);
         }
       }
     };
 
-    renderPage();
+    renderAllPages();
 
-  }, [pdfDocRef, currentPage, numPages, canvasRef]); 
+  }, [pdfDocRef, numPages]); 
+
+  const scrollToPage = (pageNumber: number) => {
+    const pageElement = document.getElementById(`pdf-page-${pageNumber}`);
+    if (pageElement) {
+      pageElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setCurrentPage(pageNumber);
+    }
+  };
 
   const goToPreviousPage = () => {
-    setCurrentPage((prev) => Math.max(1, prev - 1));
+    const newPage = Math.max(1, currentPage - 1);
+    scrollToPage(newPage);
   };
 
   const goToNextPage = () => {
-    setCurrentPage((prev) => Math.min(numPages, prev + 1));
+    const newPage = Math.min(numPages, currentPage + 1);
+    scrollToPage(newPage);
   };
 
   return (
@@ -161,12 +183,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       className
     )}>
       {/* Header with controls */}
-      <div className="flex items-center justify-between p-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="text-sm font-medium truncate flex-grow px-2">
-          {fileName || 'PDF Document'}
-        </div>
-        
-        {/* Right Controls */}
+      <div className="flex items-center justify-end p-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        {/* Controls */}
         <div className="flex items-center space-x-1">
           <a
             href={fileUrl}
@@ -196,7 +214,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       </div>
       
       {/* Main content area */}
-      <div className="flex-grow relative">
+      <div className="flex-grow relative overflow-auto" ref={pagesRef}>
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-50 dark:bg-gray-900 z-10">
             <div className="text-center p-4">
@@ -218,19 +236,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           </div>
         )}
         
-        {/* PDF Canvas */}
-        <canvas 
-          ref={canvasRef}
-          className={`w-full h-full border-0 ${isLoading || error ? 'hidden' : 'block'}`}
-          style={{ 
-            display: 'block',
-            backgroundColor: '#f5f5f5'
-          }}
-        />
+        {/* PDF Pages Container */}
+        <div className={`flex flex-col items-center p-4 ${isLoading || error ? 'hidden' : 'block'}`}>
+          {Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
+            <div key={pageNum} className="mb-4 w-full max-w-3xl bg-white shadow-md">
+              <div className="bg-gray-100 dark:bg-gray-800 py-1 px-2 text-xs text-center text-gray-500 border-b border-gray-200">
+                Page {pageNum} of {numPages}
+              </div>
+              <canvas 
+                id={`pdf-page-${pageNum}`}
+                className="w-full border-0"
+                style={{ 
+                  display: 'block',
+                  backgroundColor: '#f5f5f5'
+                }}
+              />
+            </div>
+          ))}
+        </div>
         
         {/* Pagination Controls */}
         {numPages > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 p-2 bg-gray-100 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <div className="sticky bottom-0 left-0 right-0 p-2 bg-gray-100 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
             <button
               onClick={goToPreviousPage}
               disabled={currentPage <= 1 || isLoading}
@@ -240,9 +267,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             >
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             </button>
-            <span className="text-sm font-medium text-gray-700 w-16 text-center">
-              {currentPage} / {numPages}
-            </span>
+            
+            {/* Page Selector */}
+            <div className="flex items-center">
+              <select 
+                value={currentPage}
+                onChange={(e) => scrollToPage(parseInt(e.target.value))}
+                className="h-8 w-16 text-sm rounded border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 mr-1"
+                aria-label="Select page"
+              >
+                {Array.from({ length: numPages }, (_, i) => i + 1).map((page) => (
+                  <option key={page} value={page}>Page {page}</option>
+                ))}
+              </select>
+              <span className="text-sm font-medium text-gray-700">
+                of {numPages}
+              </span>
+            </div>
+            
             <button
               onClick={goToNextPage}
               disabled={currentPage >= numPages || isLoading}
