@@ -115,6 +115,8 @@ export const verifySharePassword = async (
 /**
  * Gets share details using the server-side API route.
  * Handles password verification implicitly if needed via passwordToken.
+ * 
+ * This version uses a simplified API route that's more reliable in production.
  */
 export const getShareDetails = async (
     shareId: string,
@@ -126,8 +128,8 @@ export const getShareDetails = async (
          const baseUrl = getBaseUrl();
          console.log(`Using base URL for share details: ${baseUrl}`);
          
-         // Use our server-side API route instead of calling the Cloud Function directly
-         const response = await fetch(`${baseUrl}/api/share-details`, {
+         // Try the simplified API route first for better reliability
+         const response = await fetch(`${baseUrl}/api/share-details-simple`, {
              method: 'POST',
              headers: {
                  'Content-Type': 'application/json',
