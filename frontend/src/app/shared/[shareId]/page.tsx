@@ -1,17 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { notFound } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { getShareDetails, verifySharePassword } from '@/lib/firebase/shares';
-import DocumentViewer from '@/components/document/DocumentViewer';
-import PasswordProtection from '@/components/shared/PasswordProtection';
 import { Button } from '@/components/ui/button';
-import Link from 'next/link';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, FileText, Lock } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import PDFViewer from '@/components/dashboard/PDFViewer';
+import Link from 'next/link';
 
 // This interface should match the response from our API
 interface ShareDetails {
@@ -24,128 +23,66 @@ interface ShareDetails {
   password: boolean | null;
 }
 
-export default async function SharedDocumentPage({ params }: { params: { shareId: string } }) {
-  try {
-    const { shareId } = params;
-    console.log(`[SharedDocumentPage] Fetching share details for: ${shareId}`);
-    
-    const shareDetails = await getShareDetails(shareId);
-    
-    if (!shareDetails) {
-      console.log(`[SharedDocumentPage] Share not found: ${shareId}`);
-      return (
-        <div className="flex flex-col items-center justify-center min-h-screen p-4">
-          <div className="bg-white dark:bg-gray-800 shadow-lg rounded-lg p-8 max-w-md w-full text-center">
-            <h1 className="text-2xl font-bold mb-4">Share Not Found</h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
-              The shared document you're looking for doesn't exist or has expired.
-            </p>
-            <Link href="/">
-              <Button>Return to Home</Button>
-            </Link>
-          </div>
-        </div>
-      );
-    }
+export default function SharedDocumentPage() {
+  const params = useParams();
+  const shareId = params?.shareId as string;
+  const { toast } = useToast();
+  
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [shareDetails, setShareDetails] = useState<ShareDetails | null>(null);
+  const [passwordProtected, setPasswordProtected] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [verifyingPassword, setVerifyingPassword] = useState(false);
+  const [accessGranted, setAccessGranted] = useState(false);
+  const [documentUrl, setDocumentUrl] = useState<string | null>(null);
 
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [passwordProtected, setPasswordProtected] = useState(false);
-    const [passwordInput, setPasswordInput] = useState('');
-    const [verifyingPassword, setVerifyingPassword] = useState(false);
-    const [accessGranted, setAccessGranted] = useState(false);
-    const [documentUrl, setDocumentUrl] = useState<string | null>(null);
-
-    // Fetch share details
-    useEffect(() => {
-      async function fetchShareDetails() {
-        if (!shareId) return;
-        
-        try {
-          setLoading(true);
-          const details = await getShareDetails(shareId);
-          // Convert the API response to our ShareDetails type
-          const shareDetails: ShareDetails = {
-            documentId: details.documentId,
-            documentName: details.documentName,
-            documentPath: details.documentPath,
-            expiresAt: details.expiresAt,
-            includeChat: details.includeChat,
-            accessType: details.accessType as 'view' | 'comment',
-            password: details.password
-          };
-          setShareDetails(shareDetails);
-          
-          // Check if password protected
-          if (shareDetails.password) {
-            setPasswordProtected(true);
-          } else {
-            setAccessGranted(true);
-            // Generate document URL for viewing
-            const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(shareDetails.documentPath)}`;
-            setDocumentUrl(proxyUrl);
-          }
-        } catch (error) {
-          console.error('[SharedDocumentPage] Error fetching shared document:', error);
-          
-          // Return a user-friendly error page instead of notFound()
-          return (
-            <div className="flex flex-col items-center justify-center min-h-screen p-4">
-              <div className="bg-white dark:bg-gray-800 shadow-lg rounded-lg p-8 max-w-md w-full text-center">
-                <h1 className="text-2xl font-bold mb-4">Something Went Wrong</h1>
-                <p className="text-gray-600 dark:text-gray-400 mb-6">
-                  We encountered an error while trying to load this shared document. Please try again later.
-                </p>
-                <div className="text-left bg-gray-100 dark:bg-gray-700 p-4 rounded mb-6 overflow-auto max-h-40">
-                  <code className="text-xs">{error instanceof Error ? error.message : 'Unknown error'}</code>
-                </div>
-                <Link href="/">
-                  <Button>Return to Home</Button>
-                </Link>
-              </div>
-            </div>
-          );
-        } finally {
-          setLoading(false);
-        }
-      }
-      
-      fetchShareDetails();
-    }, [shareId]);
-
-    // Handle password verification
-    const handleVerifyPassword = async () => {
-      if (!shareId || !passwordInput) return;
+  // Fetch share details
+  useEffect(() => {
+    async function fetchShareDetails() {
+      if (!shareId) return;
       
       try {
-        setVerifyingPassword(true);
-        const result = await verifySharePassword(shareId, passwordInput);
+        setLoading(true);
+        const details = await getShareDetails(shareId);
         
-        if (result.accessGranted) {
+        if (!details) {
+          setError('Share not found or has expired');
+          return;
+        }
+        
+        // Convert the API response to our ShareDetails type
+        const shareDetails: ShareDetails = {
+          documentId: details.documentId,
+          documentName: details.documentName,
+          documentPath: details.documentPath,
+          expiresAt: details.expiresAt,
+          includeChat: details.includeChat,
+          accessType: details.accessType as 'view' | 'comment',
+          password: details.password
+        };
+        setShareDetails(shareDetails);
+        
+        // Check if password protected
+        if (shareDetails.password) {
+          setPasswordProtected(true);
+        } else {
           setAccessGranted(true);
           // Generate document URL for viewing
-          if (shareDetails?.documentPath) {
-            const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(shareDetails.documentPath)}`;
-            setDocumentUrl(proxyUrl);
-          }
-          useToast({
-            title: 'Access granted',
-            description: 'Password verified successfully',
-          });
-        } else {
-          useToast({
-            title: 'Access denied',
-            description: 'Incorrect password',
-            variant: 'destructive',
-          });
+          const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(shareDetails.documentPath)}`;
+          setDocumentUrl(proxyUrl);
         }
-      } catch (error) {
-        console.error('[SharedDocumentPage] Error verifying password:', error);
-        useToast({
-          title: 'Verification failed',
-          description: error.message || 'Failed to verify password',
+      } catch (err: any) {
+        console.error('Error fetching share details:', err);
+        setError(err.message || 'Failed to load shared document');
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    fetchShareDetails();
   }, [shareId]);
-  
+
   // Handle password verification
   const handleVerifyPassword = async () => {
     if (!shareId || !passwordInput) return;
@@ -200,63 +137,49 @@ export default async function SharedDocumentPage({ params }: { params: { shareId
     );
   }
   
-  // Error state
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="text-center text-destructive">Error</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-center">{error}</p>
-          </CardContent>
-          <CardFooter className="flex justify-center">
-            <Button variant="outline" onClick={() => window.location.href = '/'}>
-              Return to Home
-            </Button>
-          </CardFooter>
-        </Card>
-      </div>
-    );
-  }
-  
-  // Password verification screen
+  // Password protected state
   if (passwordProtected && !accessGranted) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen p-4">
         <Card className="w-full max-w-md">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Lock className="h-5 w-5" />
-              Password Protected Document
-            </CardTitle>
-            <CardDescription>
-              This document requires a password to access
+            <CardTitle className="text-center">Password Protected Document</CardTitle>
+            <CardDescription className="text-center">
+              This document is password protected. Please enter the password to view it.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input 
-                  id="password" 
-                  type="password" 
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleVerifyPassword()}
-                />
-              </div>
+          <CardContent className="space-y-4">
+            <div className="flex justify-center mb-4">
+              <Lock className="h-12 w-12 text-gray-400" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input 
+                id="password" 
+                type="password" 
+                placeholder="Enter password" 
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleVerifyPassword()}
+              />
             </div>
           </CardContent>
-          <CardFooter>
+          <CardFooter className="flex justify-between">
+            <Link href="/">
+              <Button variant="outline">Cancel</Button>
+            </Link>
             <Button 
-              className="w-full" 
-              onClick={handleVerifyPassword}
-              disabled={verifyingPassword || !passwordInput}
+              onClick={handleVerifyPassword} 
+              disabled={!passwordInput || verifyingPassword}
             >
-              {verifyingPassword && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Verify Password
+              {verifyingPassword ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Verifying
+                </>
+              ) : (
+                'Access Document'
+              )}
             </Button>
           </CardFooter>
         </Card>
