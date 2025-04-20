@@ -337,11 +337,6 @@ export default function SharedDocumentPage() {
               )}
               {isMobile && shareDetails?.includeChat && shareDetails.documentId && chatOpen && (
                 <div className="absolute inset-0 z-40 bg-background flex flex-col">
-                  <div className="flex justify-end p-0 border-b">
-                    <Button variant="ghost" size="icon" onClick={() => setChatOpen(false)} title="Close Chat">
-                      <X className="h-5 w-5" />
-                    </Button>
-                  </div>
                   <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
                     <ChatInterface 
                       documentId={shareDetails.documentId} 
