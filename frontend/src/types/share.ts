@@ -51,6 +51,22 @@ export interface CreateShareInput extends ShareOptions {
   isChatActive?: boolean; // Added optional field
 }
 
+/**
+ * Input for the sendShareInvite function to send email invitations
+ */
+export interface SendShareInviteInput {
+  shareId: string; // The ID of the share to send an invitation for
+  recipientEmail: string; // The email address to send the invitation to
+  documentName: string; // The name of the document being shared
+}
+
+/**
+ * Output returned by the sendShareInvite function
+ */
+export interface SendShareInviteOutput {
+  success: boolean; // Whether the invitation was sent successfully
+}
+
 // Output type for the 'createShare' Cloud Function
 export interface CreateShareOutput {
   id: string; // The ID of the created share document

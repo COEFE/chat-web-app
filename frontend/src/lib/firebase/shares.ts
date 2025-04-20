@@ -7,7 +7,9 @@ import {
   VerifySharePasswordInput,
   VerifySharePasswordOutput,
   GetShareDetailsInput,
-  GetShareDetailsOutput
+  GetShareDetailsOutput,
+  SendShareInviteInput,
+  SendShareInviteOutput
 } from "@/types/share";
 
 /**
@@ -54,16 +56,66 @@ export const createShareLink = async (
 /**
  * Gets the base URL for API calls, ensuring it works in both development and production
  */
-const getBaseUrl = () => {
-    // Check if we're in the browser
-    if (typeof window !== 'undefined') {
-        // Use the current window location as the base
-        return window.location.origin;
+export const getBaseUrl = (): string => {
+  // In production, we use the host from the window location
+  // In development, we use localhost:3000
+  const isLocalhost = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+  
+  if (isLocalhost) {
+    return 'http://localhost:3000';
+  }
+  
+  if (typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.host}`;
+  }
+  
+  // Fallback for server-side rendering
+  return 'https://your-production-domain.com';
+};
+
+/**
+ * Sends an email invitation for a shared document.
+ * 
+ * @param options - Contains shareId, recipientEmail, and documentName.
+ * @returns A promise that resolves with the result indicating success.
+ */
+export const sendShareInvite = async (
+  options: SendShareInviteInput
+): Promise<SendShareInviteOutput> => {
+  if (!functionsInstance) {
+    throw new Error("Firebase Functions is not initialized.");
+  }
+
+  // Create the cloud function reference
+  const sendShareInviteFunction = httpsCallable<SendShareInviteInput, SendShareInviteOutput>(
+    functionsInstance,
+    'sendShareInvite' // This will be the name of the Firebase Function to implement
+  );
+
+  try {
+    console.log("Calling sendShareInvite function with options:", options);
+    const result = await sendShareInviteFunction(options);
+    console.log("Cloud Function result:", result.data);
+
+    if (!result.data || !result.data.success) {
+      throw new Error("Failed to send invitation email.");
     }
-    // Fallback for server-side rendering
-    return process.env.NEXT_PUBLIC_VERCEL_URL ? 
-        `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : 
-        'http://localhost:3000';
+    
+    return result.data;
+  } catch (error: any) {
+    console.error("Error calling sendShareInvite function:", error);
+    let errorMessage = "Failed to send invitation email.";
+    
+    if (error.code === 'unauthenticated') {
+      errorMessage = "You must be logged in to share documents.";
+    } else if (error.details?.message) {
+      errorMessage = error.details.message;
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    throw new Error(errorMessage);
+  }
 };
 
 /**

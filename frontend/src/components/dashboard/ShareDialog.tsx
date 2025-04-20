@@ -13,9 +13,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch"; // Ensure this path is correct for Shadcn switch
 import { useState, useEffect, useRef } from "react";
-import { createShareLink } from "@/lib/firebase/shares"; // Path relative to src
+import { createShareLink, sendShareInvite } from "@/lib/firebase/shares"; // Path relative to src
 import { ShareOptions, CreateShareInput } from "@/types/share"; // Path relative to src
-import { Copy, Loader2, Share2 } from "lucide-react";
+import { Copy, Loader2, Share2, Mail } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 
 interface ShareDialogProps {
@@ -33,6 +33,8 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
   const [password, setPassword] = useState<string>("");
   const [shareLink, setShareLink] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [emailAddress, setEmailAddress] = useState<string>("");
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const dialogContentRef = useRef<HTMLDivElement>(null);
@@ -45,6 +47,8 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
       setIncludeChat(false);
       setIsChatActive(false);
       setExpirationDays(7);
+      setEmailAddress("");
+      setSendingEmail(false);
     }
   }, [open, documentId]);
 
@@ -91,6 +95,41 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
         description: "Share link copied to clipboard.",
       });
     }
+  };
+
+  const handleSendEmail = async () => {
+    if (!shareLink || !emailAddress || !validateEmail(emailAddress)) {
+      setError("Please enter a valid email address");
+      return;
+    }
+
+    setSendingEmail(true);
+    setError(null);
+
+    try {
+      await sendShareInvite({
+        shareId: shareLink.split("/shared/")[1],
+        recipientEmail: emailAddress,
+        documentName
+      });
+
+      toast({
+        title: "Invitation Sent!",
+        description: `The document has been shared with ${emailAddress}`,
+      });
+      
+      setEmailAddress(""); // Clear the email field after successful send
+    } catch (err: any) {
+      console.error("Error sending invitation:", err);
+      setError(err.message || "Failed to send invitation.");
+    } finally {
+      setSendingEmail(false);
+    }
+  };
+
+  const validateEmail = (email: string): boolean => {
+    const re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    return re.test(email);
   };
 
   return (
@@ -173,14 +212,41 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
 
           {/* Generated Link Section */}
           {shareLink && (
-            <div className="space-y-2 mt-4 p-4 border rounded-md bg-muted/50">
-              <Label htmlFor="share-link">Shareable Link</Label>
-              <div className="flex items-center space-x-2">
-                <Input id="share-link" value={shareLink} readOnly />
-                <Button type="button" size="sm" onClick={handleCopyToClipboard}>
-                  <span className="sr-only">Copy</span>
-                  <Copy className="h-4 w-4" />
-                </Button>
+            <div className="space-y-4 mt-4 p-4 border rounded-md bg-muted/50">
+              <div>
+                <Label htmlFor="share-link">Shareable Link</Label>
+                <div className="flex items-center space-x-2">
+                  <Input id="share-link" value={shareLink} readOnly />
+                  <Button type="button" size="sm" onClick={handleCopyToClipboard}>
+                    <span className="sr-only">Copy</span>
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="pt-2 border-t border-border">
+                <Label htmlFor="email-invite">Send Invitation by Email</Label>
+                <div className="flex items-center space-x-2 mt-1">
+                  <Input 
+                    id="email-invite" 
+                    type="email" 
+                    placeholder="recipient@example.com"
+                    value={emailAddress}
+                    onChange={(e) => setEmailAddress(e.target.value)}
+                  />
+                  <Button 
+                    type="button" 
+                    size="sm" 
+                    onClick={handleSendEmail}
+                    disabled={sendingEmail || !emailAddress}
+                  >
+                    {sendingEmail ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Mail className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
           )}
