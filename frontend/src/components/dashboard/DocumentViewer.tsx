@@ -491,8 +491,12 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               ))}
             </TabsList>
             {workbookData.map((sheet) => (
-              <TabsContent key={sheet.sheetName} value={sheet.sheetName}>
-                <div className="overflow-auto border rounded-md" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+              <TabsContent 
+                key={sheet.sheetName} 
+                value={sheet.sheetName} 
+                className="overflow-auto border rounded-md" 
+                style={{ maxHeight: 'calc(100vh - 200px)' }}
+              >
                   <table className="border-collapse w-full" style={{ tableLayout: 'auto' }}>
                     <colgroup>
                       {/* Column for row headers */}
@@ -555,7 +559,6 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                       ))}
                     </tbody>
                   </table>
-                </div>
               </TabsContent>
             ))}
           </Tabs>
