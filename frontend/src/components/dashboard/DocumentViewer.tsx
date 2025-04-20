@@ -496,7 +496,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                   <table className="border-collapse w-full" style={{ tableLayout: 'fixed' }}>
                     <colgroup>
                       {/* Column for row headers */}
-                      <col style={{ width: '35px' }} />
+                      <col style={{ width: '48px' }} />
                       
                       {/* Columns for data - generate one col element per column */}
                       {sheet.data[0]?.map((_: any, colIndex: number) => (
