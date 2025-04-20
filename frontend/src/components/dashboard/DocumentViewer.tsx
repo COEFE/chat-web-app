@@ -478,8 +478,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               <TabsContent 
                 key={sheet.sheetName} 
                 value={sheet.sheetName} 
-                className="overflow-auto border rounded-md" 
-                style={{ maxHeight: 'calc(100vh - 200px)' }}
+                className="overflow-auto border rounded-md flex-1 h-full"
               >
                   <table className="border-collapse w-full" style={{ tableLayout: 'auto' }}>
                     <colgroup>
