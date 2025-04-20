@@ -237,8 +237,8 @@ export default function SharedDocumentPage() {
           
           {/* Action buttons */}
           <div className="flex items-center gap-2">
-            {/* Maximize/Minimize Button */}
-            {(!isMobile || !chatOpen) && shareDetails?.includeChat && (
+            {/* Maximize/Minimize Button (Desktop Only) */}
+            {!isMobile && shareDetails?.includeChat && (
               <Button
                 variant="outline"
                 size="sm"
