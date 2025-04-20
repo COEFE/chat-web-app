@@ -5,7 +5,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getFunctions, httpsCallable } from 'firebase/functions'; 
 import { useAuth } from '@/context/AuthContext';
-import { db, functionsInstance, storage, app } from '@/lib/firebaseConfig'; 
+import { db, functionsInstance, storage, app } from '@/lib/firebaseConfig';
+import { ThemeToggle } from '@/components/ui/theme-toggle'; 
 import { 
   collection, 
   query, 
@@ -74,7 +75,9 @@ import {
   FolderPlus, 
   ArrowUpDown,
   Menu,
-  Share2, // Add Share2
+  Share2, 
+  Moon, 
+  Sun
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 // Badge component removed
@@ -1823,6 +1826,9 @@ function DashboardPage() {
         </div>
         
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
+          {/* Dark mode toggle */}
+          <ThemeToggle />
+          
           {/* Welcome message - Simplified on mobile */}
           <span className="text-xs text-muted-foreground whitespace-nowrap hidden sm:inline-block">Welcome, {user.displayName || user.email}</span>
           <span className="text-xs text-muted-foreground whitespace-nowrap sm:hidden">{user.displayName?.split(' ')[0] || user.email?.split('@')[0]}</span>
