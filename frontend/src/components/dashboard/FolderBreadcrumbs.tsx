@@ -51,6 +51,11 @@ function FolderBreadcrumbsBase({ currentFolderId, folders, onNavigate }: FolderB
     };
   }, [folders]);
 
+  // Only render breadcrumbs when not at the root folder
+  if (!currentFolderId) {
+    return null;
+  }
+  
   return (
     <Breadcrumb className="mb-4">
       <BreadcrumbList>
