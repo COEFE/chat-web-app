@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
-import { Loader2, FileText, Lock, MessageSquare, X } from 'lucide-react';
+import { Loader2, FileText, Lock, MessageSquare, X, Maximize2, Minimize2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import PDFViewer from '@/components/dashboard/PDFViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
@@ -63,6 +63,7 @@ export default function SharedDocumentPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
   const [shareDetails, setShareDetails] = useState<ShareDetails | null>(null);
   const [passwordProtected, setPasswordProtected] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
@@ -234,18 +235,33 @@ export default function SharedDocumentPage() {
             </h1>
           </div>
           
-          {/* Chat Toggle Button (Mobile Only) */}
-          {isMobile && shareDetails?.includeChat && shareDetails?.documentId && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setChatOpen(prev => !prev)}
-              title={chatOpen ? "Hide Chat" : "Show Chat"}
-              className="md:hidden"
-            >
-              {chatOpen ? <X className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}
-            </Button>
-          )}
+          {/* Action buttons */}
+          <div className="flex items-center gap-2">
+            {/* Maximize/Minimize Button */}
+            {(!isMobile || !chatOpen) && shareDetails?.includeChat && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsMaximized(prev => !prev)}
+                title={isMaximized ? "Exit full screen" : "Full screen"}
+              >
+                {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </Button>
+            )}
+            
+            {/* Chat Toggle Button (Mobile Only) */}
+            {isMobile && shareDetails?.includeChat && shareDetails?.documentId && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setChatOpen(prev => !prev)}
+                title={chatOpen ? "Hide Chat" : "Show Chat"}
+                className="md:hidden"
+              >
+                {chatOpen ? <X className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}
+              </Button>
+            )}
+          </div>
         </div>
       </header>
       
@@ -264,7 +280,7 @@ export default function SharedDocumentPage() {
         )}
         
         {accessGranted && !error && (
-          !isMobile && shareDetails?.includeChat ? (
+          !isMobile && shareDetails?.includeChat && !isMaximized ? (
             // Split View: Document + Chat
             <ResizablePanelGroup 
               direction="horizontal"
@@ -310,7 +326,7 @@ export default function SharedDocumentPage() {
               </ResizablePanel>
             </ResizablePanelGroup>
           ) : (
-            // Document Only View
+            // Document Only View or Maximized View
             <div className="flex-1 overflow-hidden relative h-full w-full"> 
               {documentUrl ? (
                 shareDetails?.documentPath?.toLowerCase().endsWith('.pdf') ? (
@@ -335,7 +351,7 @@ export default function SharedDocumentPage() {
                   </Card>
                 </div>
               )}
-              {isMobile && shareDetails?.includeChat && shareDetails.documentId && chatOpen && (
+              {isMobile && shareDetails?.includeChat && shareDetails.documentId && chatOpen && !isMaximized && (
                 <div className="absolute inset-0 z-40 bg-background flex flex-col">
                   <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
                     <ChatInterface 
