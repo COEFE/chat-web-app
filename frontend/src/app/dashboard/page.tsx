@@ -1056,7 +1056,7 @@ function DocumentTable({
 
       {/* Load More Button */}
       {hasMoreItems && (
-        <div className="flex justify-center py-4 border-t">
+        <div className="flex justify-center py-6 mb-4 border-t">
           <Button
             variant="outline"
             size="sm"
