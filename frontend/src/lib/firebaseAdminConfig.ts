@@ -15,9 +15,26 @@ export function initializeFirebaseAdmin(): admin.app.App {
   }
 
   try {
+    // Check if the service account JSON is available
+    let credential;
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      try {
+        // Parse the service account JSON
+        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+        console.log('[FirebaseAdmin] Using service account from FIREBASE_SERVICE_ACCOUNT');
+        credential = admin.credential.cert(serviceAccount);
+      } catch (parseError) {
+        console.error('[FirebaseAdmin] Error parsing FIREBASE_SERVICE_ACCOUNT:', parseError);
+        // Continue without credential - will fall back to Application Default Credentials
+      }
+    } else {
+      console.log('[FirebaseAdmin] No service account JSON found, using Application Default Credentials');
+    }
+
     firebaseApp = admin.initializeApp({
       projectId: process.env.FIREBASE_PROJECT_ID || 'web-chat-app-fa7f0',
-      storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com'
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com',
+      credential
     });
     
     console.log('[FirebaseAdmin] Firebase Admin SDK initialized successfully');
