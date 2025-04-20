@@ -478,9 +478,9 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               <TabsContent 
                 key={sheet.sheetName} 
                 value={sheet.sheetName} 
-                className="overflow-auto border rounded-md flex-1 h-full"
+                className="overflow-auto border rounded-md flex-1 h-full relative pb-8"
               >
-                  <table className="border-collapse w-full" style={{ tableLayout: 'auto' }}>
+                  <table className="border-collapse w-full mb-6" style={{ tableLayout: 'auto' }}>
                     <colgroup>
                       {/* Column for row headers */}
                       <col style={{ width: '30px', minWidth: '30px', maxWidth: '40px' }} />
@@ -542,6 +542,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                       ))}
                     </tbody>
                   </table>
+                  <div className="h-8"></div> {/* Extra bottom padding for scrolling */}
               </TabsContent>
             ))}
           </Tabs>
@@ -549,15 +550,18 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       
       {/* DOCX Viewer */}
       {!isLoading && !error && isDocx && docxHtml && (
-        <div 
-          className="flex-1 overflow-auto border rounded-md p-4 prose prose-sm max-w-none"
-          dangerouslySetInnerHTML={{ __html: docxHtml }}
-        />
+        <div className="flex-1 overflow-auto border rounded-md relative">
+          <div 
+            className="p-4 prose prose-sm max-w-none pb-10"
+            dangerouslySetInnerHTML={{ __html: docxHtml }}
+          />
+          <div className="h-8"></div> {/* Extra bottom padding for DOCX */}
+        </div>
       )}
       
       {/* Image Viewer */}
       {!isLoading && !error && isImage && imageUrl && (
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full pb-4">
           <div className="flex justify-center gap-2 p-2 bg-muted/20 border-b">
             <Button 
               variant="outline" 
@@ -641,7 +645,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
 
       {/* Unsupported format / No content */} 
       {!isLoading && !error && !isPreviewSupported && (
-        <div className="flex-1 flex items-center justify-center border rounded-md bg-muted/10">
+        <div className="flex-1 flex items-center justify-center border rounded-md bg-muted/10 py-6">
           <div className="text-center p-4">
             <p className="text-muted-foreground mb-2">Preview not available for {document?.contentType || 'this file type'}.</p>
             {document?.storagePath && (

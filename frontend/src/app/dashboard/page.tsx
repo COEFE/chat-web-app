@@ -1876,9 +1876,9 @@ function DashboardPage() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col p-1 sm:p-2 md:p-4 lg:p-6">
+      <main className="flex-1 flex flex-col p-0 sm:p-0">
         {/* Fixed breadcrumbs navigation */}
-        <div className="sticky top-7 z-30 bg-muted/40 pt-0 pb-0 -mx-4 px-4 text-[10px] text-muted-foreground">
+        <div className="sticky top-7 z-30 bg-muted/40 pt-0 pb-0 px-4 text-[10px] text-muted-foreground">
           <FolderBreadcrumbs 
             currentFolderId={currentFolderId}
             folders={availableFolders}
@@ -1925,10 +1925,10 @@ function DashboardPage() {
             {/* Favorites Section removed to simplify UI and reduce whitespace */}
 
             {/* Document List/Grid Section - Takes remaining space */}
-            <div className="flex-1 overflow-auto p-3 pt-0"> {/* Container for document section */}
+            <div className="flex-1 overflow-auto px-1 pt-0 w-full"> {/* Container for document section */}
               {/* Document Management Toolbar */} 
               <div className="mb-0 sm:mb-1"> {/* Reduced margin-bottom */} 
-                <div className="flex items-center justify-between bg-muted/30 p-1.5 rounded-md">
+                <div className="flex items-center justify-between bg-muted/30 p-1.5 rounded-md mb-2">
                   {/* Left side - Primary Actions */} 
                   <div className="flex items-center space-x-1.5">
                     {/* New Button with Dropdown */}

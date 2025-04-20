@@ -12,10 +12,10 @@ interface BreadcrumbsProps {
 
 const Breadcrumbs: React.FC<BreadcrumbsProps> = ({ path, onNavigate }) => {
   return (
-    <nav aria-label="breadcrumb" className="mb-4 flex items-center space-x-1 text-sm text-muted-foreground">
+    <nav aria-label="breadcrumb" className="mb-4 flex items-center space-x-1 text-sm text-muted-foreground pt-1">
       <button
         onClick={() => onNavigate(null)}
-        className="hover:underline focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-sm"
+        className="hover:underline focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-sm py-1.5"
       >
         Home
       </button>
@@ -29,7 +29,7 @@ const Breadcrumbs: React.FC<BreadcrumbsProps> = ({ path, onNavigate }) => {
           ) : (
             <button
               onClick={() => onNavigate(item.id)}
-              className="hover:underline focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-sm"
+              className="hover:underline focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-sm py-1.5"
             >
               {item.name}
             </button>
