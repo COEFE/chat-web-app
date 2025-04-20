@@ -369,63 +369,6 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
 
   return (
     <div className="flex flex-col h-full bg-background relative">
-      {/* Header with Title and Refresh Button */}
-      {isSheet && document.id && (
-        <div className="mb-2 p-2 bg-muted/20 border rounded-md">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <div className="text-sm font-medium">Document ID:</div>
-              <code className="px-2 py-1 bg-primary/10 rounded text-xs">{document.id}</code>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="h-7 px-2 text-xs"
-                onClick={() => {
-                  navigator.clipboard.writeText(document.id);
-                  // You could add a toast notification here
-                }}
-                title="Copy document ID to clipboard"
-              >
-                Copy
-              </Button>
-            </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={handleRefresh}
-              className="h-7 px-2 text-xs"
-              disabled={isRefreshing || isLoading} // Disable while loading/refreshing
-            >
-              {isRefreshing ? (
-                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3 w-3 mr-1" />
-              )}
-              {isRefreshing ? 'Refreshing...' : 'Refresh Document'}
-            </Button>
-            {document.storagePath && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                asChild
-              >
-                <a 
-                  href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}`}
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  download={document.name || 'document.xlsx'}
-                >
-                  Download
-                </a>
-              </Button>
-            )}
-          </div>
-          <div className="text-xs text-muted-foreground">
-            Use this ID when asking Claude to edit this Excel file
-          </div>
-        </div>
-      )}
       {/* Loading indicator */}
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
@@ -464,35 +407,73 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
           defaultValue={activeSheetName || workbookData[0]?.sheetName || ''}
           className="flex-1 overflow-auto flex flex-col"
         >
-            <TabsList className="mb-2">
-              {workbookData.map((sheet) => (
-                <TabsTrigger 
-                  key={sheet.sheetName} 
-                  value={sheet.sheetName}
-                  onClick={() => {
-                    // Set active sheet name in state
-                    setActiveSheetName(sheet.sheetName);
-                    
-                    // Store active sheet in localStorage with document ID as part of the key
-                    if (document?.id) {
-                      localStorage.setItem(`activeSheet-${document.id}`, sheet.sheetName);
-                      console.log(`[SheetSelection] Set active sheet for document ${document.id}: ${sheet.sheetName}`);
+            <div className="flex items-center justify-between mb-2">
+              <TabsList>
+                {workbookData.map((sheet) => (
+                  <TabsTrigger 
+                    key={sheet.sheetName} 
+                    value={sheet.sheetName}
+                    onClick={() => {
+                      // Set active sheet name in state
+                      setActiveSheetName(sheet.sheetName);
                       
-                      // Dispatch a custom event to notify other components of the active sheet change
-                      const event = new CustomEvent('activeSheetChanged', {
-                        detail: {
-                          documentId: document.id,
-                          sheetName: sheet.sheetName
-                        }
-                      });
-                      window.dispatchEvent(event);
-                    }
-                  }}
+                      // Store active sheet in localStorage with document ID as part of the key
+                      if (document?.id) {
+                        localStorage.setItem(`activeSheet-${document.id}`, sheet.sheetName);
+                        console.log(`[SheetSelection] Set active sheet for document ${document.id}: ${sheet.sheetName}`);
+                        
+                        // Dispatch a custom event to notify other components of the active sheet change
+                        const event = new CustomEvent('activeSheetChanged', {
+                          detail: {
+                            documentId: document.id,
+                            sheetName: sheet.sheetName
+                          }
+                        });
+                        window.dispatchEvent(event);
+                      }
+                    }}
+                  >
+                    {sheet.sheetName}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleRefresh}
+                  className="h-7 px-2 text-xs"
+                  disabled={isRefreshing || isLoading}
                 >
-                  {sheet.sheetName}
-                </TabsTrigger>
-              ))}
-            </TabsList>
+                  {isRefreshing ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                  )}
+                  {isRefreshing ? 'Refreshing...' : 'Refresh'}
+                </Button>
+                
+                {document.storagePath && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    asChild
+                  >
+                    <a 
+                      href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}`}
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      download={document.name || 'document.xlsx'}
+                    >
+                      Download
+                    </a>
+                  </Button>
+                )}
+              </div>
+            </div>
+
             {workbookData.map((sheet) => (
               <TabsContent 
                 key={sheet.sheetName} 
