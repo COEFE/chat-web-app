@@ -286,24 +286,29 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           
           <div className="w-px h-5 sm:h-6 bg-gray-300 dark:bg-gray-700 mx-0.5 sm:mx-1"></div>
           
-          <a
-            href={fileUrl}
-            download={fileName || 'document.pdf'}
-            className="inline-flex items-center justify-center h-6 w-6 sm:h-8 sm:w-8 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground"
+          <Button
+            variant="ghost"
+            size="icon"
+            asChild
+            className="h-6 w-6 sm:h-8 sm:w-8 p-0"
             title="Download PDF"
           >
-            <Download className="h-3 w-3 sm:h-4 sm:w-4" />
-          </a>
+            <a href={fileUrl} download={fileName || 'document.pdf'}>
+              <Download className="h-3 w-3 sm:h-4 sm:w-4" />
+            </a>
+          </Button>
           
-          <a
-            href={fileUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center justify-center h-6 w-6 sm:h-8 sm:w-8 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground"
+          <Button
+            variant="ghost"
+            size="icon"
+            asChild
+            className="h-6 w-6 sm:h-8 sm:w-8 p-0"
             title="Open in New Tab"
           >
-            <ExternalLink className="h-3 w-3 sm:h-4 sm:w-4" />
-          </a>
+            <a href={fileUrl} target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="h-3 w-3 sm:h-4 sm:w-4" />
+            </a>
+          </Button>
           
           {onClose && (
             <Button variant="ghost" size="icon" onClick={onClose} title="Close Viewer" className="h-6 w-6 sm:h-8 sm:w-8 p-0">
