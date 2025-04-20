@@ -438,7 +438,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                 ))}
               </TabsList>
               
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 pr-2">
                 <Button 
                   variant="outline" 
                   size="sm" 
