@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { getShareDetails, verifySharePassword } from '@/lib/firebase/shares';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
-import { Loader2, FileText, Lock, MessageSquare } from 'lucide-react';
+import { Loader2, FileText, Lock, MessageSquare, X } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import PDFViewer from '@/components/dashboard/PDFViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
@@ -62,6 +62,7 @@ export default function SharedDocumentPage() {
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
   const [shareDetails, setShareDetails] = useState<ShareDetails | null>(null);
   const [passwordProtected, setPasswordProtected] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
@@ -223,19 +224,32 @@ export default function SharedDocumentPage() {
   }
   
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-col h-screen w-full overflow-hidden">
       <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-14 items-center">
+        <div className="flex h-14 items-center justify-between px-4">
           <div className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
             <h1 className="text-lg font-semibold">
               {shareDetails?.documentName || 'Shared Document'}
             </h1>
           </div>
+          
+          {/* Chat Toggle Button (Mobile Only) */}
+          {isMobile && shareDetails?.includeChat && shareDetails?.documentId && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setChatOpen(prev => !prev)}
+              title={chatOpen ? "Hide Chat" : "Show Chat"}
+              className="md:hidden"
+            >
+              {chatOpen ? <X className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}
+            </Button>
+          )}
         </div>
       </header>
       
-      <main className="flex-1 flex flex-col container py-4"> 
+      <main className="flex-1 flex flex-col overflow-hidden"> 
         {error && (
           <div className="flex items-center justify-center flex-1">
             <Card className="w-full max-w-md">
@@ -254,10 +268,10 @@ export default function SharedDocumentPage() {
             // Split View: Document + Chat
             <ResizablePanelGroup 
               direction="horizontal"
-              className="flex-1 rounded-lg border overflow-hidden" 
+              className="flex-1 overflow-hidden h-full w-full" 
             >
               <ResizablePanel defaultSize={60} minSize={30}> 
-                <div className="flex h-full items-center justify-center p-1"> 
+                <div className="flex h-full w-full overflow-hidden"> 
                   {documentUrl ? (
                     shareDetails?.documentPath?.toLowerCase().endsWith('.pdf') ? (
                       <ErrorBoundary fallback={<div>Error loading PDF.</div>}> 
@@ -297,7 +311,7 @@ export default function SharedDocumentPage() {
             </ResizablePanelGroup>
           ) : (
             // Document Only View
-            <div className="flex-1 border rounded-lg overflow-hidden relative"> 
+            <div className="flex-1 overflow-hidden relative h-full w-full"> 
               {documentUrl ? (
                 shareDetails?.documentPath?.toLowerCase().endsWith('.pdf') ? (
                   <ErrorBoundary fallback={<div>Error loading PDF.</div>}> 
@@ -321,30 +335,20 @@ export default function SharedDocumentPage() {
                   </Card>
                 </div>
               )}
-              {isMobile && shareDetails?.includeChat && shareDetails.documentId && (
-                <Sheet>
-                  <SheetTrigger asChild>
-                    <Button 
-                      variant="default" 
-                      size="icon"
-                      className="fixed bottom-6 right-6 z-50 rounded-full shadow-lg h-14 w-14" 
-                      aria-label="Open Chat"
-                    >
-                      <MessageSquare className="h-6 w-6" />
+              {isMobile && shareDetails?.includeChat && shareDetails.documentId && chatOpen && (
+                <div className="absolute inset-0 z-40 bg-background flex flex-col">
+                  <div className="flex justify-end p-0 border-b">
+                    <Button variant="ghost" size="icon" onClick={() => setChatOpen(false)} title="Close Chat">
+                      <X className="h-5 w-5" />
                     </Button>
-                  </SheetTrigger>
-                  <SheetContent side="bottom" className="h-[75vh] flex flex-col p-0"> 
-                    <SheetHeader className="p-4 border-b">
-                      <SheetTitle>Chat</SheetTitle>
-                    </SheetHeader>
-                    <div className="flex-1 overflow-y-auto"> 
-                      <ChatInterface 
-                        documentId={shareDetails.documentId} 
-                        isReadOnly={!shareDetails.isChatActive}
-                      />
-                    </div>
-                  </SheetContent>
-                </Sheet>
+                  </div>
+                  <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+                    <ChatInterface 
+                      documentId={shareDetails.documentId} 
+                      isReadOnly={!shareDetails.isChatActive}
+                    />
+                  </div>
+                </div>
               )}
             </div>
           )
