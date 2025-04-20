@@ -459,8 +459,11 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       {!isLoading && !error && isSheet && workbookData && (
         // Log refresh key for debugging
         console.log(`[DocumentViewer] Rendering Excel viewer with refreshKey: ${refreshKey}`),
-        <div className="flex-1 overflow-auto" key={`excel-viewer-${refreshKey}`}>
-          <Tabs key={`tabs-${refreshKey}`} defaultValue={activeSheetName || workbookData[0]?.sheetName || ''}>
+        <Tabs 
+          key={`excel-viewer-${refreshKey}`} 
+          defaultValue={activeSheetName || workbookData[0]?.sheetName || ''}
+          className="flex-1 overflow-auto flex flex-col"
+        >
             <TabsList className="mb-2">
               {workbookData.map((sheet) => (
                 <TabsTrigger 
@@ -562,7 +565,6 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               </TabsContent>
             ))}
           </Tabs>
-        </div>
       )}
       
       {/* DOCX Viewer */}
