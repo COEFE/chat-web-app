@@ -1052,6 +1052,8 @@ function DocumentTable({
             </TableBody>
           </ShadcnTable>
         </div>
+        {/* Extra padding when all items are loaded */}
+        {!hasMoreItems && <div className="pb-8" />}
       </div>
 
       {/* Load More Button */}
