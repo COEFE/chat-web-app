@@ -500,7 +500,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                       
                       {/* Columns for data - generate one col element per column */}
                       {sheet.data[0]?.map((_: any, colIndex: number) => (
-                        <col key={colIndex} style={{ minWidth: '80px' }} />
+                        <col key={colIndex} style={{ minWidth: '35px' }} />
                       ))}
                     </colgroup>
                     <thead>
