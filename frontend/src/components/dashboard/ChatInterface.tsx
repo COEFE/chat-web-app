@@ -215,7 +215,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
       </CardHeader>
       <CardContent className="flex-1 overflow-hidden p-0 min-h-0"> {/* Use flex-1 and min-h-0 */}
         <ScrollArea ref={scrollAreaRef} className="h-full"> {/* Restored h-full for proper scrolling */}
-          <div className="p-0"> {/* Removed padding for scroll area content */}
+          <div className="py-0 px-3"> {/* Added horizontal padding */}
             {/* Placeholder for empty chat */}
             {!isLoading && messages.length === 0 && (
               <div className="flex h-full items-center justify-center">
