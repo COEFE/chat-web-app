@@ -3,8 +3,21 @@
 import React, { useState, useEffect, useRef, MouseEvent, WheelEvent, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { Timestamp } from 'firebase/firestore';
+import { 
+  FileText, 
+  X as XIcon, 
+  Loader2, 
+  RefreshCw, 
+  ZoomIn, 
+  ZoomOut, 
+  RotateCw,
+  ChevronDown,
+  ChevronRight,
+  Maximize2,
+  Minimize2,
+  Download,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Loader2, ZoomIn, ZoomOut, RotateCw, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx'; // Import xlsx library
 import mammoth from 'mammoth'; // Import mammoth for DOCX handling
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"; // Import Shadcn Tabs
@@ -445,13 +458,16 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                   onClick={handleRefresh}
                   className="h-7 px-2 text-xs"
                   disabled={isRefreshing || isLoading}
+                  title="Refresh data"
                 >
                   {isRefreshing ? (
-                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    <Loader2 className="h-3 w-3 sm:mr-1 animate-spin" />
                   ) : (
-                    <RefreshCw className="h-3 w-3 mr-1" />
+                    <RefreshCw className="h-3 w-3 sm:mr-1" />
                   )}
-                  {isRefreshing ? 'Refreshing...' : 'Refresh'}
+                  <span className="hidden sm:inline">
+                    {isRefreshing ? 'Refreshing...' : 'Refresh'}
+                  </span>
                 </Button>
                 
                 {document.storagePath && (
@@ -460,14 +476,17 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                     size="sm"
                     className="h-7 px-2 text-xs"
                     asChild
+                    title="Download document"
                   >
                     <a 
                       href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}`}
                       target="_blank" 
                       rel="noopener noreferrer"
                       download={document.name || 'document.xlsx'}
+                      className="flex items-center"
                     >
-                      Download
+                      <Download className="h-3 w-3 sm:mr-1" />
+                      <span className="hidden sm:inline">Download</span>
                     </a>
                   </Button>
                 )}
