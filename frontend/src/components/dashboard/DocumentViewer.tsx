@@ -493,14 +493,14 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
             {workbookData.map((sheet) => (
               <TabsContent key={sheet.sheetName} value={sheet.sheetName}>
                 <div className="overflow-auto border rounded-md" style={{ maxHeight: 'calc(100vh - 200px)' }}>
-                  <table className="border-collapse w-full" style={{ tableLayout: 'fixed' }}>
+                  <table className="border-collapse w-full" style={{ tableLayout: 'auto' }}>
                     <colgroup>
                       {/* Column for row headers */}
-                      <col style={{ width: '30px' }} />
+                      <col style={{ width: '30px', minWidth: '30px', maxWidth: '40px' }} />
                       
                       {/* Columns for data - generate one col element per column */}
                       {sheet.data[0]?.map((_: any, colIndex: number) => (
-                        <col key={colIndex} style={{ width: '120px' }} />
+                        <col key={colIndex} style={{ minWidth: '80px' }} />
                       ))}
                     </colgroup>
                     <thead>
@@ -546,6 +546,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                             <td 
                               key={cellIndex} 
                               className="border border-border p-2 text-sm overflow-hidden text-ellipsis whitespace-nowrap"
+                              title={cell !== null && cell !== undefined ? String(cell) : ''}
                             >
                               {cell !== null && cell !== undefined ? String(cell) : ''}
                             </td>
