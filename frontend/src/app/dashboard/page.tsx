@@ -1826,8 +1826,10 @@ function DashboardPage() {
         </div>
         
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
-          {/* Dark mode toggle */}
-          <ThemeToggle />
+          {/* Dark mode toggle - more prominent */}
+          <div className="flex items-center mr-2 bg-muted rounded-md p-1 border border-border">
+            <ThemeToggle />
+          </div>
           
           {/* Welcome message - Simplified on mobile */}
           <span className="text-xs text-muted-foreground whitespace-nowrap hidden sm:inline-block">Welcome, {user.displayName || user.email}</span>
