@@ -1981,9 +1981,14 @@ function DashboardPage() {
                     {/* Grouping Control - Now Second */}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-7 px-2 ml-2">
-                          <ListTree className="h-3.5 w-3.5 mr-1.5" /> 
-                          <span className="text-xs">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-7 px-2 ml-2"
+                          title={groupingOption === 'type' ? 'Group By Type' : groupingOption === 'date' ? 'Group By Date' : 'No Grouping'}
+                        >
+                          <ListTree className="h-3.5 w-3.5 md:mr-1.5" /> 
+                          <span className="text-xs hidden md:inline">
                             {groupingOption === 'type' ? 'By Type' : groupingOption === 'date' ? 'By Date' : 'No Groups'}
                           </span>
                         </Button>
