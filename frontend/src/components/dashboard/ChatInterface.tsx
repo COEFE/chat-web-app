@@ -68,6 +68,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
   // DEBUG: Log the headers being passed to useChat
   console.log('[ChatInterface] Headers for useChat:', chatHeaders);
 
+  // --- Prepare Document Context for API --- 
+  const documentContext = document && user?.uid && document.storagePath && document.contentType
+    ? {
+        storagePath: document.storagePath,
+        contentType: document.contentType,
+        name: document.name,
+        userId: user.uid, // Pass the authenticated user's ID
+      }
+    : undefined;
+
   // Initialize useChat hook - provides messages, setMessages, etc.
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages } = useChat({
     api: '/api/chat',
@@ -81,6 +91,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
       additionalDocumentIds: allDocumentIds.filter(id => id !== documentId), // Additional document IDs
       additionalDocuments: additionalDocuments, // Additional document data
       activeSheet: activeSheet,
+      documentContext: documentContext, // Send the main document context
     },
     onFinish: (message) => {
       console.log('Chat finished:', message);

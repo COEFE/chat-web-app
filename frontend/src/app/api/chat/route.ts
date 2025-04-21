@@ -1,6 +1,15 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { MessageParam } from '@anthropic-ai/sdk/resources/messages';
-import { CoreMessage, streamText, StreamData, Message as VercelChatMessage, ToolCallPart, ToolResultPart } from 'ai';
+import { 
+  CoreMessage, 
+  streamText, 
+  StreamData, 
+  ToolCallPart, 
+  ToolResultPart,
+  CoreToolMessage,
+  ImagePart,
+  TextPart
+} from 'ai';
 import { z } from 'zod'; // Import Zod
 import { anthropic as vercelAnthropic } from '@ai-sdk/anthropic';
 import { NextRequest, NextResponse } from 'next/server';
@@ -191,10 +200,17 @@ export async function POST(req: NextRequest) {
   let body;
   try {
     body = await req.json();
-    console.log("Request body parsed:", body);
+    console.log("Request body parsed:"); // Removed potentially large body log
   } catch (error) {
     console.error("Error parsing request body:", error);
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
+
+  const { messages, documentContext } = body;
+
+  // Validate messages format (basic check)
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return NextResponse.json({ error: "Missing 'messages' array in request body" }, { status: 400 });
   }
 
   // Initialize array for additional document contents
@@ -292,10 +308,9 @@ export async function POST(req: NextRequest) {
   }
 
   // --- Get messages, documentId, currentDocument, additionalDocuments, activeSheet from body --- 
-  // Explicitly type messages as VercelChatMessage[] upon destructuring
+  // Explicitly type messages as CoreMessage[] upon destructuring
   // Use firestore.DocumentData for currentDocument and additionalDocuments
-  const { messages, documentId, currentDocument, additionalDocumentIds, additionalDocuments, additionalContents, activeSheet }: {
-    messages: VercelChatMessage[];
+  const { documentId, currentDocument, additionalDocumentIds, additionalDocuments, additionalContents, activeSheet }: {
     documentId?: string;
     currentDocument?: firestore.DocumentData;
     additionalDocumentIds?: string[];
@@ -305,9 +320,6 @@ export async function POST(req: NextRequest) {
   } = body;
 
   // Validate required fields
-  if (!messages || !Array.isArray(messages) || messages.length === 0) {
-    return NextResponse.json({ error: "Missing 'messages' array in request body" }, { status: 400 });
-  }
   if (!documentId) {
     console.warn("Missing documentId in request body, proceeding without document context.");
     // Allow proceeding for general chat, but document-specific features won't work
@@ -323,304 +335,247 @@ export async function POST(req: NextRequest) {
   console.log(`Last user message content: "${userMessageContent}"`);
   console.log(`Active Sheet provided: ${activeSheet}`);
 
-  // 3. Document Context Handling (if documentId provided)
-  let primaryFileContent: string | null = null;
-  let primaryFileType: string | null = null;
-  let primaryFileName: string | null = null;
-  
-  // We'll use body.additionalContents to store additional document content
+  let systemPrompt = DEFAULT_SYSTEM_PROMPT;
+  let fileContent: string | Buffer | null = null;
+  let isImageContext = false;
+  let imageMediaType: string | undefined;
+  let imageBase64Data: string | undefined;
 
-  // Process primary document first
-  if (documentId && currentDocument?.storagePath) {
-    console.log(`Processing primary document: ID=${documentId}, Path=${currentDocument.storagePath}`);
-    primaryFileName = currentDocument.name || documentId;
-    primaryFileType = primaryFileName?.split('.').pop()?.toLowerCase() || null;
-    console.log(`Primary file type determined as: ${primaryFileType}`);
+  // Define allowed image media types for Anthropic
+  type AnthropicImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  const ALLOWED_IMAGE_TYPES: AnthropicImageMediaType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
-    try {
-      // Decode the storage path first
-      const decodedPath = decodeURIComponent(currentDocument.storagePath);
-      console.log(`[Chat API] Decoded primary path: ${decodedPath}`);
-      
-      // Try with the decoded path first
-      let file: GoogleCloudFile = bucket.file(decodedPath);
-      let [exists] = await file.exists();
-      
-      // If file not found with direct path, try fallback approaches
-      if (!exists) {
-        console.log(`Primary file not found with decoded path: ${decodedPath}, trying fallback approaches...`);
-        
-        // List all files in the user's directory to help diagnose the issue
-        const userDir = decodedPath.split('/').slice(0, 2).join('/');
-        console.log(`Listing files in user directory: ${userDir}`);
-        
-        try {
-          const [files] = await bucket.getFiles({ prefix: userDir });
-          console.log(`Found ${files.length} files in user directory:`);
-          files.forEach(f => console.log(`- ${f.name}`));
-          
-          // Try to find files with similar names
-          const fileName = decodedPath.split('/').pop() || '';
-          const similarFiles = files.filter(f => {
-            const name = f.name.split('/').pop() || '';
-            // More flexible matching - look for key parts of the filename
-            return name.toLowerCase().includes(fileName.toLowerCase().replace(/\s+/g, '').substring(0, 5));
-          });
-          
-          console.log(`Found ${similarFiles.length} files with similar names:`);
-          similarFiles.forEach(f => console.log(`- ${f.name}`));
-          
-          // Use the first similar file if found
-          if (similarFiles.length > 0) {
-            console.log(`Using similar file instead: ${similarFiles[0].name}`);
-            file = bucket.file(similarFiles[0].name);
-            [exists] = await file.exists();
-          }
-        } catch (listError) {
-          console.error('Error listing files:', listError);
+  // 3. Process Document Context (if provided)
+  if (documentContext && documentContext.storagePath && documentContext.contentType && documentContext.userId === userId) {
+    console.log('Processing document context:', documentContext.storagePath);
+    const filePath = documentContext.storagePath;
+    const contentType = documentContext.contentType;
+    const fileRef = bucket.file(filePath);
+
+    // --- IMAGE HANDLING --- 
+    if (contentType.startsWith('image/')) {
+      console.log(`[Chat API] Identified image context: ${contentType}`);
+      isImageContext = true;
+      imageMediaType = contentType;
+      systemPrompt = "You are analyzing an image provided by the user. Answer their questions about it."; // Updated system prompt for image
+      try {
+        // Download image data as a buffer
+        const [buffer] = await fileRef.download();
+        imageBase64Data = buffer.toString('base64');
+        console.log(`[Chat API] Successfully fetched and encoded image: ${filePath}`);
+        // We don't set fileContent here, image data is handled separately
+      } catch (error: any) {
+        console.error(`[Chat API] Error fetching image ${filePath}:`, error);
+        if (isFirebaseStorageError(error, 404)) {
+          return NextResponse.json({ error: `File not found: ${filePath}` }, { status: 404 });
+        } else {
+          return NextResponse.json({ error: `Failed to fetch image: ${error.message}` }, { status: 500 });
         }
       }
-      
-      // Final check if we found a file
-      if (!exists) {
-        console.error(`Primary file not found after all attempts for: ${decodedPath}`);
-
+    } 
+    // --- PDF/EXCEL/TEXT HANDLING (Existing Logic) --- 
+    else if (contentType === 'application/pdf') {
+      console.log(`[route.ts] Attempting PDF text extraction for document: ${documentId} using unpdf...`); 
+      try {
+         // Convert Node.js Buffer to Uint8Array
+         const [fileBuffer] = await fileRef.download();
+         const fileUint8Array = new Uint8Array(fileBuffer); 
+         console.log(`[route.ts] Converted Buffer (length: ${fileBuffer.length}) to Uint8Array (length: ${fileUint8Array.length}) for unpdf.`);
+        // Pass the Uint8Array to extractText
+        const extractResult = await extractText(fileUint8Array);
+        // Handle the result which might be an object with text array
+        fileContent = Array.isArray(extractResult.text) 
+          ? extractResult.text.join('\n') 
+          : typeof extractResult === 'string' 
+            ? extractResult 
+            : typeof extractResult.text === 'string' 
+              ? extractResult.text 
+              : 'Error: Could not extract text from PDF';
+         console.log(`[route.ts] PDF content extracted successfully for document: ${documentId}.`); 
+      } catch (pdfError: any) { 
+          console.error(`[route.ts] Error during unpdf text extraction for document ${documentId}:`, pdfError);
+          fileContent = ''; // Set to empty string on PDF extraction failure
+         // Explicitly log message and stack if available
+         if (pdfError.message) {
+           console.error(`[route.ts] unpdf Error Message: ${pdfError.message}`);
+         }
+         if (pdfError.stack) {
+           console.error(`[route.ts] unpdf Error Stack: ${pdfError.stack}`);
+         }
+         // Re-throw the error to be caught by the outer catch block
+         throw new Error(`unpdf extraction failed: ${pdfError.message || 'Unknown PDF processing error'}`);
+      }
+    } else if (contentType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || contentType === 'application/vnd.ms-excel') {
+      // Handle Excel files
+      try {
+        // Parse Excel file
+        const [fileBuffer] = await fileRef.download();
+        const workbook = XLSX.read(fileBuffer);
+        const sheetNames = workbook.SheetNames;
+        
+        // If activeSheet is specified and exists, use that sheet
+        // Otherwise, use the first sheet
+        const sheetToUse = activeSheet && sheetNames.includes(activeSheet) 
+          ? activeSheet 
+          : sheetNames[0];
+          
+        const worksheet = workbook.Sheets[sheetToUse];
+        
+        // Convert worksheet to JSON
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        // Convert JSON data to string representation
+        fileContent = `Excel file "${documentContext.name}" sheet "${sheetToUse}" contents:\n`;
+        fileContent += jsonData.map((row: any) => row.join('\t')).join('\n');
+        
+        console.log(`Excel content extracted from sheet "${sheetToUse}" (${fileContent.length} chars)`);
+      } catch (excelError) {
+        console.error('Excel processing error:', excelError);
         return NextResponse.json(
-          { error: "Primary document file not found in storage." },
-          { status: 404 }
+          { error: "Failed to process Excel file." },
+          { status: 500 }
         );
       }
-
-      // Download file content
-      const [fileBuffer] = await file.download();
-      console.log(`Primary file downloaded successfully (${fileBuffer.length} bytes)`);
-
-      // Process based on file type
-      if (primaryFileType === 'pdf') {
-        console.log(`[route.ts] Attempting PDF text extraction for document: ${documentId} using unpdf...`); 
-        try {
-           // Convert Node.js Buffer to Uint8Array
-           const fileUint8Array = new Uint8Array(fileBuffer); 
-           console.log(`[route.ts] Converted Buffer (length: ${fileBuffer.length}) to Uint8Array (length: ${fileUint8Array.length}) for unpdf.`);
-          // Pass the Uint8Array to extractText
-          const extractResult = await extractText(fileUint8Array);
-          // Handle the result which might be an object with text array
-          primaryFileContent = Array.isArray(extractResult.text) 
-            ? extractResult.text.join('\n') 
-            : typeof extractResult === 'string' 
-              ? extractResult 
-              : typeof extractResult.text === 'string' 
-                ? extractResult.text 
-                : 'Error: Could not extract text from PDF';
-           console.log(`[route.ts] PDF content extracted successfully for document: ${documentId}.`); 
-         } catch (pdfError: any) { 
-             console.error(`[route.ts] Error during unpdf text extraction for document ${documentId}:`, pdfError);
-             primaryFileContent = ''; // Set to empty string on PDF extraction failure
-            // Explicitly log message and stack if they exist
-            if (pdfError.message) {
-              console.error(`[route.ts] unpdf Error Message: ${pdfError.message}`);
-            }
-            if (pdfError.stack) {
-              console.error(`[route.ts] unpdf Error Stack: ${pdfError.stack}`);
-            }
-            // Re-throw the error to be caught by the outer catch block
-            throw new Error(`unpdf extraction failed: ${pdfError.message || 'Unknown PDF processing error'}`);
-        }
-       } else if (primaryFileType === 'xlsx' || primaryFileType === 'xls') {
-         // Handle Excel files
-         try {
-           // Parse Excel file
-           const workbook = XLSX.read(fileBuffer);
-           const sheetNames = workbook.SheetNames;
-           
-           // If activeSheet is specified and exists, use that sheet
-           // Otherwise, use the first sheet
-           const sheetToUse = activeSheet && sheetNames.includes(activeSheet) 
-             ? activeSheet 
-             : sheetNames[0];
-             
-           const worksheet = workbook.Sheets[sheetToUse];
-           
-           // Convert worksheet to JSON
-           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-           
-           // Convert JSON data to string representation
-           primaryFileContent = `Excel file "${primaryFileName}" sheet "${sheetToUse}" contents:\n`;
-           primaryFileContent += jsonData.map((row: any) => row.join('\t')).join('\n');
-           
-           console.log(`Excel content extracted from sheet "${sheetToUse}" (${primaryFileContent.length} chars)`);
-         } catch (excelError) {
-           console.error('Excel processing error:', excelError);
-           return NextResponse.json(
-             { error: "Failed to process Excel file." },
-             { status: 500 }
-           );
+    } else {
+      // Default: treat as text file
+      try {
+        const [fileBuffer] = await fileRef.download();
+        fileContent = fileBuffer.toString('utf-8');
+        console.log(`Text file content extracted (${fileContent.length} chars)`);
+      } catch (error) {
+        console.error(`Error processing document ${documentId}:`, error);
+        // Check if it's a GCS 'object not found' error using the helper function
+        if (isFirebaseStorageError(error, 404)) { 
+           return NextResponse.json({ error: "Document file not found in storage." }, { status: 404 });
+         } else {
+           const apiErrorMessage = error instanceof Error ? error.message : "Failed to process document";
+           console.error(`[route.ts] Returning 500 error: ${apiErrorMessage}`); 
+           return NextResponse.json({ error: apiErrorMessage }, { status: 500 });
          }
-       } else {
-         // Default: treat as text file
-         primaryFileContent = fileBuffer.toString('utf-8');
-         console.log(`Text file content extracted (${primaryFileContent.length} chars)`);
-       }
-    } catch (error) {
-      console.error(`Error processing document ${documentId}:`, error);
-      // Check if it's a GCS 'object not found' error using the helper function
-      if (isFirebaseStorageError(error, 404)) { 
-         return NextResponse.json({ error: "Document file not found in storage." }, { status: 404 });
-       } else {
-         const apiErrorMessage = error instanceof Error ? error.message : "Failed to process document";
-         console.error(`[route.ts] Returning 500 error: ${apiErrorMessage}`); 
-         return NextResponse.json({ error: apiErrorMessage }, { status: 500 });
-       }
+      }
     }
   }
 
-  // 4. Prepare prompt for AI
-  // Use the full message history
-  const formattedPreviousMessages = messages
-     .slice(0, -1) // Exclude the last message (current user input)
-     .map((msg: VercelChatMessage) => `${msg.role}: ${msg.content}`) // Format as role: content
-     .join('\n');
-     
-  // Construct the prompt - include history and document context
-  const documentContext = primaryFileContent 
-     ? `\n\n--- Document Content (${primaryFileName || 'current document'}) ---\n${primaryFileContent.substring(0, 20000)} ${primaryFileContent.length > 20000 ? '\n[Content Truncated]' : ''}\n--- End Document Content ---` 
-     : '\n\nNo document context provided.';
-     
-  // Combine history, document context, and the latest user message
-  // NOTE: Adjust formatting based on how your chosen AI model best handles history and context.
-  const finalPromptContent = `Chat History:\n${formattedPreviousMessages}\n\n${documentContext}\n\nUser Question: ${userMessageContent}`;
-  
-  // If using LangChain or similar, you might pass the messages array directly
-  // For direct Anthropic SDK, construct a prompt string or use their message format
-
-  console.log("--- Final Prompt Content Sent to AI (excluding potential system prompt) ---");
-  // console.log(finalPromptContent); // Be careful logging large prompts
-  console.log("History Length:", formattedPreviousMessages.length);
-  console.log("Doc Context Length:", documentContext.length);
-  console.log("User Question Length:", userMessageContent.length);
-  console.log("Total Prompt Approx Length:", finalPromptContent.length);
-  console.log("---------------------------------------------------------------------");
-
-  // --- Zod Schema for Excel Tool --- 
-  const excelOperationSchema = z.object({
-    action: z.enum(['createExcelFile', 'editExcelFile']),
-    args: z.object({
-      operations: z.array(z.any()).describe('Array of operation objects (e.g., { type: "createSheet", name: "Sheet1" }, { type: "addRow", row: ["A", "B"] })'),
-      fileName: z.string().optional().describe('Optional desired filename for the new Excel file.'),
-      sheetName: z.string().optional().describe('Optional target sheet name (often handled by createSheet operation).')
-    })
-  });
-
-  // Type alias for convenience
-  type ExcelOperationArgs = z.infer<typeof excelOperationSchema>;
-
-  // 5. Call AI (Anthropic Example)
-  try {
-    // --- Build System Prompt (Instructing AI to use the tool) ---
-    let finalSystemPrompt = `You are a helpful assistant.
-If asked to modify an Excel file or create a spreadsheet, call the 'excelOperation' tool with the required arguments ('action', 'args.operations', optional 'args.fileName', optional 'args.sheetName').
-Do not output raw JSON. Use the tool.
-If asked a general question or a question about the document content, answer normally.`;
-
-    // Add primary document context if available
-    if (primaryFileContent) {
-        // Append document context, truncating if necessary
-        const truncatedContent = primaryFileContent.substring(0, 20000); // Limit context size
-        const isTruncated = primaryFileContent.length > 20000;
-        finalSystemPrompt += `
-        
---- Primary Document Context (${primaryFileName || 'current document'}) ---
-${truncatedContent}${isTruncated ? '\n[Content Truncated]' : ''}
---- End Primary Document Context ---`;
-        console.log(`[route.ts] Appending primary document context (${primaryFileName || 'current document'}) to system prompt. Length: ${truncatedContent.length}, Truncated: ${isTruncated}`);
-    } else {
-        console.log("[route.ts] No primary document context to append to system prompt.");
+  // 4. Prepare messages for Anthropic API (Deep copy and ensure CoreMessage structure)
+  // Need to ensure it matches CoreMessage[] required by streamText
+  let processedMessages: CoreMessage[] = JSON.parse(JSON.stringify(messages)).map((msg: any): CoreMessage | null => {
+    // Basic validation and transformation
+    if ((msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system') && msg.content) {
+        // Ensure content is string or valid block array for CoreMessage
+        const content = typeof msg.content === 'string' || Array.isArray(msg.content)
+            ? msg.content
+            : JSON.stringify(msg.content); // Fallback for unexpected content types
+        return { role: msg.role, content: content };
+    } else if (msg.role === 'tool' && msg.tool_call_id && msg.content) {
+        // Structure content as ToolResultPart for CoreToolMessage
+        const toolContent: ToolResultPart = {
+          type: 'tool-result',
+          toolCallId: msg.tool_call_id,
+          toolName: 'unknown', // Attempt to determine if possible, else keep generic
+          result: msg.content, // Assuming msg.content contains the result
+        };
+        return { role: 'tool', content: [toolContent] }; // CoreToolMessage only needs role and content
     }
-    
-    // Add additional document contexts if available
-    if (body.additionalContents && body.additionalContents.length > 0) {
-        console.log(`[route.ts] Appending ${body.additionalContents.length} additional document contexts to system prompt.`);
-        
-        // Calculate remaining space for additional documents
-        const basePromptLength = finalSystemPrompt.length;
-        const maxTotalLength = 80000; // Adjust based on model's context window
-        const remainingSpace = Math.max(0, maxTotalLength - basePromptLength);
-        const spacePerAdditionalDoc = Math.floor(remainingSpace / body.additionalContents.length);
-        
-        for (const addDoc of body.additionalContents) {
-            // Truncate additional content to fit within allocated space
-            const truncatedAddContent = addDoc.content.length > spacePerAdditionalDoc
-                ? addDoc.content.substring(0, spacePerAdditionalDoc) + "\n[Content Truncated]"
-                : addDoc.content;
-            
-            finalSystemPrompt += `
-            
---- Additional Document: ${addDoc.name} (${addDoc.type}) ---
-${truncatedAddContent}
---- End Additional Document ---`;
-            
-            console.log(`[route.ts] Added additional document ${addDoc.name} to system prompt. Length: ${truncatedAddContent.length}`);
+    console.warn("[Chat API] Filtering out invalid message structure:", msg);
+    return null; // Filter out invalid messages
+  }).filter((msg: CoreMessage | null): msg is CoreMessage => msg !== null); // Remove null entries
+
+  // --- Inject Image into the Last User Message --- 
+  if (isImageContext && imageBase64Data && imageMediaType && ALLOWED_IMAGE_TYPES.includes(imageMediaType as AnthropicImageMediaType)) {
+    const lastUserMessageIndex = processedMessages.slice().reverse().findIndex(msg => msg.role === 'user');
+    if (lastUserMessageIndex !== -1) {
+      const actualIndex = processedMessages.length - 1 - lastUserMessageIndex;
+      const originalContent = processedMessages[actualIndex].content;
+      let textContent = "";
+
+      if (typeof originalContent === 'string') {
+        textContent = originalContent;
+      } else if (Array.isArray(originalContent)) {
+        // Find the first text block if it exists
+        const textBlock = originalContent.find(block => block.type === 'text');
+        if (textBlock) {
+          textContent = textBlock.text;
         }
-        
-        // Add instruction for handling multiple documents
-        finalSystemPrompt += `
-
-When answering questions, use information from both the primary document and any additional documents. If information appears in multiple documents, synthesize it and note the different sources.`;
-    }
-     
-    // --- Prepare messages for AI API (Use the full conversation history for context) ---
-    // Map VercelChatMessages to CoreMessages, filtering for valid roles.
-    const messagesForStreamText: CoreMessage[] = messages
-      .filter(msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system') // Keep only valid roles
-      .map(msg => ({ // Map to the structure CoreMessage expects
-        role: msg.role,
-        content: msg.content,
-      })) as CoreMessage[]; // Explicitly cast the final array
-
-    console.log("[route.ts] Payload for AI call (Anthropic):", JSON.stringify(messagesForStreamText, null, 2)); // Log the exact payload
-
-    // Capture variables needed in onFinish in local constants to ensure they're available in the closure
-    const capturedAuthToken = req.headers.get('Authorization');
-    const capturedUserId = userId;
-    const capturedDocumentId = documentId;
-    const capturedCurrentDocument = currentDocument;
-    const capturedActiveSheet = activeSheet;
-    const capturedMessages = messages;
-      
-    // --- Save User's Latest Message BEFORE Calling AI --- 
-    try {
-      if (documentId && userId) {
-        const messagesCollectionRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
-        const lastUserMsg = messages[messages.length - 1]; // Get the actual last message from the input
-        if (lastUserMsg && lastUserMsg.role === 'user') { 
-          await messagesCollectionRef.add({ 
-            role: lastUserMsg.role,
-            content: lastUserMsg.content,
-            userId: capturedUserId, // Add userId
-            documentId: capturedDocumentId, // Add documentId
-            createdAt: firestore.FieldValue.serverTimestamp(),
-          });
-          console.log(`[route.ts] User message saved BEFORE AI call for document ${documentId}`);
-        } else {
-          console.warn(`[route.ts] Did not save user message before AI call - last message not from user.`);
-        }
-      } else {
-        console.log("[route.ts] Skipping user message save before AI call - no documentId or userId.");
       }
-    } catch (saveError: any) {
-      console.error(`[route.ts] Error saving user message before AI call for document ${documentId}:`, saveError);
+      
+      if (!textContent) {
+        // Default text if none found (should ideally not happen with user input)
+        textContent = "Analyze this image."; 
+      }
+
+      // Construct the new content array with image first (Vercel AI SDK format)
+      processedMessages[actualIndex].content = [
+        {
+          type: 'image',
+          image: Buffer.from(imageBase64Data, 'base64'), // Pass the image data directly as a Buffer
+          // mediaType is often inferred or handled by the provider SDK
+        },
+        {
+          type: 'text',
+          text: textContent,
+        },
+      ];
+      console.log('[Chat API] Injected image block into the last user message.');
+    } else {
+      console.warn('[Chat API] Could not find a user message to inject image into.');
+      // Handle error? Or proceed without image?
     }
+  }
+
+  // Add file content to the system prompt or user message if not an image context
+  if (!isImageContext && fileContent) {
+    // Existing logic for adding PDF/Excel content...
+    // ... (Ensure this logic doesn't conflict)
+    const contextMessage = `\n\n--- Document Context (${documentContext?.contentType || 'unknown'}) ---\n${typeof fileContent === 'string' ? fileContent.substring(0, 10000) : '[Binary Content]'}\n--- End Document Context ---`;
+    
+    // Append context to the last user message for better focus
+    const lastUserMessage = processedMessages.findLast(msg => msg.role === 'user');
+    if (lastUserMessage) {
+      if (typeof lastUserMessage.content === 'string') {
+         lastUserMessage.content += contextMessage;
+      } else if (Array.isArray(lastUserMessage.content)) {
+         // If content is already an array (e.g. complex input), find the last text block
+         const lastTextBlock = lastUserMessage.content.findLast(block => block.type === 'text');
+         if (lastTextBlock) {
+            lastTextBlock.text += contextMessage;
+         } else {
+             // If no text block, add one (edge case)
+             lastUserMessage.content.push({ type: 'text', text: contextMessage });
+         }
+      }
+    } else {
+      // Fallback: Add to system prompt if no user message (less ideal)
+      systemPrompt += contextMessage;
+    }
+
+  }
+
+  // 5. Call Anthropic API via Vercel AI SDK
+  try {
+    console.log('Calling Anthropic API with model:', MODEL_NAME);
+    // Filter messages again just before sending to be absolutely sure
+    // Ensure the messages conform to CoreMessage structure
+    const finalMessagesForApi = processedMessages.filter(
+        (msg): msg is CoreMessage => typeof msg === 'object' && msg !== null && 'role' in msg && 'content' in msg
+    );
 
     const result = await streamText({
-      model: vercelAnthropic('claude-3-7-sonnet-20250219'),
-      system: finalSystemPrompt, // Use the potentially augmented system prompt
-      messages: messagesForStreamText, // Pass the full conversation history
-      maxTokens: 4096, // Use the constant for regular chat
-      // --- Define the Tool --- 
+      model: vercelAnthropic(MODEL_NAME),
+      system: systemPrompt,
+      messages: finalMessagesForApi, // Use the correctly typed and filtered array
+      maxTokens: MAX_TOKENS,
+      // --- Define the Tool ---
       tools: {
         excelOperation: {
           description: 'Performs operations on Excel files (create or edit).',
-          parameters: excelOperationSchema,
+          parameters: z.object({
+            action: z.enum(['createExcelFile', 'editExcelFile']),
+            args: z.object({
+              operations: z.array(z.any()).describe('Array of operation objects (e.g., { type: "createSheet", name: "Sheet1" }, { type: "addRow", row: ["A", "B"] })'),
+              fileName: z.string().optional().describe('Optional desired filename for the new Excel file.'),
+              sheetName: z.string().optional().describe('Optional target sheet name (often handled by createSheet operation).')
+            })
+          }),
         },
       },
       onFinish: async ({ text, toolCalls, toolResults, usage, finishReason, logprobs }) => {
@@ -639,7 +594,7 @@ When answering questions, use information from both the primary document and any
             console.log(`[route.ts][onFinish] Detected 'excelOperation' tool call.`);
 
             // Check auth token
-            if (!capturedAuthToken) {
+            if (!authorizationHeader) {
               console.error("[route.ts][onFinish] Auth token missing for Excel tool call.");
               finalAiMessageContent = "Error: Authentication token was missing unexpectedly.";
               excelResult = { success: false, message: finalAiMessageContent }; // Set error state
@@ -649,7 +604,7 @@ When answering questions, use information from both the primary document and any
                 // SDK automatically parses args based on schema if valid
                 const { action, args } = excelToolCall.args as { action: 'createExcelFile' | 'editExcelFile', args: { operations: any[], fileName?: string, sheetName?: string } };
                 const { operations, fileName, sheetName } = args;
-                const documentIdToUse = capturedCurrentDocument?.id || null;
+                const documentIdToUse = documentId || null;
 
                 // Basic check for required args
                 if (!action || !operations) {
@@ -663,7 +618,7 @@ When answering questions, use information from both the primary document and any
                   action,
                   documentIdToUse,
                   operations,
-                  capturedUserId,
+                  userId,
                   fileName,
                   sheetName
                 );
@@ -736,8 +691,7 @@ When answering questions, use information from both the primary document and any
     // Decide if you want to save history when the AI call fails.
     // It might be useful for debugging, but could store incomplete conversations.
     // Example: Save history including an error message from AI
-    const errorMessage: VercelChatMessage = {
-      id: Date.now().toString(),
+    const errorMessage: CoreMessage = {
       role: 'assistant',
       content: `Sorry, there was an error processing your request. ${error instanceof Error ? error.message : ''}`
     };
