@@ -1077,7 +1077,7 @@ function DocumentTable({
             onChange={(event) =>
               table.getColumn("name")?.setFilterValue(event.target.value)
             }
-            className="h-8 max-w-sm" // Adjusted height
+            className="h-8 max-w-sm dark:border-gray-600" // Adjusted height and dark mode border override
           />
           {/* Columns Dropdown */}
           <DropdownMenu>
