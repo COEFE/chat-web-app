@@ -80,7 +80,16 @@ export function FileUpload({
           continue; 
       }
 
-      const storagePath = `users/${user.uid}/${file.name}`;
+      const originalName = file.name;
+      const lastDot = originalName.lastIndexOf('.');
+      const baseName = lastDot > -1 ? originalName.substring(0, lastDot) : originalName;
+      // Ensure extension includes the dot or is empty if no extension
+      const extension = lastDot > -1 ? originalName.substring(lastDot) : ''; 
+      const timestamp = Date.now();
+      const uniqueFileName = `${baseName}-${timestamp}${extension}`; 
+      console.log(`Generated unique filename: ${uniqueFileName} from original: ${originalName}`);
+
+      const storagePath = `users/${user.uid}/${uniqueFileName}`;
       console.log(`Using standard storage path: ${storagePath}`);
       const storageRef = ref(getStorage(), storagePath);
       
@@ -88,8 +97,8 @@ export function FileUpload({
       const metadata: { customMetadata: Record<string, string> } = {
         customMetadata: {
           userId: user.uid,
-          originalName: file.name,
-          timestamp: Date.now().toString(), // Add timestamp to ensure uniqueness
+          originalName: file.name, // Keep original name in metadata
+          timestamp: timestamp.toString(), // Use the same timestamp
           ...(currentFolderId && { folderId: currentFolderId }) // Include folderId if present
         }
       };
