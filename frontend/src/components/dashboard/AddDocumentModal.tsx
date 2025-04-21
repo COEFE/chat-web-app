@@ -137,7 +137,8 @@ export function AddDocumentModal({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="fixed inset-0 !top-0 !right-0 !bottom-0 !left-0 !translate-x-0 !translate-y-0 !transform-none w-full h-full !flex !flex-col gap-4 bg-background overflow-auto p-0 !rounded-none !border-0 !max-w-none sm:inset-auto sm:translate-x-[-50%] sm:translate-y-[-50%] sm:top-[50%] sm:left-[50%] sm:w-auto sm:max-w-lg sm:h-auto sm:max-h-[80vh] sm:rounded-lg sm:border sm:p-6">
+      <DialogContent className="sm:max-w-md max-h-[85vh] flex flex-col">
+
         <DialogHeader>
           <DialogTitle>Add Document to Chat</DialogTitle>
           <DialogDescription>
@@ -156,7 +157,8 @@ export function AddDocumentModal({
         </div>
         
         {/* Content area - Ensure it takes remaining space and scrolls */}
-        <ScrollArea className="flex-1 p-4 border-t overflow-y-auto"> 
+        <ScrollArea className="flex-1 border-t"> 
+          <div className="p-4">
           {loading ? (
             <div className="flex items-center justify-center h-full"> {/* Center loading in scroll area */}
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -179,7 +181,7 @@ export function AddDocumentModal({
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {filteredDocuments.map((doc) => {
                 
                 // Safely handle date display
@@ -223,9 +225,10 @@ export function AddDocumentModal({
               })}
             </div>
           )}
+          </div>
         </ScrollArea>
         
-        <DialogFooter className="flex justify-between">
+        <DialogFooter className="flex justify-between px-4 py-3 border-t">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
