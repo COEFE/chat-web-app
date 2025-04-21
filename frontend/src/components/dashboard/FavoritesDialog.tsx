@@ -5,8 +5,8 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogHeader as BaseDialogHeader,
-  DialogTitle as BaseDialogTitle,
+  DialogHeader,
+  DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -14,21 +14,6 @@ import { FilesystemItem } from '@/types';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Folder, FileText, Star } from 'lucide-react'; // Add icons
 import { cn } from '@/lib/utils';
-
-// Custom centered dialog components
-const DialogHeader = ({ className, ...props }: React.ComponentProps<"div">) => (
-  <BaseDialogHeader
-    className={cn("flex flex-col gap-2 text-center", className)}
-    {...props}
-  />
-);
-
-const DialogTitle = ({ className, ...props }: React.ComponentProps<"h2">) => (
-  <BaseDialogTitle
-    className={cn("text-lg font-semibold text-center", className)}
-    {...props}
-  />
-);
 
 interface FavoritesDialogProps {
   trigger: React.ReactNode; // Allow custom trigger element
@@ -76,12 +61,12 @@ const FavoritesDialog: React.FC<FavoritesDialogProps> = ({
         {trigger}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[525px]">
-        <DialogHeader>
-          <DialogTitle>Favorite Items</DialogTitle>
-          <DialogDescription className="text-center mx-auto">
+        <div className="text-center mb-4">
+          <h2 className="text-lg font-semibold">Favorite Items</h2>
+          <p className="text-sm text-muted-foreground mt-1">
             Quickly access your most used documents and folders.
-          </DialogDescription>
-        </DialogHeader>
+          </p>
+        </div>
         <ScrollArea className="h-[400px] w-full pr-4">
           {favoriteItems.length > 0 ? (
             <ul className="space-y-2">
