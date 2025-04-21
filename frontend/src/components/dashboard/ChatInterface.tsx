@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'; 
+import React, { useState, useRef, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter, CardDescription } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea'; // Import Textarea
 import { Button } from '@/components/ui/button';
@@ -29,6 +29,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
   // Get all document IDs for the API call
   const allDocumentIds = allDocuments.map(doc => doc.id);
   const scrollAreaRef = useRef<HTMLDivElement>(null); 
+  const scrollableRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth(); 
   const submitButtonRef = useRef<HTMLButtonElement>(null); // Ref for the submit button
   const [authToken, setAuthToken] = useState<string | null>(null); // State for auth token
@@ -178,11 +180,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
     }
   }, [document?.id]);
 
+  // Scroll to bottom when messages change
   useEffect(() => {
-    if (scrollAreaRef.current) {
-      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
-    }
-  }, [messages, scrollAreaRef]);
+    const scrollToBottom = () => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      }
+    };
+    
+    // Small delay to ensure DOM update is complete
+    const timeoutId = setTimeout(scrollToBottom, 100);
+    return () => clearTimeout(timeoutId);
+  }, [messages]);
 
   // Handle keydown events for Textarea (Enter to submit, Shift+Enter for newline)
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -191,6 +200,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
       // Trigger form submission by clicking the button
       if (submitButtonRef.current && !submitButtonRef.current.disabled) {
         submitButtonRef.current.click();
+        // Extra scroll to bottom on submit to ensure visibility
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
       }
     }
   };
@@ -215,7 +228,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
       </CardHeader>
       <CardContent className="flex-1 overflow-hidden p-0 min-h-0"> {/* Use flex-1 and min-h-0 */}
         <ScrollArea ref={scrollAreaRef} className="h-full"> {/* Restored h-full for proper scrolling */}
-          <div className="py-0 px-3"> {/* Added horizontal padding */}
+          <div className="py-0 px-3" ref={scrollableRef}> {/* Added horizontal padding */}
             {/* Placeholder for empty chat */}
             {!isLoading && messages.length === 0 && (
               <div className="flex h-full items-center justify-center">
@@ -281,6 +294,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
                 </div>
               </div>
             )}
+            {/* Messages end marker for scrolling */}
+            <div ref={messagesEndRef} style={{ height: '1px', width: '100%' }} />
           </div> {/* End padding div */}
         </ScrollArea>
       </CardContent>
