@@ -61,8 +61,9 @@ const FavoritesDialog: React.FC<FavoritesDialogProps> = ({
         {trigger}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[525px]">
-        <DialogHeader>
-          <DialogTitle className="text-center sm:text-left">Favorite Items</DialogTitle>
+        {/* Force dialog header to be centered on mobile with !important */}
+        <DialogHeader className="!text-center sm:!text-left">
+          <DialogTitle>Favorite Items</DialogTitle>
           <DialogDescription>
             Quickly access your most used documents and folders.
           </DialogDescription>
@@ -71,14 +72,16 @@ const FavoritesDialog: React.FC<FavoritesDialogProps> = ({
           {favoriteItems.length > 0 ? (
             <ul className="space-y-2">
               {favoriteItems.map((item) => (
-                <li key={item.id} className="flex items-center p-2 rounded-md hover:bg-accent w-full">
+                <li key={item.id} className="flex items-center gap-2 p-2 rounded-md hover:bg-accent w-full overflow-hidden">
                   <button 
-                    className="flex items-center flex-grow text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm min-w-0 max-w-[85%]"
+                    className="flex items-center text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm min-w-0 max-w-[80%] overflow-hidden"
                     onClick={() => handleItemClick(item)}
                     title={`Open ${item.name}`}
                   >
-                    {getFileTypeIcon(item)}
-                    <span className="truncate text-sm font-medium">{item.name}</span>
+                    <div className="flex-shrink-0">
+                      {getFileTypeIcon(item)}
+                    </div>
+                    <span className="truncate text-sm font-medium block w-full">{item.name}</span>
                   </button>
                   <Button
                     variant="ghost"
