@@ -421,7 +421,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
           defaultValue={activeSheetName || workbookData[0]?.sheetName || ''}
           className="flex-1 overflow-auto flex flex-col"
         >
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-x-2 p-2 bg-muted/20 border-b justify-between">
               <TabsList>
                 {workbookData.map((sheet) => (
                   <TabsTrigger 
@@ -582,8 +582,54 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
       {/* Image Viewer using react-zoom-pan-pinch */}
       {!isLoading && !error && isImage && imageUrl && (
         <div className="flex flex-col h-full">
-          <div className="flex items-center gap-x-2 p-2 bg-muted/20 border-b justify-between">
-            <div className="flex items-center space-x-2">
+          {/* Updated Header Layout */}
+          <div className="flex items-center w-full gap-x-2 p-2 bg-muted/20 border-b">
+            {/* Left Spacer */}
+            <div className="flex-1"></div>
+
+            {/* Center Controls */}
+            <div className="flex justify-center gap-2 p-1.5">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setZoom(prev => prev > 0.1 ? prev - 0.1 : 0.1)} // Prevent zoom < 0.1
+                title="Zoom Out"
+              >
+                <ZoomOut className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setZoom(prev => prev < 5 ? prev + 0.1 : 5)} // Prevent zoom > 5
+                title="Zoom In"
+              >
+                <ZoomIn className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setRotation(prev => (prev + 90) % 360)}
+                title="Rotate"
+              >
+                <RotateCw className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => {
+                  setZoom(1);
+                  setRotation(0);
+                  // Note: We can't call resetTransform directly here anymore
+                  // If pan/pinch needs reset, we might need TransformWrapper ref
+                }}
+                title="Reset"
+              >
+                Reset
+              </Button>
+            </div>
+
+            {/* Right Download Button */}
+            <div className="flex-1 flex justify-end">
               <Button 
                 variant="outline" 
                 size="sm" 
@@ -602,78 +648,43 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
               </Button>
             </div>
           </div>
+          
+          {/* Image Content Area */}
           <div className="flex-1 overflow-hidden relative">
             <TransformWrapper
-              initialScale={1}
+              initialScale={zoom} // Use state for initial scale
               minScale={0.1}
               maxScale={5}
               limitToBounds={false}
               doubleClick={{ disabled: false }}
+              // If we need to reset pan, we'll need a ref to TransformWrapper
+              // const transformWrapperRef = useRef<ReactZoomPanPinchRef>(null);
+              // and call transformWrapperRef.current?.resetTransform(); in Reset button
             >
-              {({ zoomIn, zoomOut, resetTransform }) => (
-                <>
-                  <div className="absolute top-4 left-4 z-10 bg-background border rounded-md shadow-sm flex gap-2 p-1.5">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => zoomOut()}
-                      title="Zoom Out"
-                    >
-                      <ZoomOut className="h-4 w-4" />
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => zoomIn()}
-                      title="Zoom In"
-                    >
-                      <ZoomIn className="h-4 w-4" />
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => setRotation(prev => (prev + 90) % 360)}
-                      title="Rotate"
-                    >
-                      <RotateCw className="h-4 w-4" />
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => {
-                        resetTransform();
-                        setRotation(0);
-                      }}
-                      title="Reset"
-                    >
-                      Reset
-                    </Button>
-                  </div>
-                  <TransformComponent
-                    wrapperStyle={{
-                      width: '100%', 
-                      height: '100%'
-                    }}
-                    contentStyle={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      height: '100%',
-                      transform: `rotate(${rotation}deg)`
-                    }}
-                  >
-                    <img 
-                      src={imageUrl} 
-                      alt={document.name || 'Document image'}
-                      style={{
-                        maxWidth: '100%',
-                        maxHeight: '100%',
-                        objectFit: 'contain'
-                      }}
-                    />
-                  </TransformComponent>
-                </>
-              )}
+              {/* Removed direct access to zoomIn/Out/ResetTransform from here */}
+              <TransformComponent
+                wrapperStyle={{
+                  width: '100%', 
+                  height: '100%'
+                }}
+                contentStyle={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  height: '100%',
+                  transform: `rotate(${rotation}deg) scale(${zoom})`
+                }}
+              >
+                <img 
+                  src={imageUrl} 
+                  alt={document.name || 'Document image'}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    objectFit: 'contain'
+                  }}
+                />
+              </TransformComponent>
             </TransformWrapper>
           </div>
         </div>
