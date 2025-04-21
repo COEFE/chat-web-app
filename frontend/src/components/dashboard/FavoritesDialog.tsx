@@ -60,10 +60,10 @@ const FavoritesDialog: React.FC<FavoritesDialogProps> = ({
       <DialogTrigger asChild>
         {trigger}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[525px]">
-        <DialogHeader className="sm:text-left" style={{ textAlign: 'center' }}>
-          <DialogTitle style={{ textAlign: 'center' }} className="sm:text-left">Favorite Items</DialogTitle>
-          <DialogDescription style={{ textAlign: 'center' }} className="sm:text-left">
+      <DialogContent className="sm:max-w-[525px] text-center">
+        <DialogHeader className="text-center" style={{ textAlign: 'center' }}>
+          <DialogTitle className="text-center" style={{ textAlign: 'center' }}>Favorite Items</DialogTitle>
+          <DialogDescription className="text-center" style={{ textAlign: 'center' }}>
             Quickly access your most used documents and folders.
           </DialogDescription>
         </DialogHeader>
