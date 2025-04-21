@@ -215,9 +215,11 @@ export default function DocumentChatPage() {
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back
         </Button>
-        <h1 className="text-base font-semibold truncate flex-1 md:ml-auto">
-          {documentTitle} 
-        </h1>
+        {!(['application/pdf','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel','text/csv'].includes(activeDocument?.contentType || '')) && (
+          <h1 className="text-base font-semibold truncate flex-1 md:ml-auto">
+            {documentTitle}
+          </h1>
+        )}
         
         {/* Button Group (Aligned Right) */}
         <div className="ml-auto flex items-center gap-2">

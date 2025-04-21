@@ -1,5 +1,13 @@
 {
   "projects": {
     "default": "web-chat-app-fa7f0"
+  },
+  "targets": {},
+  "etags": {
+    "web-chat-app-fa7f0": {
+      "extensionInstances": {
+        "firestore-send-email": "1ffedd38a8ee06bb6c2fed16b8f82ded12d28488336ae28be5ee3c771c7ad64c"
+      }
+    }
   }
 }

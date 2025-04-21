@@ -13,7 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch"; // Ensure this path is correct for Shadcn switch
 import { useState, useEffect, useRef } from "react";
-import { createShareLink, sendShareInvite } from "@/lib/firebase/shares"; // Path relative to src
+import { createShareLink } from "@/lib/firebase/shares";
+import { sendShareInvite } from "@/lib/firebase/email";
 import { ShareOptions, CreateShareInput } from "@/types/share"; // Path relative to src
 import { Copy, Loader2, Share2, Mail } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
@@ -78,7 +79,12 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
       // Assuming createShareLink returns an object like { id: 'shareId' }
       const result = await createShareLink(options);
       const generatedLink = `${window.location.origin}/shared/${result.id}`;
+      console.log("Generated share link:", generatedLink); // Debug log
       setShareLink(generatedLink);
+      
+      // Clear email field when creating a new link
+      setEmailAddress("");
+      setSendingEmail(false);
     } catch (err: any) {
       console.error("Error creating share link:", err);
       setError(err.message || "Failed to create share link.");
@@ -107,11 +113,17 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
     setError(null);
 
     try {
-      await sendShareInvite({
-        shareId: shareLink.split("/shared/")[1],
-        recipientEmail: emailAddress,
+      // Extract the share ID from the share link
+      const shareId = shareLink.includes("/shared/") 
+        ? shareLink.split("/shared/")[1] 
+        : shareLink.split("/share/")[1];
+      
+      // Send the invitation using our new email service
+      await sendShareInvite(
+        shareId,
+        emailAddress,
         documentName
-      });
+      );
 
       toast({
         title: "Invitation Sent!",
@@ -224,8 +236,9 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
                 </div>
               </div>
               
+              {/* Email Sharing Section */}
               <div className="pt-2 border-t border-border">
-                <Label htmlFor="email-invite">Send Invitation by Email</Label>
+                <Label htmlFor="email-invite" className="block mb-1 font-medium">Send Invitation by Email</Label>
                 <div className="flex items-center space-x-2 mt-1">
                   <Input 
                     id="email-invite" 
@@ -233,17 +246,23 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
                     placeholder="recipient@example.com"
                     value={emailAddress}
                     onChange={(e) => setEmailAddress(e.target.value)}
+                    className="flex-grow"
                   />
                   <Button 
                     type="button" 
-                    size="sm" 
+                    size="sm"
+                    variant="secondary"
                     onClick={handleSendEmail}
                     disabled={sendingEmail || !emailAddress}
+                    className="shrink-0 px-3"
                   >
                     {sendingEmail ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      <Mail className="h-4 w-4" />
+                      <>
+                        <Mail className="h-4 w-4 mr-1" />
+                        <span>Send</span>
+                      </>
                     )}
                   </Button>
                 </div>

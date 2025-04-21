@@ -43,6 +43,10 @@ export async function GET(request: NextRequest) {
     
     // Decode the file path and normalize spaces
     decodedPath = decodeURIComponent(filePath);
+    // Normalize Unicode and replace non-ASCII spaces to prevent ByteString conversion errors
+    // Use a more aggressive approach to remove all non-ASCII characters from the path
+    decodedPath = decodedPath.normalize('NFKD');
+    decodedPath = decodedPath.replace(/[^\x00-\x7F]/g, ''); // Remove all non-ASCII characters
     // Ensure consistent space handling (replace multiple spaces with single space)
     decodedPath = decodedPath.replace(/\s+/g, ' ');
     console.log(`File path after decoding and normalization: ${decodedPath}`);
@@ -121,10 +125,12 @@ export async function GET(request: NextRequest) {
             console.log(`[file-proxy] File downloaded successfully, size: ${fileBuffer.length} bytes`);
             
             // Create a response with the file content
-            const fileName = mostRecentFile.name.split('/').pop() || 'document';
+            let fileName = mostRecentFile.name.split('/').pop() || 'document';
+            // Sanitize filename by removing all non-ASCII characters
+            fileName = fileName.replace(/[^\x00-\x7F]/g, '');
             const contentDisposition = download 
               ? `attachment; filename="${fileName}"` 
-              : `inline; filename="${fileName}"`;
+              : `inline; filename="${fileName}";`
               
             const response = new NextResponse(fileBuffer, {
               status: 200,
@@ -186,7 +192,7 @@ export async function GET(request: NextRequest) {
         headers: {
           'Content-Type': contentType,
           'Content-Length': String(fileBuffer.length),
-          'Content-Disposition': `inline; filename="${file.name.split('/').pop()}"`,
+          'Content-Disposition': `inline; filename="${(file.name.split('/').pop() || '').replace(/[^\x00-\x7F]/g, '')}"`,
           'Cache-Control': 'public, max-age=86400', // Cache for 24 hours
           ...corsHeaders, // Add consistent CORS headers
         },

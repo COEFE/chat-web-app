@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, MouseEvent, WheelEvent, useCallback } from 'react';
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import dynamic from 'next/dynamic';
 import { Timestamp } from 'firebase/firestore';
 import { 
@@ -578,86 +579,102 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
         </div>
       )}
       
-      {/* Image Viewer */}
+      {/* Image Viewer using react-zoom-pan-pinch */}
       {!isLoading && !error && isImage && imageUrl && (
-        <div className="flex flex-col h-full pb-4">
-          <div className="flex justify-center gap-2 p-2 bg-muted/20 border-b">
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setZoom(prev => Math.min(prev + 0.1, 3))}
-              title="Zoom In"
-            >
-              <ZoomIn className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setZoom(prev => Math.max(prev - 0.1, 0.5))}
-              title="Zoom Out"
-            >
-              <ZoomOut className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setRotation(prev => (prev + 90) % 360)}
-              title="Rotate"
-            >
-              <RotateCw className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => {
-                setZoom(1);
-                setRotation(0);
-                setPosition({ x: 0, y: 0 });
-              }}
-              title="Reset"
-            >
-              Reset
-            </Button>
+        <div className="flex flex-col h-full">
+          <div className="flex items-center gap-x-2 p-2 bg-muted/20 border-b justify-between">
+            <div className="flex items-center space-x-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                asChild
+              >
+                <a 
+                  href={`/api/file-proxy?path=${encodeURIComponent(document.storagePath)}&userId=${document.userId}`}
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  download={document.name || 'image.jpg'}
+                  className="flex items-center"
+                >
+                  <Download className="h-4 w-4 mr-1" />
+                  <span className="hidden xs:inline">Download</span>
+                </a>
+              </Button>
+            </div>
           </div>
-          <div 
-            ref={viewerRef}
-            className="flex-1 overflow-hidden relative"
-            onMouseDown={(e: MouseEvent) => {
-              if (e.button === 0) { // Left click only
-                isDragging.current = true;
-                startPos.current = { x: e.clientX - position.x, y: e.clientY - position.y }; 
-              }
-            }}
-            onMouseMove={(e: MouseEvent) => {
-              if (!isDragging.current) return;
-              setPosition({ 
-                x: e.clientX - startPos.current.x, 
-                y: e.clientY - startPos.current.y 
-              });
-            }}
-            onMouseUp={() => {
-              isDragging.current = false;
-            }}
-            onMouseLeave={() => {
-              isDragging.current = false;
-            }}
-            onWheel={(e: WheelEvent) => {
-              e.preventDefault();
-              const delta = e.deltaY * -0.01;
-              setZoom(prev => Math.max(0.5, Math.min(3, prev + delta)));
-            }}
-          >
-            <img 
-              src={imageUrl} 
-              alt={document.name || 'Document image'}
-              style={{
-                transform: `translate(${position.x}px, ${position.y}px) scale(${zoom}) rotate(${rotation}deg)`,
-                transformOrigin: 'center',
-                transition: 'transform 0.2s ease-out',
-                cursor: isDragging.current ? 'grabbing' : 'grab' 
-              }}
-              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 max-w-none"
-            />
+          <div className="flex-1 overflow-hidden relative">
+            <TransformWrapper
+              initialScale={1}
+              minScale={0.1}
+              maxScale={5}
+              limitToBounds={false}
+              doubleClick={{ disabled: false }}
+            >
+              {({ zoomIn, zoomOut, resetTransform }) => (
+                <>
+                  <div className="absolute top-4 left-4 z-10 bg-background border rounded-md shadow-sm flex gap-2 p-1.5">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => zoomOut()}
+                      title="Zoom Out"
+                    >
+                      <ZoomOut className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => zoomIn()}
+                      title="Zoom In"
+                    >
+                      <ZoomIn className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => setRotation(prev => (prev + 90) % 360)}
+                      title="Rotate"
+                    >
+                      <RotateCw className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => {
+                        resetTransform();
+                        setRotation(0);
+                      }}
+                      title="Reset"
+                    >
+                      Reset
+                    </Button>
+                  </div>
+                  <TransformComponent
+                    wrapperStyle={{
+                      width: '100%', 
+                      height: '100%'
+                    }}
+                    contentStyle={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      height: '100%',
+                      transform: `rotate(${rotation}deg)`
+                    }}
+                  >
+                    <img 
+                      src={imageUrl} 
+                      alt={document.name || 'Document image'}
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '100%',
+                        objectFit: 'contain'
+                      }}
+                    />
+                  </TransformComponent>
+                </>
+              )}
+            </TransformWrapper>
           </div>
         </div>
       )}

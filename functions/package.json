@@ -16,10 +16,12 @@
   "main": "lib/index.js",
   "dependencies": {
     "@types/bcrypt": "^5.0.2",
+    "@types/nodemailer": "^6.4.14",
     "@types/uuid": "^10.0.0",
     "bcrypt": "^5.1.1",
     "firebase-admin": "^12.7.0",
     "firebase-functions": "^6.3.2",
+    "nodemailer": "^6.9.12",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

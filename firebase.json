@@ -62,7 +62,9 @@
   "remoteconfig": {
     "template": "remoteconfig.template.json"
   },
-  "extensions": {},
+  "extensions": {
+    "firestore-send-email": "firebase/firestore-send-email@0.1.37"
+  },
   "database": {
     "rules": "database.rules.json"
   }

@@ -44,6 +44,32 @@ service cloud.firestore {
       // The document ID must match the user's UID.
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
+    
+    // Rules for the email collection (used by Firebase Email Extension)
+    // Note: There's a typo in the extension config, so we need to use 'emai_shares'
+    match /emai_shares/{emailId} {
+      // Allow authenticated users to create emails
+      allow create: if request.auth != null;
+      // Allow users to read their own emails
+      allow read: if request.auth != null;
+    }
+    
+    // Rules for email_templates collection
+    match /email_templates/{templateId} {
+      // Allow reading templates by any authenticated user
+      allow read: if request.auth != null;
+      // Only allow writes by admins (you'll need to implement admin role checking)
+    }
+
+    // Rules for shares collection
+    match /shares/{shareId} {
+      // Allow the creator to read/write their shares
+      allow read, write: if request.auth != null && 
+                          (request.resource.data.createdBy == request.auth.uid || 
+                           resource.data.createdBy == request.auth.uid);
+      // Allow anyone to read a share if it's public (no password)
+      allow read: if resource.data.password == null || resource.data.password == "";
+    }
 
     // Default deny all other access
     match /{document=**} {
