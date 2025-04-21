@@ -137,7 +137,7 @@ export function AddDocumentModal({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-md max-h-[85vh] flex flex-col">
+      <DialogContent className="sm:max-w-md max-h-[85vh] flex flex-col overflow-hidden">
 
         <DialogHeader>
           <DialogTitle>Add Document to Chat</DialogTitle>
@@ -157,8 +157,9 @@ export function AddDocumentModal({
         </div>
         
         {/* Content area - Ensure it takes remaining space and scrolls */}
-        <ScrollArea className="flex-1 border-t"> 
-          <div className="p-4">
+        <div className="flex-1 border-t overflow-hidden">
+          <ScrollArea className="h-[50vh] md:h-[40vh]">
+            <div className="p-4">
           {loading ? (
             <div className="flex items-center justify-center h-full"> {/* Center loading in scroll area */}
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -225,8 +226,9 @@ export function AddDocumentModal({
               })}
             </div>
           )}
-          </div>
-        </ScrollArea>
+            </div>
+          </ScrollArea>
+        </div>
         
         <DialogFooter className="flex justify-between px-4 py-3 border-t">
           <Button variant="outline" onClick={onClose}>
