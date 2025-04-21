@@ -79,7 +79,7 @@ export const sendShareInvite = onCall(
 
       // 3. Generate the share link (use environment variable or fallback)
       const FRONTEND_URL = process.env.FRONTEND_URL || "https://chat-web-app.vercel.app";
-      const shareUrl = `${FRONTEND_URL}/share/${shareId}`;
+      const shareUrl = `${FRONTEND_URL}/shared/${shareId}`;
 
       // 4. Prepare the email template
       const expirationText = shareData.expiresAt ?
