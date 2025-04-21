@@ -60,20 +60,20 @@ const FavoritesDialog: React.FC<FavoritesDialogProps> = ({
       <DialogTrigger asChild>
         {trigger}
       </DialogTrigger>
-      <DialogContent className="w-full sm:max-w-[525px]">
+      <DialogContent className="sm:max-w-[525px]">
         <DialogHeader>
-          <DialogTitle className="w-full text-center">Favorite Items</DialogTitle>
+          <DialogTitle className="text-center sm:text-left">Favorite Items</DialogTitle>
           <DialogDescription>
             Quickly access your most used documents and folders.
           </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="h-[400px] w-full pr-2 sm:pr-4">
+        <ScrollArea className="h-[400px] w-full pr-4">
           {favoriteItems.length > 0 ? (
             <ul className="space-y-2">
               {favoriteItems.map((item) => (
-                <li key={item.id} className="flex items-center justify-between p-2 rounded-md hover:bg-accent min-w-0 overflow-hidden">
+                <li key={item.id} className="flex items-center justify-between p-2 rounded-md hover:bg-accent w-full">
                   <button 
-                    className="flex items-center flex-grow min-w-0 overflow-hidden text-left mr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                    className="flex items-center flex-grow text-left mr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm min-w-0"
                     onClick={() => handleItemClick(item)}
                     title={`Open ${item.name}`}
                   >
