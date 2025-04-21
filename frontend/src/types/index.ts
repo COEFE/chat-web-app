@@ -9,11 +9,11 @@ export interface MyDocumentData {
   folderId: string | null; // ID of the parent folder, or null for root
   uploadedAt: Timestamp; // Use Firestore Timestamp
   updatedAt: Timestamp; // Add the missing updatedAt field
-  contentType: string;
+  contentType?: string; // Make optional
   status: string; // e.g., 'uploading', 'complete', 'error'
   downloadURL?: string;
   size?: number; // Size in bytes
-  createdAt: Timestamp | null; // Creation timestamp, null if not available
+  createdAt?: Timestamp; // Change to optional Timestamp
   parentId?: string | null; // Add optional parentId
 }
 
@@ -28,9 +28,14 @@ export interface FolderData {
   parentId?: string | null; // Add optional parentId
 }
 
-// You might also want a type that represents either a folder or a document
-// for use in the display list
-export type FilesystemItem = (FolderData & { type: 'folder' }) | (MyDocumentData & { type: 'document' });
+// Represents either a folder or a document for UI display
+export type FilesystemItem =
+  | (FolderData & { type: 'folder' })
+  | (MyDocumentData & {
+      type: 'document';
+      url?: string; // Can be derived or added later
+      // size, contentType, createdAt are now consistently optional via MyDocumentData
+    });
 
 // Type for Breadcrumbs
 export interface BreadcrumbItem {

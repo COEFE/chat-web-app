@@ -29,6 +29,7 @@ import { ref as storageRef, getMetadata } from "firebase/storage";
 import Skeleton from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
 import DocumentViewer from "@/components/dashboard/DocumentViewer";
+import DocumentMetadataFetcher from '@/components/dashboard/DocumentMetadataFetcher'; // Import the new component
 import {
   FilesystemItem,
   MyDocumentData,
@@ -487,16 +488,11 @@ const createColumns = (
       header: "Size",
       cell: ({ row }) => {
         const item = row.original;
-        if (item.type === "document") {
-          // Use the formatBytes utility
-          return (
-            <span className="text-sm text-muted-foreground">
-              {formatBytes(item.size)}
-            </span>
-          );
-        } else {
-          return <span className="text-sm text-muted-foreground">-</span>; // Folders don't have a size in this context
+        if (item.type === "folder") {
+          return <span className="text-sm text-muted-foreground">-</span>; // Folders don't have size
         }
+        // Use the DocumentMetadataFetcher for documents
+        return <DocumentMetadataFetcher storagePath={item.storagePath} />;
       },
       enableSorting: true, // Allow sorting by size
       enableGrouping: false, // Size doesn't make sense for grouping
@@ -1579,63 +1575,49 @@ function DashboardPage() {
       );
 
       const fetchedDocs: MyDocumentData[] = documentSnapshot.docs.map(
-        (doc) =>
-          ({
+        (doc) => {
+          const data = doc.data();
+          // Explicitly construct the object matching MyDocumentData
+          // Handle potential null for createdAt directly
+          const docData: MyDocumentData = {
             id: doc.id,
-            ...doc.data(),
-            uploadedAt: doc.data().uploadedAt as Timestamp,
-            createdAt: doc.data().createdAt as Timestamp,
-            updatedAt: doc.data().updatedAt as Timestamp,
-          } as MyDocumentData)
-      );
-      const documentItems: FilesystemItem[] = fetchedDocs.map((d) => ({
-        ...d,
-        type: "document",
-      }));
-      console.log(
-        `[Dashboard] Processed ${fetchedDocs.length} documents into UI items`
+            userId: data.userId,
+            name: data.name,
+            storagePath: data.storagePath,
+            folderId: data.folderId ?? null,
+            uploadedAt: data.uploadedAt as Timestamp,
+            updatedAt: data.updatedAt as Timestamp,
+            contentType: data.contentType,
+            status: data.status,
+            downloadURL: data.downloadURL,
+            size: data.size,
+            // Ensure createdAt conforms to 'Timestamp | undefined' expected by MyDocumentData
+            createdAt: data.createdAt ? (data.createdAt as Timestamp) : undefined,
+            parentId: data.parentId,
+          };
+          return docData;
+        }
       );
 
-      // Fetch Metadata from Storage for each document
-      const docsWithMetadata = await Promise.all(
-        fetchedDocs.map(async (docData) => {
-          let metadataProps: { size?: number; contentType?: string } = {};
-          if (docData.storagePath) {
-            try {
-              const fileRef = storageRef(storage, docData.storagePath);
-              const metadata = await getMetadata(fileRef);
-              console.log(
-                `[Dashboard] Fetched metadata for ${docData.name}: size=${metadata.size}, type=${metadata.contentType}`
-              );
-              metadataProps = {
-                size: metadata.size,
-                contentType: metadata.contentType,
-              };
-            } catch (error) {
-              console.warn(
-                `[Dashboard] Failed to get metadata for ${docData.name} (${docData.storagePath}):`,
-                error
-              );
-              // Keep metadataProps empty if fetch fails
-            }
-          } else {
-            console.warn(
-              `[Dashboard] Document ${docData.name} missing storagePath.`
-            );
-          }
-          // Combine original data, metadata, and explicitly add type
-          return {
-            ...docData,
-            ...metadataProps,
-            type: "document", // Explicitly add the type property
-          } as FilesystemItem; // Assert type here for clarity
-        })
+      // Map fetched documents to FilesystemItem, ensuring correct type assignment
+      const documentItems: FilesystemItem[] = fetchedDocs.map((d) => {
+        const item: FilesystemItem = {
+          ...d,
+          // Convert null createdAt to undefined here to match FilesystemItem
+          createdAt: d.createdAt ?? undefined,
+          type: "document", // Explicitly set type
+        };
+        return item;
+      });
+
+      console.log(
+        `[Dashboard] Processed ${fetchedDocs.length} documents into UI items`
       );
 
       // Combine and sort folders first, then by name
       const combinedItems: FilesystemItem[] = [
         ...folderItems,
-        ...docsWithMetadata,
+        ...documentItems,
       ].sort((a, b) => {
         // Sort folders before documents
         if (a.type === "folder" && b.type !== "folder") return -1;
