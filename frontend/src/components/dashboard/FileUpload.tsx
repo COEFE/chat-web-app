@@ -113,6 +113,7 @@ export function FileUpload({
         );
         
         console.log(`Starting direct upload for ${file.name}`);
+        console.log(`[FileUpload] About to upload to storagePath: ${storagePath} with metadata:`, metadata);
         const snapshot = await firebaseUploadBytesResumable(storageRef, file, metadata);
         console.log(`Upload SUCCESS for ${file.name}`, snapshot);
 
