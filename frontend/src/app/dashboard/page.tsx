@@ -1083,7 +1083,11 @@ function DocumentTable({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               {/* Using SlidersHorizontal icon as per removed code */}
-              <Button variant="outline" size="sm" className="h-8 border-dashed">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 border-dashed"
+              >
                 <SlidersHorizontal className="mr-2 h-4 w-4" />
                 Columns
               </Button>
@@ -1521,10 +1525,10 @@ function DashboardPage() {
         `[fetchItems] Querying folders with parentFolderId: ${targetFolderId}`
       );
       const folderSnapshot = await getDocs(foldersQuery);
-      const fetchedFolders: FolderData[] = folderSnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...(doc.data() as Omit<FolderData, "id">),
-      }));
+      const fetchedFolders: FolderData[] = folderSnapshot.docs.map((doc) => {
+        const data = doc.data() as Omit<FolderData, 'id'>;
+        return { id: doc.id, ...data };
+      });
       const folderItems: FilesystemItem[] = fetchedFolders.map((f) => ({
         ...f,
         type: "folder",
@@ -1829,13 +1833,10 @@ function DashboardPage() {
       const foldersRef = collection(db, `users/${user.uid}/folders`);
       const q = query(foldersRef, orderBy("name", "asc"));
       const querySnapshot = await getDocs(q);
-      const fetchedFolders: FolderData[] = querySnapshot.docs.map(
-        (doc) =>
-          ({
-            id: doc.id,
-            ...doc.data(),
-          } as FolderData)
-      );
+      const fetchedFolders: FolderData[] = querySnapshot.docs.map((doc) => {
+        const data = doc.data() as Omit<FolderData, 'id'>;
+        return { id: doc.id, ...data };
+      });
       setAvailableFolders(fetchedFolders);
     } catch (error) {
       console.error("Error fetching all folders:", error);
@@ -2365,7 +2366,7 @@ function DashboardPage() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col p-0 sm:p-0 h-[calc(100vh-56px)] overflow-hidden min-h-0">
+      <main className="flex-1 flex flex-col p-0 sm:p-0 overflow-hidden min-h-0">
         {/* Fixed breadcrumbs navigation */}
         <div className="sticky top-7 z-30 bg-muted/40 pt-0 pb-0 px-4 text-[10px] text-muted-foreground">
           <FolderBreadcrumbs
@@ -2437,7 +2438,7 @@ function DashboardPage() {
             {/* Favorites Section removed to simplify UI and reduce whitespace */}
 
             {/* Document List/Grid Section - Takes remaining space */}
-            <div className="flex-1 overflow-auto px-1 pt-0 w-full h-full min-h-0 pb-16">
+            <div className="flex-1 overflow-auto px-1 pt-0 w-full min-h-0">
               {" "}
               {/* Container for document section */}
               {/* Document Management Toolbar */}
@@ -2638,7 +2639,7 @@ function DashboardPage() {
                 </div>
               ) : (
                 <>
-                  <div className="h-[calc(100vh-160px)] sm:h-[calc(100vh-120px)] overflow-auto">
+                  <div className="h-full overflow-auto">
                     {viewMode === "list" ? (
                       <DndProvider backend={HTML5Backend}>
                         <DocumentTable
