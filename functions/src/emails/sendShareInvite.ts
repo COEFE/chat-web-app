@@ -105,6 +105,8 @@ ${senderName} has shared the document "${documentName}" with you.
 
 You can access it using this link: ${shareUrl}
 
+If the button doesn't work, copy and paste this URL into your browser: ${shareUrl}
+
 ${expirationText}
 ${passwordText}
 
@@ -137,7 +139,7 @@ Document Sharing Service
     <p>${senderName} has shared the document <strong>"${documentName}"</strong> with you.</p>
     
     <p style="margin: 25px 0; text-align: center;">
-      <a href="${shareUrl}" class="button">View Document</a>
+      <a href="${shareUrl}" class="button" target="_blank" rel="noopener">View Document</a>
     </p>
     
     <p class="note">
