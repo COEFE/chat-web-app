@@ -61,12 +61,12 @@ const FavoritesDialog: React.FC<FavoritesDialogProps> = ({
         {trigger}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[525px]">
-        {/* Skip DialogHeader components completely and use standard HTML elements */}
-        <div className="mb-6" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <h2 className="text-lg font-semibold mb-1 text-center" style={{ textAlign: 'center' }}>
+        {/* Use standard HTML elements with left alignment */}
+        <div className="mb-6" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+          <h2 className="text-lg font-semibold mb-1 text-left" style={{ textAlign: 'left' }}>
             Favorite Items
           </h2>
-          <p className="text-sm text-muted-foreground text-center" style={{ textAlign: 'center' }}>
+          <p className="text-sm text-muted-foreground text-left" style={{ textAlign: 'left' }}>
             Quickly access your most used documents and folders.
           </p>
         </div>
