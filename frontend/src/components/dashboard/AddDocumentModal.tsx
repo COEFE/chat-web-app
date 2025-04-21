@@ -158,7 +158,7 @@ export function AddDocumentModal({
         
         {/* Content area - Ensure it takes remaining space and scrolls */}
         <div className="flex-1 border-t overflow-hidden">
-          <ScrollArea className="h-[50vh] md:h-[40vh]">
+          <ScrollArea className="h-[60vh] md:h-[50vh]">
             <div className="p-4">
           {loading ? (
             <div className="flex items-center justify-center h-full"> {/* Center loading in scroll area */}
@@ -230,11 +230,7 @@ export function AddDocumentModal({
           </ScrollArea>
         </div>
         
-        <DialogFooter className="flex justify-between px-4 py-3 border-t">
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-        </DialogFooter>
+        {/* Footer removed to maximize space for document scrolling */}
       </DialogContent>
     </Dialog>
   );
