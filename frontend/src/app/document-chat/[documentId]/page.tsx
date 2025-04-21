@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Maximize2, Minimize2, Plus, MessageSquare, X } from 'lucide-react';
+import { ArrowLeft, Maximize2, Minimize2, Plus, MessageSquare, X, Share2 } from 'lucide-react';
 import DocumentViewer from '@/components/dashboard/DocumentViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
 import { useAuth } from '@/context/AuthContext';
@@ -12,6 +12,7 @@ import AddDocumentModal from '@/components/dashboard/AddDocumentModal';
 import { MyDocumentData } from '@/types';
 import { useMediaQuery } from '@/hooks/use-media-query';
 import { cn } from '@/lib/utils';
+import { ShareDialog } from '@/components/dashboard/ShareDialog';
 
 export default function DocumentChatPage() {
   const params = useParams();
@@ -22,6 +23,7 @@ export default function DocumentChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [isAddDocumentModalOpen, setIsAddDocumentModalOpen] = useState(false);
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [isChatVisibleMobile, setIsChatVisibleMobile] = useState(false);
   const [activeDocumentId, setActiveDocumentId] = useState<string>('');
   const documentId = params?.documentId as string || '';
@@ -223,7 +225,10 @@ export default function DocumentChatPage() {
         
         {/* Button Group (Aligned Right) */}
         <div className="ml-auto flex items-center gap-2">
-          {/* Add Document Button - Icon only on mobile */}
+          <Button variant="outline" size="sm" onClick={() => setIsShareDialogOpen(true)} title="Share Document">
+            <Share2 className="h-4 w-4 md:mr-1" />
+            <span className="hidden md:inline">Share</span>
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -358,6 +363,14 @@ export default function DocumentChatPage() {
           }}
           onDocumentSelect={handleDocumentSelected}
           excludedDocumentIds={documents.map(doc => doc.id)}
+        />
+      )}
+      {isShareDialogOpen && (
+        <ShareDialog
+          documentId={activeDocumentId}
+          documentName={documentTitle}
+          open={isShareDialogOpen}
+          onOpenChange={setIsShareDialogOpen}
         />
       )}
     </div>

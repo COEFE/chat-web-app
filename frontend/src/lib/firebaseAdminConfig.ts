@@ -31,11 +31,15 @@ export function initializeFirebaseAdmin(): admin.app.App {
       console.log('[FirebaseAdmin] No service account JSON found, using Application Default Credentials');
     }
 
-    firebaseApp = admin.initializeApp({
+    // Build options without credential if undefined
+    const appOptions: admin.AppOptions = {
       projectId: process.env.FIREBASE_PROJECT_ID || 'web-chat-app-fa7f0',
       storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com',
-      credential
-    });
+    };
+    if (credential) {
+      appOptions.credential = credential;
+    }
+    firebaseApp = admin.initializeApp(appOptions);
     
     console.log('[FirebaseAdmin] Firebase Admin SDK initialized successfully');
     return firebaseApp;

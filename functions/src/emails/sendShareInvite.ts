@@ -95,7 +95,7 @@ export const sendShareInvite = onCall(
       // which will trigger the Firebase Email Extension to send the email
 
       // Use the correct collection name
-      const mailCollection = "emai_shares"; // Collection name configured in the extension (note: has a typo)
+      const mailCollection = "email_shares"; // Collection name configured in the extension
 
       // Email text content
       const textContent = `
@@ -117,15 +117,18 @@ Document Sharing Service
       // Email HTML content
       const htmlContent = `
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
     body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
     .container { border: 1px solid #ddd; border-radius: 5px; padding: 20px; }
     .header { border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
     .footer { border-top: 1px solid #eee; padding-top: 10px; margin-top: 20px; font-size: 12px; color: #777; }
-    .button { display: inline-block; padding: 10px 20px; background-color: #1E90FF; color: #FFFFFF; text-decoration: none; border-radius: 4px; }
+    .button { display: inline-block; padding: 10px 20px; background-color: #1E90FF; color: #FFFFFF !important; text-decoration: none; border-radius: 4px; font-weight: bold; }
     .note { background-color: #f8f9fa; padding: 10px; margin: 15px 0; border-left: 4px solid #ddd; }
+    .url-link { word-break: break-all; color: #1E90FF; font-family: monospace; font-size: 14px; padding: 8px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; display: block; margin: 10px 0; }
   </style>
 </head>
 <body>
@@ -133,20 +136,20 @@ Document Sharing Service
     <div class="header">
       <h2>Document Shared With You</h2>
     </div>
-    
+
     <p>Hello,</p>
-    
+
     <p>${senderName} has shared the document <strong>"${documentName}"</strong> with you.</p>
-    
+
     <p style="margin: 25px 0; text-align: center;">
       <a href="${shareUrl}" class="button" target="_blank" rel="noopener">View Document</a>
     </p>
-    
-    <p class="note">
-      ${expirationText}<br>
-      ${passwordText ? passwordText + "<br>" : ""}
-    </p>
-    
+
+    <p>If the button doesn't work, copy and paste this URL into your browser:</p>
+    <div class="url-link">${shareUrl}</div>
+
+    ${expirationText ? `<p class="note">${expirationText}${passwordText ? `<br>${passwordText}` : ''}</p>` : ''}
+
     <div class="footer">
       <p>This is an automated message from Document Sharing Service.</p>
     </div>
