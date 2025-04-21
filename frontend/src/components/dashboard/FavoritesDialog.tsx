@@ -64,7 +64,7 @@ const FavoritesDialog: React.FC<FavoritesDialogProps> = ({
         <DialogHeader>
           <DialogTitle className="text-left">Favorite Items</DialogTitle>
           <DialogDescription className="text-left">
-            Quickly access your most used documents and folders.
+            Quick access to your favorites.
           </DialogDescription>
         </DialogHeader>
         <ScrollArea className="h-[400px] w-full pr-4">
@@ -78,7 +78,7 @@ const FavoritesDialog: React.FC<FavoritesDialogProps> = ({
                     title={`Open ${item.name}`}
                   >
                     {getFileTypeIcon(item)}
-                    <span className="flex-grow truncate text-sm font-medium max-w-[300px] sm:max-w-[350px]" title={item.name}>{item.name}</span>
+                    <span className="flex-grow truncate text-sm font-medium max-w-[150px] sm:max-w-[250px] md:max-w-[300px]" title={item.name}>{item.name}</span>
                   </button>
                   <Button
                     variant="ghost"
