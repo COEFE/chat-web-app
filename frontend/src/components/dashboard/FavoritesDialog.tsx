@@ -60,14 +60,15 @@ const FavoritesDialog: React.FC<FavoritesDialogProps> = ({
       <DialogTrigger asChild>
         {trigger}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[525px] text-center">
-        <div style={{ width: '100%', textAlign: 'center' }}>
-          <DialogHeader style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-            <DialogTitle style={{ width: '100%', textAlign: 'center' }}>Favorite Items</DialogTitle>
-            <DialogDescription style={{ width: '100%', textAlign: 'center' }}>
-              Quickly access your most used documents and folders.
-            </DialogDescription>
-          </DialogHeader>
+      <DialogContent className="sm:max-w-[525px]">
+        {/* Skip DialogHeader components completely and use standard HTML elements */}
+        <div className="mb-6" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <h2 className="text-lg font-semibold mb-1 text-center" style={{ textAlign: 'center' }}>
+            Favorite Items
+          </h2>
+          <p className="text-sm text-muted-foreground text-center" style={{ textAlign: 'center' }}>
+            Quickly access your most used documents and folders.
+          </p>
         </div>
         <ScrollArea className="h-[400px] w-full pr-4">
           {favoriteItems.length > 0 ? (
