@@ -326,14 +326,7 @@ export default function DocumentChatPage() {
             ] :
             'h-full w-[30%] flex flex-col'
           )}>
-            {/* Optional: Add a close button inside the chat panel for mobile */} 
-            {isMobile && (
-              <div className="flex justify-end p-0 border-b md:hidden">
-                <Button variant="ghost" size="icon" onClick={toggleChatVisibility} title="Close Chat">
-                  <X className="h-5 w-5" />
-                </Button>
-              </div>
-            )}
+            {/* Close button removed - using header X button instead */}
             <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
               <ChatInterface 
                 documentId={activeDocumentId} 
