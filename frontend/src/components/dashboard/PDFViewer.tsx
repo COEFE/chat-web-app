@@ -319,7 +319,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       </div>
       
       {/* Main content area */}
-      <div className="flex-grow relative overflow-auto" ref={pagesRef}>
+      <div className="flex-grow relative overflow-auto overscroll-contain" ref={pagesRef}>
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-50 dark:bg-gray-900 z-10">
             <div className="text-center p-4">
