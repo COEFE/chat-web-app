@@ -23,7 +23,7 @@ async function seed() {
     .container { border: 1px solid #ddd; border-radius: 5px; padding: 20px; }
     .header { border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
     .footer { border-top: 1px solid #eee; padding-top: 10px; margin-top: 20px; font-size: 12px; color: #777; }
-    .button { display: inline-block; padding: 10px 20px; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 4px; }
+    .button { display: inline-block; padding: 10px 20px; background-color: #1E90FF; color: #FFFFFF; text-decoration: none; border-radius: 4px; }
     .note { background-color: #f8f9fa; padding: 10px; margin: 15px 0; border-left: 4px solid #ddd; }
   </style>
 </head>
