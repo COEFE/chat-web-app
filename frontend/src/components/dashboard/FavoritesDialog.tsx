@@ -62,12 +62,12 @@ const FavoritesDialog: React.FC<FavoritesDialogProps> = ({
       </DialogTrigger>
       <DialogContent className="sm:max-w-[525px]">
         <DialogHeader>
-          <DialogTitle>Favorite Items</DialogTitle>
+          <DialogTitle className="w-full text-center">Favorite Items</DialogTitle>
           <DialogDescription>
             Quickly access your most used documents and folders.
           </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="h-[400px] w-full pr-4">
+        <ScrollArea className="h-[400px] w-full pr-2 sm:pr-4">
           {favoriteItems.length > 0 ? (
             <ul className="space-y-2">
               {favoriteItems.map((item) => (
