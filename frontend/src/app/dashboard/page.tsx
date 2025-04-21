@@ -2666,7 +2666,7 @@ function DashboardPage() {
                       </DndProvider>
                     ) : (
                       <DocumentGrid
-                        items={filesystemItems}
+                        items={filesystemItems.slice(0, itemsToShow)} // Apply pagination slice here
                         isLoading={loadingDocs}
                         error={docsError}
                         onSelectItem={handleSelectItem}
@@ -2678,7 +2678,9 @@ function DashboardPage() {
                         favoriteIds={favoriteIds}
                         handleToggleFavorite={handleToggleFavorite}
                         togglingFavoriteId={togglingFavoriteId}
-                        onOpenShareDialog={handleOpenShareDialog} // Pass the handler
+                        onOpenShareDialog={handleOpenShareDialog}
+                        hasMoreItems={filesystemItems.length > itemsToShow} // Check if there are more items
+                        onLoadMore={() => setItemsToShow((prevCount: number) => prevCount + 20)} // Load 20 more items
                       />
                     )}
                   </div>

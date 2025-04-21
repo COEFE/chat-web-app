@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Folder, FileText, Loader2, Star, MoreHorizontal, Pencil, Move, Trash2, Share2 } from 'lucide-react';
+import { Folder, FileText, Loader2, Star, MoreHorizontal, Pencil, Move, Trash2, Share2, PlusCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FilesystemItem } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -29,6 +29,8 @@ interface DocumentGridProps {
   handleToggleFavorite: (itemId: string, currentStatus: boolean) => Promise<void>;
   togglingFavoriteId: string | null;
   onOpenShareDialog: (doc: { id: string; name: string }) => void; // Add prop for opening dialog
+  hasMoreItems?: boolean; // Flag indicating if there are more items to load
+  onLoadMore?: () => void; // Function to load more items
 }
 
 const DocumentGrid: React.FC<DocumentGridProps> = ({
@@ -45,6 +47,8 @@ const DocumentGrid: React.FC<DocumentGridProps> = ({
   handleToggleFavorite,
   togglingFavoriteId,
   onOpenShareDialog, // Destructure the new prop
+  hasMoreItems = false,
+  onLoadMore
 }) => {
 
   if (isLoading) {
@@ -88,8 +92,9 @@ const DocumentGrid: React.FC<DocumentGridProps> = ({
   };
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-4 flex-grow overflow-y-auto">
-      {items.map((item) => (
+    <div className="flex flex-col">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-4 flex-grow overflow-y-auto">
+        {items.map((item) => (
         <Card 
           key={item.id} 
           className="hover:shadow-md transition-shadow cursor-pointer flex flex-col justify-between h-full" 
@@ -204,6 +209,22 @@ const DocumentGrid: React.FC<DocumentGridProps> = ({
           </CardContent>
         </Card>
       ))}
+      </div>
+      
+      {/* Load More Button */}
+      {hasMoreItems && onLoadMore && (
+        <div className="flex justify-center py-6 mb-4 border-t">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onLoadMore}
+            className="w-40"
+          >
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Load More
+          </Button>
+        </div>
+      )}
     </div>
   );
 };
