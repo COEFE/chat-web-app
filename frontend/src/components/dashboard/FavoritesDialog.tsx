@@ -61,34 +61,29 @@ const FavoritesDialog: React.FC<FavoritesDialogProps> = ({
         {trigger}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[525px]">
-        {/* Use standard HTML elements with left alignment */}
-        <div className="mb-6" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-          <h2 className="text-lg font-semibold mb-1 text-left" style={{ textAlign: 'left' }}>
-            Favorite Items
-          </h2>
-          <p className="text-sm text-muted-foreground text-left" style={{ textAlign: 'left' }}>
+        <DialogHeader>
+          <DialogTitle className="text-left">Favorite Items</DialogTitle>
+          <DialogDescription className="text-left">
             Quickly access your most used documents and folders.
-          </p>
-        </div>
+          </DialogDescription>
+        </DialogHeader>
         <ScrollArea className="h-[400px] w-full pr-4">
           {favoriteItems.length > 0 ? (
             <ul className="space-y-2">
               {favoriteItems.map((item) => (
-                <li key={item.id} className="flex items-center gap-2 p-2 rounded-md hover:bg-accent w-full overflow-hidden">
+                <li key={item.id} className="flex items-center justify-between p-2 rounded-md hover:bg-accent">
                   <button 
-                    className="flex items-center text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm min-w-0 max-w-[80%] overflow-hidden"
+                    className="flex items-center flex-grow text-left mr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
                     onClick={() => handleItemClick(item)}
                     title={`Open ${item.name}`}
                   >
-                    <div className="flex-shrink-0">
-                      {getFileTypeIcon(item)}
-                    </div>
-                    <span className="truncate text-sm font-medium block w-full">{item.name}</span>
+                    {getFileTypeIcon(item)}
+                    <span className="flex-grow truncate text-sm font-medium max-w-[300px] sm:max-w-[350px]" title={item.name}>{item.name}</span>
                   </button>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-primary flex-shrink-0 ml-auto focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0"
+                    className="h-7 w-7 text-muted-foreground hover:text-primary flex-shrink-0 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0"
                     onClick={() => handleToggleFavorite(item.id, true)} // Always true because it's currently a favorite
                     disabled={togglingFavoriteId === item.id}
                     title="Remove from Favorites"

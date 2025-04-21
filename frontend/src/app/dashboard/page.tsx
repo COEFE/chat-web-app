@@ -1326,9 +1326,9 @@ function DocumentTable({
         {!hasMoreItems && <div className="pb-8" />}
       </div>
 
-      {/* Load More Button */}
+      {/* Load More Button - Fixed at bottom for mobile */}
       {hasMoreItems && (
-        <div className="flex justify-center py-6 mb-4 border-t">
+        <div className="fixed bottom-0 left-0 right-0 flex justify-center py-3 bg-background/90 backdrop-blur-sm border-t z-10">
           <Button
             variant="outline"
             size="sm"
@@ -2666,7 +2666,7 @@ function DashboardPage() {
                       </DndProvider>
                     ) : (
                       <DocumentGrid
-                        items={filesystemItems.slice(0, itemsToShow)} // Apply pagination slice here
+                        items={filesystemItems}
                         isLoading={loadingDocs}
                         error={docsError}
                         onSelectItem={handleSelectItem}
@@ -2678,9 +2678,7 @@ function DashboardPage() {
                         favoriteIds={favoriteIds}
                         handleToggleFavorite={handleToggleFavorite}
                         togglingFavoriteId={togglingFavoriteId}
-                        onOpenShareDialog={handleOpenShareDialog}
-                        hasMoreItems={filesystemItems.length > itemsToShow} // Check if there are more items
-                        onLoadMore={() => setItemsToShow((prevCount: number) => prevCount + 20)} // Load 20 more items
+                        onOpenShareDialog={handleOpenShareDialog} // Pass the handler
                       />
                     )}
                   </div>
