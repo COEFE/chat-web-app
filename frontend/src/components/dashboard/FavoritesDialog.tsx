@@ -61,10 +61,9 @@ const FavoritesDialog: React.FC<FavoritesDialogProps> = ({
         {trigger}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[525px]">
-        {/* Force dialog header to be centered on mobile with !important */}
-        <DialogHeader className="!text-center sm:!text-left">
-          <DialogTitle>Favorite Items</DialogTitle>
-          <DialogDescription>
+        <DialogHeader className="sm:text-left" style={{ textAlign: 'center' }}>
+          <DialogTitle style={{ textAlign: 'center' }} className="sm:text-left">Favorite Items</DialogTitle>
+          <DialogDescription style={{ textAlign: 'center' }} className="sm:text-left">
             Quickly access your most used documents and folders.
           </DialogDescription>
         </DialogHeader>
