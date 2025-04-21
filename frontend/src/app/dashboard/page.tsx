@@ -2292,7 +2292,7 @@ function DashboardPage() {
   }, [pathname]); // Dependency array includes pathname
 
   return (
-    <div className="flex h-screen flex-col bg-muted/40 overflow-hidden">
+    <div className="flex h-screen flex-col bg-muted overflow-hidden">
       {/* Fixed header - Mobile optimized */}
       <header className="sticky top-0 z-40 flex h-9 items-center gap-2 sm:gap-4 bg-background px-2 sm:px-4 border-b border-border/40">
         <h1 className="text-xl font-semibold whitespace-nowrap">
@@ -2365,7 +2365,7 @@ function DashboardPage() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col p-0 sm:p-0">
+      <main className="flex-1 flex flex-col p-0 sm:p-0 h-[calc(100vh-56px)] overflow-hidden min-h-0">
         {/* Fixed breadcrumbs navigation */}
         <div className="sticky top-7 z-30 bg-muted/40 pt-0 pb-0 px-4 text-[10px] text-muted-foreground">
           <FolderBreadcrumbs
@@ -2376,7 +2376,7 @@ function DashboardPage() {
         </div>
 
         {/* Scrollable content area */}
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto h-full min-h-0">
           {selectedDocument && (
             <>
               <div className="flex justify-end mb-2 gap-2">
@@ -2430,14 +2430,14 @@ function DashboardPage() {
           )}
 
           <div
-            className={`flex-1 flex flex-col overflow-auto ${
+            className={`flex-1 flex flex-col overflow-hidden min-h-0 ${
               isMaximized && isViewerVisible ? "hidden" : ""
             }`}
           >
             {/* Favorites Section removed to simplify UI and reduce whitespace */}
 
             {/* Document List/Grid Section - Takes remaining space */}
-            <div className="flex-1 overflow-auto px-1 pt-0 w-full">
+            <div className="flex-1 overflow-auto px-1 pt-0 w-full h-full min-h-0 pb-16">
               {" "}
               {/* Container for document section */}
               {/* Document Management Toolbar */}

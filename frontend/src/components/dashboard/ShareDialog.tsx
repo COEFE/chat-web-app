@@ -155,7 +155,7 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
         }
       }}
     >
-      <DialogContent className="sm:max-w-[525px]" ref={dialogContentRef}>
+      <DialogContent className="sm:max-w-[525px] [&>button[data-slot=dialog-close]]:hidden" ref={dialogContentRef}>
         <DialogHeader>
           <DialogTitle>Share Document: {documentName || "Document"}</DialogTitle>
           <DialogDescription>
@@ -274,9 +274,7 @@ export function ShareDialog({ documentId, documentName, open, onOpenChange }: Sh
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
-          {shareLink ? (
-            <Button type="button" onClick={handleDialogClose}>Close</Button>
-          ) : (
+          {!shareLink && (
             <Button type="button" onClick={handleCreateLink} disabled={loading}>
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {loading ? "Generating..." : "Generate Link"}
