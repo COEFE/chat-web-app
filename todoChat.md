@@ -1,47 +1,84 @@
-# Chat Interface UI/UX TODOs
+# Implementation Plan: Mobile Chat Session Resume
 
-## Contextual Clarity
+This document outlines the mobile‑first approach for persisting and resuming multi‑document chat sessions.
 
-- [x] Display active document name(s) in the header (e.g., "Chat with [Doc Name]").
-- [x] Indicate if multiple documents are active in the header.
-- [x] Display the active Excel sheet name when applicable.
+## 1. Data Model & API
 
-## Message Readability & Formatting
+```ts
+interface ChatSession {
+  id: string;
+  docIds: [string, string?];    // one or two document IDs
+  label: string;                // e.g., "Budget + Specs"
+  lastActivity: number;         // UNIX timestamp
+}
+```
 
-- [x] Implement Markdown rendering for message content (`react-markdown`).
-- [x] Enhance visual differentiation between user and assistant messages (e.g., slightly different background/border).
-- [x] Add optional timestamps to messages (e.g., on hover or below bubble).
+- **Endpoints**
+  - `GET /api/chat-sessions` → list recent (limit 5)
+  - `POST /api/chat-sessions` → create or update session
+  - `DELETE /api/chat-sessions/:id` → remove session
 
-## Loading & Error States
+## 2. Persistence & LocalStorage
 
-- [ ] Add a "typing" indicator when the AI is processing (`isLoading`).
-- [ ] Display user-friendly error messages within the chat UI or via Toasts.
+- On every message send or doc add/remove, `POST /api/chat-sessions` with upsert behavior.
+- Store `lastSessionId` in `localStorage` whenever session is created or updated.
 
-## Input Area Enhancements
+## 3. Resume Banner
 
-- [x] Replace `<Input>` with `<Textarea>` for multi-line input.
-- [x] Consider Shift+Enter for newline vs. Enter for submit in Textarea.
-- [x] Replace "Send" text button with an icon button (e.g., Paper Plane) + aria-label.
+- In `pages/chat/[session].tsx` (or layout), on mount:
+  1. Read `lastSessionId` from `localStorage`.
+  2. If user has no session loaded but `lastSessionId` exists, `GET /api/chat-sessions/:id`.
+  3. Show fixed banner at top:
+     ```jsx
+     <div className="fixed top-0 inset-x-0 bg-primary text-white p-2 flex justify-between items-center z-20">
+       <span>Resume “{session.label}”?</span>
+       <button onClick={() => loadSession(session.id)}>Resume</button>
+       <button onClick={() => localStorage.removeItem('lastSessionId')}>×</button>
+     </div>
+     ```
+- Dismiss clears `lastSessionId`.
 
-## Initial State / Empty Chat
+## 4. Recent Chats Bottom‑Sheet
 
-- [x] Show a placeholder message in an empty chat (e.g., "Ask me anything about [Document Name]").
+- In chat header, add a Sheet trigger (bottom side):
+  ```jsx
+  <Sheet>
+    <SheetTrigger>
+      <Button variant="ghost"><ClockIcon /></Button>
+    </SheetTrigger>
+    <SheetContent side="bottom" className="h-1/2">
+      <h3>Recent Chats</h3>
+      <ul>
+        {sessions.map(s => (
+          <li key={s.id}>
+            <button onClick={() => loadSession(s.id)}>
+              {s.label}
+              <span className="text-xs text-muted">{formatRelative(s.lastActivity)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </SheetContent>
+  </Sheet>
+  ```
+- Sheet is full‑width, swipe‑down to close, touch targets ≥40px.
 
-## Responsiveness
+## 5. UI/UX Details
 
-- [ ] Test and refine chat interface layout on smaller screens (mobile/tablet).
-- [ ] Apply responsive Tailwind modifiers (`sm:`, `md:`) as needed for fonts, padding, etc.
+- **Banner height**: ~50px, fixed at top, content scrolls under.
+- **Sheet**: covers bottom 50% of viewport on mobile.
+- **Touch targets**: buttons ≥40px.
+- **Responsive**: use Tailwind modifiers (`sm:`, `md:`) if needed for larger screens.
 
-## Backend/API Integration
+## 6. Lifecycle Hooks
 
-- [ ] Refactor Excel update handling: Use structured API response (e.g., `excelUpdated: true`) instead of string markers.
+- **onMessageSend** or **onDocAdd**:
+  1. upsert session via API.
+  2. update `localStorage.lastSessionId`.
+- **onLoad** of `/chat`:
+  1. fetch recent sessions (`GET /api/chat-sessions`).
+  2. if no active and `lastSessionId`, show banner.
 
-## Document Viewer/List UI
-- [x] Fix CORS issue when viewing documents (Proxy API)
-- [x] Show placeholder message in empty chat with document name
-- [x] Implement Favorites feature (Button + State)
-- [x] Add "Date Added" column/info to document list/grid
-- [ ] ~~Group documents by date in list view (Today, Yesterday, This Week, etc.)~~ (Using grid view now)
-- [ ] Persist view mode (grid/list) selection
-- [ ] Implement drag-and-drop reordering (List view)
-- [ ] Implement drag-and-drop into folders (Grid/List view)
+---
+
+This plan ensures a lightweight, mobile‑friendly way to resume or switch multi‑document chats without cluttering small screens.

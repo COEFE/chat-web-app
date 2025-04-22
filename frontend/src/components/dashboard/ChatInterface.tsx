@@ -14,36 +14,46 @@ import ReactMarkdown from 'react-markdown'; // Import ReactMarkdown
 import remarkGfm from 'remark-gfm'; // Import remark-gfm for GitHub Flavored Markdown
 import { format } from 'date-fns'; // Import date-fns for formatting
 
-interface ChatInterfaceProps {
-  documentId: string; // Primary/active document ID
-  document?: MyDocumentData;
-  // Optional additional properties for multi-document support
-  additionalDocuments?: MyDocumentData[];
-  isReadOnly?: boolean; // Add optional read-only prop
-  className?: string; // Add optional className prop
+export interface ChatInterfaceProps { 
+  chatId: string; 
+  userId: string; // Make userId required
+  linkedDocuments?: MyDocumentData[]; // Accept all linked documents
+  isReadOnly?: boolean; 
+  className?: string; 
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, additionalDocuments = [], isReadOnly = false, className }) => {
-  // Combine primary document with additional documents for context
-  const allDocuments = document ? [document, ...additionalDocuments] : additionalDocuments;
-  // Get all document IDs for the API call
-  const allDocumentIds = allDocuments.map(doc => doc.id);
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
+  chatId, 
+  userId, // Destructure userId
+  linkedDocuments = [], // Use linkedDocuments, default to empty array
+  isReadOnly = false, 
+  className 
+}) => {
+  // Use linkedDocuments directly
+  const allDocumentIds = linkedDocuments.map(doc => doc.id); 
+  // Find the primary document if needed (e.g., for context - assuming first is primary for now)
+  // Note: This assumption might need refinement based on how 'activeDocument' is determined upstream
+  const primaryDocument = linkedDocuments.length > 0 ? linkedDocuments[0] : undefined;
+
   const scrollAreaRef = useRef<HTMLDivElement>(null); 
   const scrollableRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { user } = useAuth(); 
+  const messagesEndRef = useRef<HTMLDivElement>(null); 
   const submitButtonRef = useRef<HTMLButtonElement>(null); // Ref for the submit button
+  const { user } = useAuth(); // Call useAuth at the top level
   const [authToken, setAuthToken] = useState<string | null>(null); // State for auth token
 
   const [activeSheet, setActiveSheet] = useState<string | null>(null);
 
   // Helper to check if the document is likely an Excel file
   const isExcel = (doc?: MyDocumentData) => {
+    // Check primary document or maybe any linked document?
+    // For now, checking the primary one.
     return doc?.contentType?.includes('spreadsheetml') || doc?.name?.endsWith('.xlsx');
   };
 
   // Effect to fetch the auth token when the user object changes
   useEffect(() => {
+    // Fetch the auth token when the user object changes.
     if (user) {
       user.getIdToken()
         .then(token => {
@@ -68,30 +78,33 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
   // DEBUG: Log the headers being passed to useChat
   console.log('[ChatInterface] Headers for useChat:', chatHeaders);
 
-  // --- Prepare Document Context for API --- 
-  const documentContext = document && user?.uid && document.storagePath && document.contentType
+  // --- Prepare Document Context for API (only if document exists) --- 
+  // Use primaryDocument and userId prop
+  const documentContext = primaryDocument && userId && primaryDocument.storagePath && primaryDocument.contentType
     ? {
-        storagePath: document.storagePath,
-        contentType: document.contentType,
-        name: document.name,
-        userId: user.uid, // Pass the authenticated user's ID
+        storagePath: primaryDocument.storagePath,
+        contentType: primaryDocument.contentType,
+        name: primaryDocument.name,
+        userId: userId, // Use userId prop
       }
     : undefined;
 
   // Initialize useChat hook - provides messages, setMessages, etc.
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages } = useChat({
     api: '/api/chat',
-    id: documentId, // Use primary document ID as the chat ID
+    id: chatId, // Use chatId as the unique ID for the chat session
     initialMessages: [], // Explicitly start with empty messages
     // Pass the prepared headers object (or undefined)
     headers: chatHeaders, 
     body: {
-      documentId: documentId, // Primary document ID
-      currentDocument: document, // Primary document data
-      additionalDocumentIds: allDocumentIds.filter(id => id !== documentId), // Additional document IDs
-      additionalDocuments: additionalDocuments, // Additional document data
-      activeSheet: activeSheet,
-      documentContext: documentContext, // Send the main document context
+      chatId: chatId, // Always include chatId
+      // Pass all linked document IDs
+      ...(allDocumentIds.length > 0 && { linkedDocumentIds: allDocumentIds }), 
+      // Pass all linked documents data
+      ...(linkedDocuments.length > 0 && { linkedDocuments: linkedDocuments }),
+      // Note: activeSheet logic might need review if it depends on the 'primary' document concept
+      ...(activeSheet && primaryDocument && { activeSheet: activeSheet }), 
+      ...(documentContext && { documentContext: documentContext }),
     },
     onFinish: (message) => {
       console.log('Chat finished:', message);
@@ -118,19 +131,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
     }
   });
 
-  // Effect to load chat history when documentId or user changes
+  // Effect to load chat history when chatId or user changes
   useEffect(() => {
     const loadChatHistory = async () => {
-      if (!documentId || !user?.uid) {
-        console.log('[ChatInterface] No documentId or user, clearing messages.');
-        setMessages([]); // Clear history if no document or user
+      if (!chatId || !userId) { // Use userId prop
+        console.log('[ChatInterface] No chatId or user, clearing messages.');
+        setMessages([]); // Clear history if no chat or user
         return;
       }
 
-      console.log(`[ChatInterface] Attempting to load chat history for document: ${documentId}`);
+      console.log(`[ChatInterface] Attempting to load chat history for chat: ${chatId}`);
       const db = getFirestore();
-      // Assuming messages are stored directly under the document
-      const messagesPath = `users/${user.uid}/documents/${documentId}/messages`;
+      // Assuming messages are stored directly under the chat
+      const messagesPath = `users/${userId}/chats/${chatId}/messages`; // Use userId prop
 
       try {
         const messagesQuery = query(collection(db, messagesPath), orderBy('createdAt', 'asc'));
@@ -165,13 +178,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
     };
 
     loadChatHistory();
-  }, [documentId, user, setMessages]); // Dependencies for the effect
+  }, [chatId, userId, setMessages]); // Use userId prop in dependency array
 
   useEffect(() => {
-    if (document?.id) {
-      const savedSheet = localStorage.getItem(`activeSheet-${document.id}`);
+    // Update active sheet logic based on primaryDocument
+    if (primaryDocument?.id) { 
+      const savedSheet = localStorage.getItem(`activeSheet-${primaryDocument.id}`);
       if (savedSheet) {
-        console.log(`[ChatInterface] Found active sheet for document ${document.id}: ${savedSheet}`);
+        console.log(`[ChatInterface] Found active sheet for document ${primaryDocument.id}: ${savedSheet}`);
         setActiveSheet(savedSheet);
       } else {
         setActiveSheet(null);
@@ -179,7 +193,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
 
       const handleActiveSheetChange = (event: CustomEvent) => {
         const { documentId: eventDocId, sheetName } = event.detail;
-        if (eventDocId === document.id) {
+        if (eventDocId === primaryDocument.id) {
           console.log(`[ChatInterface] Received active sheet change event: ${sheetName}`);
           setActiveSheet(sheetName);
         }
@@ -189,7 +203,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
         window.removeEventListener('activeSheetChanged', handleActiveSheetChange as EventListener);
       };
     }
-  }, [document?.id]);
+  }, [primaryDocument?.id]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -224,16 +238,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
       <CardHeader className="p-0 pl-3"> {/* Added left padding to align with chat bubbles */}
         <CardTitle 
           className="truncate" 
-          title={document?.name ? `Chat with ${document.name}${additionalDocuments.length > 0 ? ` (+${additionalDocuments.length} more)` : ''}` : 'Chat'}
+          title={primaryDocument?.name ? `Chat with ${primaryDocument.name}${linkedDocuments.length > 0 ? ` (+${linkedDocuments.length} more)` : ''}` : 'Chat'}
         >
-          {document?.name ? `Chat with ${document.name}` : 'Chat'}
-          {additionalDocuments.length > 0 && (
+          {primaryDocument?.name ? `Chat with ${primaryDocument.name}` : 'Chat'}
+          {linkedDocuments.length > 0 && (
             <span className="text-muted-foreground text-sm ml-1">
-              (+{additionalDocuments.length} more)
+              (+{linkedDocuments.length} more)
             </span>
           )}
         </CardTitle>
-        {isExcel(document) && activeSheet && (
+        {isExcel(primaryDocument) && activeSheet && (
           <CardDescription>Active Sheet: {activeSheet}</CardDescription>
         )}
       </CardHeader>
@@ -244,7 +258,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documentId, document, add
             {!isLoading && messages.length === 0 && (
               <div className="flex h-full items-center justify-center">
                 <p className="text-muted-foreground">
-                  Ask me anything about {document?.name ? `"${document.name}"` : 'the document'}.
+                  Ask me anything about {primaryDocument?.name ? `"${primaryDocument.name}"` : 'the document'}.
                 </p>
               </div>
             )}

@@ -11,10 +11,12 @@ import { Loader2, FileText, Lock, MessageSquare, X, Maximize2, Minimize2 } from 
 import { useToast } from '@/components/ui/use-toast';
 import PDFViewer from '@/components/dashboard/PDFViewer';
 import ChatInterface from '@/components/dashboard/ChatInterface';
+import DocumentViewer from '@/components/dashboard/DocumentViewer';
 import Link from 'next/link';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import useMediaQuery from '@/hooks/useMediaQuery';
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { MyDocumentData } from '@/types'; // Ensure MyDocumentData is imported
 
 // Error boundary component for handling rendering errors
 class ErrorBoundary extends React.Component<
@@ -48,6 +50,8 @@ interface ShareDetails {
   documentId: string;
   documentName: string;
   documentPath: string;
+  ownerUserId: string; // Added owner user ID
+  documentData: MyDocumentData; // Added full document data
   expiresAt: number | null;
   includeChat: boolean;
   accessType: 'view' | 'comment';
@@ -69,7 +73,6 @@ export default function SharedDocumentPage() {
   const [passwordInput, setPasswordInput] = useState('');
   const [verifyingPassword, setVerifyingPassword] = useState(false);
   const [accessGranted, setAccessGranted] = useState(false);
-  const [documentUrl, setDocumentUrl] = useState<string | null>(null);
 
   const isMobile = useMediaQuery('(max-width: 768px)');
 
@@ -92,6 +95,8 @@ export default function SharedDocumentPage() {
           documentId: details.documentId,
           documentName: details.documentName,
           documentPath: details.documentPath,
+          ownerUserId: details.ownerUserId,
+          documentData: details.documentData,
           expiresAt: details.expiresAt,
           includeChat: details.includeChat,
           accessType: details.accessType as 'view' | 'comment',
@@ -105,9 +110,6 @@ export default function SharedDocumentPage() {
           setPasswordProtected(true);
         } else {
           setAccessGranted(true);
-          // Generate document URL for viewing
-          const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(shareDetails.documentPath)}`;
-          setDocumentUrl(proxyUrl);
         }
       } catch (err: any) {
         console.error('Error fetching share details:', err);
@@ -130,11 +132,6 @@ export default function SharedDocumentPage() {
       
       if (result.accessGranted) {
         setAccessGranted(true);
-        // Generate document URL for viewing
-        if (shareDetails?.documentPath) {
-          const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(shareDetails.documentPath)}`;
-          setDocumentUrl(proxyUrl);
-        }
         toast({
           title: 'Access granted',
           description: 'Password verified successfully',
@@ -288,18 +285,19 @@ export default function SharedDocumentPage() {
             >
               <ResizablePanel defaultSize={60} minSize={30}> 
                 <div className="flex h-full w-full overflow-hidden"> 
-                  {documentUrl ? (
-                    shareDetails?.documentPath?.toLowerCase().endsWith('.pdf') ? (
+                  {shareDetails?.documentData ? (
+                    shareDetails.documentData.contentType?.includes('pdf') ? (
                       <ErrorBoundary fallback={<div>Error loading PDF.</div>}> 
-                        <PDFViewer fileUrl={documentUrl} />
+                        <PDFViewer 
+                          fileUrl={`/api/file-proxy?path=${encodeURIComponent(shareDetails.documentData.storagePath || '')}&userId=${encodeURIComponent(shareDetails.documentData.userId || '')}`}
+                          fileName={shareDetails.documentData.name}
+                        />
                       </ErrorBoundary>
                     ) : (
                       <ErrorBoundary fallback={<div>Error loading document.</div>}> 
-                        <iframe 
-                          src={documentUrl}
-                          className="w-full h-full"
-                          title={shareDetails?.documentName || 'Shared Document'}
-                          onError={() => console.error('Error loading document iframe')}
+                        <DocumentViewer 
+                          document={shareDetails.documentData} 
+                          className="flex-1"
                         />
                       </ErrorBoundary>
                     )
@@ -316,9 +314,11 @@ export default function SharedDocumentPage() {
               <ResizableHandle withHandle />
               <ResizablePanel defaultSize={40} minSize={25}> 
                 <div className="flex h-full flex-col"> 
-                  {shareDetails.documentId && (
+                  {shareDetails && shareDetails.ownerUserId && shareDetails.documentData && (
                     <ChatInterface 
-                      documentId={shareDetails.documentId} 
+                      chatId={shareDetails.documentId} 
+                      userId={shareDetails.ownerUserId} 
+                      linkedDocuments={[shareDetails.documentData]} 
                       isReadOnly={!shareDetails.isChatActive}
                     />
                   )}
@@ -328,18 +328,19 @@ export default function SharedDocumentPage() {
           ) : (
             // Document Only View or Maximized View
             <div className="flex-1 overflow-hidden relative h-full w-full"> 
-              {documentUrl ? (
-                shareDetails?.documentPath?.toLowerCase().endsWith('.pdf') ? (
+              {shareDetails?.documentData ? (
+                shareDetails.documentData.contentType?.includes('pdf') ? (
                   <ErrorBoundary fallback={<div>Error loading PDF.</div>}> 
-                    <PDFViewer fileUrl={documentUrl} />
+                    <PDFViewer 
+                      fileUrl={`/api/file-proxy?path=${encodeURIComponent(shareDetails.documentData.storagePath || '')}&userId=${encodeURIComponent(shareDetails.documentData.userId || '')}`}
+                      fileName={shareDetails.documentData.name}
+                    />
                   </ErrorBoundary>
                 ) : (
                   <ErrorBoundary fallback={<div>Error loading document.</div>}> 
-                    <iframe 
-                      src={documentUrl}
-                      className="w-full h-full"
-                      title={shareDetails?.documentName || 'Shared Document'}
-                      onError={() => console.error('Error loading document iframe')}
+                    <DocumentViewer 
+                      document={shareDetails.documentData} 
+                      className="flex-1"
                     />
                   </ErrorBoundary>
                 )
@@ -354,10 +355,14 @@ export default function SharedDocumentPage() {
               {isMobile && shareDetails?.includeChat && shareDetails.documentId && chatOpen && !isMaximized && (
                 <div className="absolute inset-0 z-40 bg-background flex flex-col">
                   <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-                    <ChatInterface 
-                      documentId={shareDetails.documentId} 
-                      isReadOnly={!shareDetails.isChatActive}
-                    />
+                    {shareDetails && shareDetails.ownerUserId && shareDetails.documentData && (
+                      <ChatInterface 
+                        chatId={shareDetails.documentId} 
+                        userId={shareDetails.ownerUserId} 
+                        linkedDocuments={[shareDetails.documentData]} 
+                        isReadOnly={!shareDetails.isChatActive}
+                      />
+                    )}
                   </div>
                 </div>
               )}

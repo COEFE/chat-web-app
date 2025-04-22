@@ -194,6 +194,18 @@ export default function DocumentChatPage() {
     return null; // Router will redirect to login
   }
 
+  // Add explicit check for user after loading is complete
+  if (!user) {
+    console.error("DocumentChatPage rendered without authenticated user after loading.");
+    // Optionally redirect or show an error message
+    router.push('/auth'); // Redirect to login
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <p className="text-red-500">Redirecting to login...</p>
+      </div>
+    );
+  }
+
   if (loading) {
     return <div className="flex h-screen items-center justify-center">Loading document...</div>;
   }
@@ -329,9 +341,9 @@ export default function DocumentChatPage() {
             {/* Close button removed - using header X button instead */}
             <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
               <ChatInterface 
-                documentId={activeDocumentId} 
-                document={documents.find(doc => doc.id === activeDocumentId)!} 
-                additionalDocuments={documents.filter(doc => doc.id !== activeDocumentId)}
+                chatId={activeDocumentId} // Use the active doc ID as the chat context ID here
+                userId={user.uid} // Pass the required user ID
+                linkedDocuments={documents} // Pass all currently loaded documents
               />
             </div>
           </div>

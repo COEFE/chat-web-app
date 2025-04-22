@@ -3,9 +3,9 @@
 import * as React from "react";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getFunctions, httpsCallable } from "firebase/functions";
 import { useAuth } from "@/context/AuthContext";
-import { db, functionsInstance, storage, app } from "@/lib/firebaseConfig";
+import { app, db, storage } from "@/lib/firebaseConfig"; // Ensure 'app', 'db', and 'storage' are exported
+import { getFunctions, httpsCallable, Functions } from "firebase/functions"; // Import necessary functions and type
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import {
   collection,
@@ -88,6 +88,7 @@ import {
   Share2,
   Moon,
   Sun,
+  MessageSquarePlus, // Import the new icon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 // Badge component removed
@@ -1779,7 +1780,7 @@ function DashboardPage() {
     setIsCreatingFolder(true);
     try {
       const createFolderFunction = httpsCallable(
-        functionsInstance,
+        getFunctions(app),
         "createFolder"
       );
       await createFolderFunction({
@@ -1853,7 +1854,7 @@ function DashboardPage() {
         `Attempting to move ${movingDocument.id} to ${targetFolderId}`
       );
       try {
-        const moveDocFunc = httpsCallable(functionsInstance, "moveDocument");
+        const moveDocFunc = httpsCallable(getFunctions(app), "moveDocument");
         await moveDocFunc({
           documentId: movingDocument.id,
           targetFolderId: targetFolderId,
@@ -1881,7 +1882,7 @@ function DashboardPage() {
     },
     [
       movingDocument,
-      functionsInstance,
+      getFunctions(app),
       toast,
       currentFolderId,
       setIsMoveModalOpen,
@@ -1911,7 +1912,7 @@ function DashboardPage() {
       const renameFolderFunction = httpsCallable<
         { folderId: string; newName: string },
         { success: boolean; message?: string }
-      >(functionsInstance, "renameFolder");
+      >(getFunctions(app), "renameFolder");
 
       const result = await renameFolderFunction({
         folderId: id,
@@ -2396,16 +2397,22 @@ function DashboardPage() {
               {/* Document Viewer and Chat Interface */}
               {isViewerVisible && (
                 <div
-                  className={`mb-4 ${
+                  className={`mb-4 h-[60vh] flex flex-col ${ // Added height and flex context
                     isMaximized && isViewerVisible ? "hidden" : ""
                   }`}
                 >
-                  <div className="h-full flex flex-col">
-                    <DocumentViewer document={selectedDocument} />
-                    <ChatInterface
-                      documentId={selectedDocument.id}
-                      document={selectedDocument}
-                    />
+                  <div className="flex-1 flex flex-row space-x-4 overflow-hidden"> {/* Changed to flex-1 and added overflow */}
+                    <div className="w-[70%] flex-shrink-0 overflow-auto"> {/* Added overflow-auto */}
+                      <DocumentViewer document={selectedDocument} />
+                    </div>
+                    <div className="w-[30%] flex-shrink-0 overflow-auto"> {/* Added overflow-auto */}
+                      <ChatInterface
+                        chatId={selectedDocument.id} // Using doc ID as chat ID in this context
+                        userId={user.uid} // Add required userId prop
+                        linkedDocuments={[selectedDocument]} // Pass the selected doc as linkedDocuments
+                        // Consider how/if additionalDocuments should be handled here
+                      />
+                    </div>
                   </div>
                 </div>
               )}
@@ -2456,6 +2463,63 @@ function DashboardPage() {
                         >
                           <Upload className="h-4 w-4 mr-2" />
                           Upload Document
+                        </DropdownMenuItem>
+                        {/* Add New Chat Option */}
+                        <DropdownMenuItem
+                          onClick={() => {
+                            const createAndNavigateToNewChat = async () => {
+                              if (!user) {
+                                toast({
+                                  variant: "destructive",
+                                  title: "Error",
+                                  description: "You must be logged in to start a chat.",
+                                });
+                                return;
+                              }
+
+                              try {
+                                // Create a new chat document in Firestore
+                                const chatsCollectionRef = collection(
+                                  db,
+                                  "users",
+                                  user.uid,
+                                  "chats"
+                                );
+                                const newChatDocRef = await addDoc(
+                                  chatsCollectionRef,
+                                  {
+                                    // Initial data for the new chat
+                                    createdAt: serverTimestamp(),
+                                    title: "New Chat", // Default title, user can rename later
+                                    userId: user.uid,
+                                    // No documentId initially
+                                  }
+                                );
+
+                                console.log(
+                                  "New chat created with ID:",
+                                  newChatDocRef.id
+                                );
+
+                                // Navigate to the new chat page
+                                router.push(`/chat/${newChatDocRef.id}`);
+                              } catch (error) {
+                                console.error(
+                                  "Error creating new chat:",
+                                  error
+                                );
+                                toast({
+                                  variant: "destructive",
+                                  title: "Error",
+                                  description: "Failed to start a new chat. Please try again.",
+                                });
+                              }
+                            };
+                            createAndNavigateToNewChat();
+                          }}
+                        >
+                          <MessageSquarePlus className="h-4 w-4 mr-2" />
+                          New Chat
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

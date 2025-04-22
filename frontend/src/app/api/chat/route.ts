@@ -307,10 +307,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // --- Get messages, documentId, currentDocument, additionalDocuments, activeSheet from body --- 
+  // --- Get messages, chatId, documentId, currentDocument, additionalDocuments, activeSheet from body --- 
   // Explicitly type messages as CoreMessage[] upon destructuring
   // Use firestore.DocumentData for currentDocument and additionalDocuments
-  const { documentId, currentDocument, additionalDocumentIds, additionalDocuments, additionalContents, activeSheet }: {
+  const { chatId, documentId, currentDocument, additionalDocumentIds, additionalDocuments, additionalContents, activeSheet }: { 
+    chatId?: string; 
     documentId?: string;
     currentDocument?: firestore.DocumentData;
     additionalDocumentIds?: string[];
@@ -319,10 +320,18 @@ export async function POST(req: NextRequest) {
     activeSheet?: string;
   } = body;
 
-  // Validate required fields
-  if (!documentId) {
-    console.warn("Missing documentId in request body, proceeding without document context.");
-    // Allow proceeding for general chat, but document-specific features won't work
+  // Validate required IDs
+  if (!chatId) {
+    // If chatId is missing, we cannot proceed with saving history reliably.
+    // DocumentId might exist for old contexts, but we prioritize chatId now.
+    console.error("Critical: Missing chatId in request body. Cannot determine chat context.");
+    return NextResponse.json({ error: "Missing required 'chatId' in request body" }, { status: 400 });
+  } else {
+    console.log(`[Chat API] Processing request for chatId: ${chatId}`);
+  }
+  // Log if documentId is also present (for informational purposes)
+  if (documentId) {
+    console.log(`[Chat API] DocumentId ${documentId} is also present in the request.`);
   }
 
   // --- Get the last user message --- 
@@ -659,23 +668,23 @@ export async function POST(req: NextRequest) {
           }
 
           // --- Save Assistant's Final Message in onFinish --- 
-          if (documentId && userId) { 
-            const messagesCollectionRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
-            // Save assistant message (could be text response or Excel result message)
-            await messagesCollectionRef.add({
-              role: 'assistant',
-              content: finalAiMessageContent, // This now holds the correct message
-              userId: userId, // Use userId directly
-              documentId: documentId, // Use documentId directly
-              createdAt: firestore.FieldValue.serverTimestamp(),
-              // Add excelFileUrl only if the operation was successful and resulted in a file
-              ...(isExcelOperation && excelResult?.success && excelResult?.fileUrl ? { excelFileUrl: excelResult.fileUrl } : {}),
-            });
-            console.log(`[route.ts][onFinish] Assistant message saved (tool/text) for document ${documentId}`);
-          } else {
-            console.log("[route.ts][onFinish] Skipping assistant message save - no documentId or userId.");
-          }
+          // Determine Firestore path based on chatId primarily
+          const messagesCollectionPath = `users/${userId}/chats/${chatId}/messages`;
+          const messagesCollectionRef = db.collection(messagesCollectionPath);
+          console.log(`[route.ts][onFinish] Using Firestore path: ${messagesCollectionPath}`);
 
+          // Save assistant message (could be text response or Excel result message)
+          await messagesCollectionRef.add({
+            role: 'assistant',
+            content: finalAiMessageContent, // This now holds the correct message
+            userId: userId, // Use userId directly
+            chatId: chatId, // Save chatId
+            // documentId: documentId, // Optionally save documentId if relevant
+            createdAt: firestore.FieldValue.serverTimestamp(),
+            // Add excelFileUrl only if the operation was successful and resulted in a file
+            ...(isExcelOperation && excelResult?.success && excelResult?.fileUrl ? { excelFileUrl: excelResult.fileUrl } : {}),
+          });
+          console.log(`[route.ts][onFinish] Assistant message saved (tool/text) for chatId ${chatId}`);
         } catch (onFinishError: any) {
           console.error('[route.ts][onFinish] Error during onFinish processing:', onFinishError);
         }
@@ -697,8 +706,12 @@ export async function POST(req: NextRequest) {
     };
     const finalMessagesOnError = [...messages, errorMessage];
     try {
-      if (documentId && userId) {
-        const messagesCollectionRef = db.collection('users').doc(userId).collection('documents').doc(documentId).collection('messages');
+      // Determine Firestore path based on chatId primarily (even on error)
+      if (chatId && userId) { 
+        const messagesCollectionPathOnError = `users/${userId}/chats/${chatId}/messages`;
+        const messagesCollectionRef = db.collection(messagesCollectionPathOnError);
+        console.log(`[route.ts][onError] Using Firestore path: ${messagesCollectionPathOnError}`);
+        
         // Get the last user message
         const lastUserMessage = messages.filter(m => m.role === 'user').pop();
 
@@ -708,10 +721,11 @@ export async function POST(req: NextRequest) {
             role: lastUserMessage.role,
             content: lastUserMessage.content,
             userId: userId, // Use userId directly
-            documentId: documentId, // Use documentId directly
+            chatId: chatId, // Save chatId
+            // documentId: documentId, // Optionally save documentId if relevant
             createdAt: firestore.FieldValue.serverTimestamp(),
           });
-          console.log(`User message saved (on error) for document ${documentId}`);
+          console.log(`User message saved (on error) for chatId ${chatId}`);
         }
         
         // Save error message from assistant
@@ -719,15 +733,16 @@ export async function POST(req: NextRequest) {
           role: 'assistant',
           content: `Sorry, there was an error processing your request. ${error instanceof Error ? error.message : ''}`,
           userId: userId, // Use userId directly
-          documentId: documentId, // Use documentId directly
+          chatId: chatId, // Save chatId
+          // documentId: documentId, // Optionally save documentId if relevant
           createdAt: firestore.FieldValue.serverTimestamp(),
         });
-        console.log(`Error message saved for document ${documentId}`);
+        console.log(`Error message saved for chatId ${chatId}`);
       } else {
-        console.log("Skipping chat history save (on error) as no documentId or userId was provided.");
+        console.log("Skipping chat history save (on error) as chatId or userId was missing.");
       }
     } catch (saveError) {
-      console.error(`Error saving chat history (on error) for document ${documentId}:`, saveError);
+      console.error(`Error saving chat history (on error) for chatId ${chatId}:`, saveError);
     }
 
     const apiErrorMessage = error instanceof Error ? error.message : "Failed to get response from AI";

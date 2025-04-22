@@ -90,11 +90,15 @@ export interface GetShareDetailsInput {
     passwordToken?: string; // Optional token from password verification
 }
 
+import { MyDocumentData } from './index';
+
 // Output type for the 'getShareDetails' Cloud Function
 export interface GetShareDetailsOutput {
   documentId: string;
   documentName: string;
   documentPath: string;
+  ownerUserId: string;
+  documentData: MyDocumentData;
   expiresAt: number | null;
   includeChat: boolean;
   isChatActive: boolean; // Added required field

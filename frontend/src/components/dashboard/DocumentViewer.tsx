@@ -33,6 +33,12 @@ import 'react-pdf/dist/esm/Page/TextLayer.css';
 // Use the shared document interface
 import { MyDocumentData } from '@/types';
 
+// Define props interface
+interface DocumentViewerProps {
+  document: MyDocumentData;
+  className?: string; // Make className optional
+}
+
 // Dynamically import PDFViewer component to isolate PDF.js related code
 const PDFViewer = dynamic(() => import('./PDFViewer'), {
   ssr: false,
@@ -45,7 +51,7 @@ const PDFViewer = dynamic(() => import('./PDFViewer'), {
 });
 
 // Main DocumentViewer component
-export default function DocumentViewer({ document }: { document: MyDocumentData }) {
+export default function DocumentViewer({ document, className }: DocumentViewerProps) {
   // For text files
   const [textContent, setTextContent] = useState<string | null>(null);
   // State for workbook data and active sheet
@@ -382,7 +388,7 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
   console.log(`[DocumentViewer Render] Rendering with Cell A2 value: ${cellValueRender}`);
 
   return (
-    <div className="flex flex-col h-full bg-background relative">
+    <div className={`flex flex-col h-full bg-background relative ${className || ''}`}>
       {/* Loading indicator */}
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
@@ -643,7 +649,9 @@ export default function DocumentViewer({ document }: { document: MyDocumentData 
                   className="flex items-center"
                 >
                   <Download className="h-4 w-4 mr-1" />
-                  <span className="hidden xs:inline">Download</span>
+                  <span className="hidden xs:inline">
+                    Download
+                  </span>
                 </a>
               </Button>
             </div>

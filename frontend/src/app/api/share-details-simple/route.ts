@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getVercelFirestore, initVercelFirebaseAdmin } from '../../../lib/firebase/vercelAdmin';
+import { MyDocumentData } from '@/types'; // Import MyDocumentData type
+import { Timestamp } from 'firebase/firestore'; // Import Timestamp
 
 // Set up CORS headers for all responses
 const corsHeaders = {
@@ -54,25 +56,40 @@ export async function POST(request: NextRequest) {
     }
     
     // Mock response for testing
-    // This allows us to test the client without Firebase Admin working
-    const mockResponse = {
+    const mockResponse: any = {
       documentId: 'mock-document-id',
       documentName: 'Mock Document',
       documentPath: 'documents/mock-document.pdf',
       expiresAt: null,
       includeChat: true,
       accessType: 'view',
-      password: null
+      password: null,
+      ownerUserId: 'mock-owner-id', // Add mock ownerUserId
+      documentData: { // Add mock documentData (adjust structure as needed)
+        id: 'mock-document-id',
+        userId: 'mock-owner-id',
+        name: 'Mock Document',
+        storagePath: 'documents/mock-document.pdf',
+        createdAt: Timestamp.now(),
+        fileType: 'application/pdf',
+        fileSize: 12345,
+        folderId: null, // Added mock value
+        uploadedAt: Timestamp.now(), // Added mock value
+        updatedAt: Timestamp.now(), // Added mock value
+        status: 'processed', // Added mock value
+      } as MyDocumentData
     };
     
     // Try to get the real share document if Firebase is initialized
-    let shareData = mockResponse;
+    let responseData = { ...mockResponse }; // Start with mock data
     
     if (db) {
       try {
         console.log(`[share-details-simple] Fetching share document with ID: ${shareId}`);
         const shareRef = db.collection('shares').doc(shareId);
         const shareDoc = await shareRef.get();
+        
+        let shareData: any; // Declare shareData here
         
         if (!shareDoc.exists) {
           console.log(`[share-details-simple] Share not found: ${shareId}`);
@@ -84,7 +101,30 @@ export async function POST(request: NextRequest) {
         
         console.log(`[share-details-simple] Share document found: ${shareId}`);
         
-        shareData = shareDoc.data() as any;
+        shareData = shareDoc.data(); // Get share data
+        
+        if (!shareData || !shareData.documentId || !shareData.ownerUserId) {
+          console.error('[share-details-simple] Share data missing required fields (documentId or ownerUserId)');
+          return NextResponse.json(
+            { error: 'Invalid share data configuration' },
+            { status: 500, headers: corsHeaders }
+          );
+        }
+        
+        // Fetch the actual document details using ownerUserId and documentId
+        const documentRef = db.collection('users').doc(shareData.ownerUserId)
+                              .collection('documents').doc(shareData.documentId);
+        const documentDoc = await documentRef.get();
+        
+        if (!documentDoc.exists) {
+          console.error(`[share-details-simple] Document not found: users/${shareData.ownerUserId}/documents/${shareData.documentId}`);
+          return NextResponse.json(
+            { error: 'Associated document not found' },
+            { status: 404, headers: corsHeaders }
+          );
+        }
+        
+        const documentData = documentDoc.data() as MyDocumentData;
         
         // If password protected, check for token
         if (shareData.password && !passwordToken) {
@@ -92,17 +132,14 @@ export async function POST(request: NextRequest) {
           return NextResponse.json(
             { 
               password: true,
-              documentName: shareData.documentName || 'Protected Document'
+              documentName: shareData.documentName || 'Protected Document',
+              ownerUserId: shareData.ownerUserId // Still return ownerUserId if known
             },
             { status: 200, headers: corsHeaders }
           );
         }
         
-        // If we have a token, we've already verified the password
-        if (shareData.password && passwordToken) {
-          // In a real implementation, verify the token here
-          console.log(`[share-details-simple] Password token provided, proceeding`);
-        }
+        // Verification should happen in verify-share-password route
         
         // Check if share has expired
         if (shareData.expiresAt && shareData.expiresAt < Date.now()) {
@@ -112,19 +149,26 @@ export async function POST(request: NextRequest) {
             { status: 410, headers: corsHeaders }
           );
         }
+        
+        // Update response data with actual share data and document data
+        responseData = {
+          ...shareData,
+          documentData,
+        };
       } catch (dbError) {
         console.error(`[share-details-simple] Error fetching from database: ${dbError}`);
         console.log('[share-details-simple] Using mock data due to database error');
         // Continue with mock data
-        shareData = mockResponse;
+        responseData = mockResponse;
       }
     } else {
       console.log('[share-details-simple] Firebase not initialized, using mock data');
+      responseData = mockResponse; // Ensure we use mock if DB fails init
     }
     
     // Return the share details
     return NextResponse.json(
-      shareData,
+      responseData, // Return the combined/mock data
       { status: 200, headers: corsHeaders }
     );
   } catch (error) {
