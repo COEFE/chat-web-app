@@ -148,7 +148,7 @@ Document Sharing Service
     <p>If the button doesn't work, copy and paste this URL into your browser:</p>
     <div class="url-link">${shareUrl}</div>
 
-    ${expirationText ? `<p class="note">${expirationText}${passwordText ? `<br>${passwordText}` : ''}</p>` : ''}
+    ${expirationText ? `<p class="note">${expirationText}${passwordText ? `<br>${passwordText}` : ""}</p>` : ""}
 
     <div class="footer">
       <p>This is an automated message from Document Sharing Service.</p>

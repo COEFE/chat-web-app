@@ -461,7 +461,7 @@ export const createShare = onCall(async (request: CallableRequest<CreateShareReq
       documentId,
       documentName: docData.name,
       documentPath: docData.storagePath, // Changed from path to storagePath to match document structure
-      createdBy: userId,
+      ownerUserId: userId, // Renamed from createdBy to match API route expectation
       createdAt: Date.now(),
       expiresAt,
       accessType,
