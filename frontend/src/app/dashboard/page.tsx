@@ -334,7 +334,7 @@ const createColumns = (
     {
       id: "select",
       header: ({ table }) => (
-        <div style={{ width: 28 }} className="pl-0 pr-1 sm:px-2">
+        <div className="flex items-center justify-center px-0 sm:px-2 w-[28px] h-full">
           <Checkbox
             aria-label="Select all"
             checked={table.getIsAllRowsSelected()}
@@ -356,7 +356,7 @@ const createColumns = (
       enableHiding: false,
       size: 28, // narrower to reduce gap on mobile
       meta: {
-        className: "pl-0 pr-1 sm:px-2 w-[28px] min-w-[28px] max-w-[28px]",
+        className: "px-0 sm:px-2 w-[28px] min-w-[28px] max-w-[28px]",
       }, // minimal padding on mobile
     },
     {
