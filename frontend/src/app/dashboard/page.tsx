@@ -413,7 +413,16 @@ const createColumns = (
     },
     {
       accessorKey: "type",
-      header: "Type",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-0 sm:-ml-4"
+        >
+          Type
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+      ),
       cell: ({ row }) => {
         const item = row.original;
         if (item.type === "folder") {
@@ -485,7 +494,16 @@ const createColumns = (
     },
     {
       accessorKey: "size",
-      header: "Size",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-0 sm:-ml-4"
+        >
+          Size
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+      ),
       cell: ({ row }) => {
         const item = row.original;
         if (item.type === "folder") {
@@ -503,7 +521,16 @@ const createColumns = (
     },
     {
       accessorKey: "uploadedAt",
-      header: "Date Added",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-0 sm:-ml-4"
+        >
+          Date Added
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+      ),
       cell: ({ row }) => {
         const item = row.original;
         let date: Date | null = null;
@@ -629,7 +656,16 @@ const createColumns = (
     },
     {
       accessorKey: "updatedAt",
-      header: "Date Modified",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-0 sm:-ml-4"
+        >
+          Date Modified
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+      ),
       cell: ({ row }: { row: Row<FilesystemItem> }) => {
         const item = row.original;
         if (!item.updatedAt)
