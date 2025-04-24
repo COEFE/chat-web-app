@@ -160,11 +160,15 @@ export function FileUpload({
       
       if (allFilesUploaded) {
         console.log('All files uploaded successfully, calling onUploadComplete callback');
-        // Add a small delay to ensure UI updates before closing
-        setTimeout(() => {
-          onUploadComplete();
-          console.log('Upload dialog closed, refreshing document list');
-        }, 500);
+        // First, move focus to a safe element like document.body before callback
+        // This helps prevent focus from being trapped in the dialog that's about to close
+        if (document && document.body) {
+          document.body.focus();
+        }
+        
+        console.log('Focus reset to body, now calling onUploadComplete');
+        onUploadComplete();
+        console.log('Upload dialog closed, refreshing document list');
       } else {
         console.log('Not all files have completed uploading yet, keeping dialog open');
       }

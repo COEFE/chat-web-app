@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, MouseEvent, WheelEvent, useCallback } from 'react';
-import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import { TransformWrapper, TransformComponent, ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import dynamic from 'next/dynamic';
 import { Timestamp } from 'firebase/firestore';
 import { 
@@ -19,7 +19,7 @@ import {
   Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import * as XLSX from 'xlsx'; // Import xlsx library
+import * as XLSX from 'xlsx-js-style'; // Import xlsx-js-style library
 import mammoth from 'mammoth'; // Import mammoth for DOCX handling
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"; // Import Shadcn Tabs
 import { useAuth } from '@/context/AuthContext'; // Import useAuth
@@ -67,6 +67,9 @@ export default function DocumentViewer({ document, className }: DocumentViewerPr
   const viewerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const startPos = useRef({ x: 0, y: 0 });
+
+  // Ref for controlling the TransformWrapper component
+  const transformWrapperRef = useRef<ReactZoomPanPinchRef>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false); // State for refresh button loading
@@ -589,16 +592,16 @@ export default function DocumentViewer({ document, className }: DocumentViewerPr
       {!isLoading && !error && isImage && imageUrl && (
         <div className="flex flex-col h-full">
           {/* Updated Header Layout */}
-          <div className="flex items-center w-full gap-x-2 p-2 bg-muted/20 border-b">
+          <div className="flex items-center w-full gap-x-1 p-1 bg-muted/20 border-b">
             {/* Left Spacer */}
             <div className="flex-1"></div>
 
             {/* Center Controls */}
-            <div className="flex justify-center gap-2 p-1.5">
+            <div className="flex justify-center gap-1 p-1">
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={() => setZoom(prev => prev > 0.1 ? prev - 0.1 : 0.1)} // Prevent zoom < 0.1
+                onClick={() => transformWrapperRef.current?.zoomOut()}
                 title="Zoom Out"
               >
                 <ZoomOut className="h-4 w-4" />
@@ -606,7 +609,7 @@ export default function DocumentViewer({ document, className }: DocumentViewerPr
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={() => setZoom(prev => prev < 5 ? prev + 0.1 : 5)} // Prevent zoom > 5
+                onClick={() => transformWrapperRef.current?.zoomIn()}
                 title="Zoom In"
               >
                 <ZoomIn className="h-4 w-4" />
@@ -625,8 +628,7 @@ export default function DocumentViewer({ document, className }: DocumentViewerPr
                 onClick={() => {
                   setZoom(1);
                   setRotation(0);
-                  // Note: We can't call resetTransform directly here anymore
-                  // If pan/pinch needs reset, we might need TransformWrapper ref
+                  transformWrapperRef.current?.resetTransform(); 
                 }}
                 title="Reset"
               >
@@ -660,16 +662,13 @@ export default function DocumentViewer({ document, className }: DocumentViewerPr
           {/* Image Content Area */}
           <div className="flex-1 overflow-hidden relative">
             <TransformWrapper
+              ref={transformWrapperRef} // Assign the ref here
               initialScale={zoom} // Use state for initial scale
               minScale={0.1}
               maxScale={5}
               limitToBounds={false}
               doubleClick={{ disabled: false }}
-              // If we need to reset pan, we'll need a ref to TransformWrapper
-              // const transformWrapperRef = useRef<ReactZoomPanPinchRef>(null);
-              // and call transformWrapperRef.current?.resetTransform(); in Reset button
             >
-              {/* Removed direct access to zoomIn/Out/ResetTransform from here */}
               <TransformComponent
                 wrapperStyle={{
                   width: '100%', 
@@ -680,7 +679,6 @@ export default function DocumentViewer({ document, className }: DocumentViewerPr
                   alignItems: 'center',
                   justifyContent: 'center',
                   height: '100%',
-                  transform: `rotate(${rotation}deg) scale(${zoom})`
                 }}
               >
                 <img 
@@ -689,7 +687,8 @@ export default function DocumentViewer({ document, className }: DocumentViewerPr
                   style={{
                     maxWidth: '100%',
                     maxHeight: '100%',
-                    objectFit: 'contain'
+                    objectFit: 'contain',
+                    transform: `rotate(${rotation}deg)`,
                   }}
                 />
               </TransformComponent>

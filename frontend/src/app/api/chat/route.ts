@@ -2,16 +2,16 @@ import Anthropic from '@anthropic-ai/sdk';
 import { MessageParam } from '@anthropic-ai/sdk/resources/messages';
 import { 
   CoreMessage, 
+  CoreToolMessage,
+  ImagePart,
+  TextPart,
   streamText, 
   StreamData, 
   ToolCallPart, 
-  ToolResultPart,
-  CoreToolMessage,
-  ImagePart,
-  TextPart
+  ToolResultPart, 
 } from 'ai';
 import { z } from 'zod'; // Import Zod
-import { anthropic as vercelAnthropic } from '@ai-sdk/anthropic';
+import { anthropic as vercelAnthropic } from '@ai-sdk/anthropic'; // Use this one
 import { NextRequest, NextResponse } from 'next/server';
 import admin from 'firebase-admin'; 
 import { firestore } from 'firebase-admin'; 
@@ -21,7 +21,7 @@ import { getStorage as getAdminStorage } from 'firebase-admin/storage';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth'; 
 import { processExcelOperation, extractBaseFilename } from '@/lib/excelUtils';
 import { File as GoogleCloudFile } from '@google-cloud/storage'; 
-import * as XLSX from 'xlsx'; 
+import * as XLSX from 'xlsx-js-style'; 
 import { extractText } from 'unpdf'; 
 
 console.log("--- MODULE LOAD: /api/chat/route.ts ---");
@@ -38,23 +38,21 @@ if (!admin.apps.length) {
 }
 
 // --- Constants ---
+// Using Claude 3.5 Sonnet (valid model name)
 const MODEL_NAME = 'claude-3-5-sonnet-20240620'; 
 const MAX_TOKENS = 4000; 
 const EXCEL_MAX_TOKENS = 4000; 
 // Timeout constants optimized for Vercel Pro plan (60s limit)
 const ANTHROPIC_TIMEOUT_MS = 30000; // 30 seconds for Anthropic API calls
 const EXCEL_OPERATION_TIMEOUT_MS = 25000; // 25 seconds for Excel operations
-const DEFAULT_SYSTEM_PROMPT = `You are Claude, a helpful AI assistant integrated into a web chat application. Provide concise and accurate responses. If the user asks you to interact with an Excel file, format your response strictly as a JSON object containing 'action' ('createExcelFile' or 'editExcelFile') and 'args' (specific arguments for the action, including operations like 'createSheet', 'updateCells', 'formatCells'). Do not include any explanatory text outside the JSON object when performing Excel actions. For example:
-{
-  "action": "editExcelFile",
-  "args": {
-    "operations": [
-      { "type": "updateCells", "sheetName": "Sheet1", "cellUpdates": [ { "cell": "A1", "value": "New Value" } ] },
-      { "type": "formatCells", "sheetName": "Sheet1", "cellFormats": [ { "cell": "A1", "format": { "bold": true } } ] }
-    ]
-  }
-}
-`;
+const DEFAULT_SYSTEM_PROMPT = `You are Claude, a helpful AI assistant integrated into a web chat application. Provide concise and accurate responses. When the user asks you to create or edit an Excel file, call the excelOperation tool with the appropriate arguments:
+- action: "createExcelFile" or "editExcelFile"
+- operations: array of operation objects (e.g. { "type": "createSheet", "name": "Sheet1" }, { "type": "updateCells", ... })
+- Optional fileName and sheetName
+- After the tool runs, respond with a short, friendly confirmation stating what was done (e.g., " Dragon Fruit has been added to the 'Fruits' sheet.").
+- For requests involving multiple changes (e.g., adding several items), bundle them into the *single* 'operations' array in one tool call.
+- Avoid apologies, error retries, or detailed reasoning in the confirmation.
+Do NOT output raw JSON to the user; instead, call the tool.`;
 
 // Initialize Anthropic SDK Client (outside of POST function)
 const anthropic = new Anthropic({
@@ -386,7 +384,7 @@ export async function POST(req: NextRequest) {
     else if (contentType === 'application/pdf') {
       console.log(`[route.ts] Attempting PDF text extraction for document: ${documentId} using unpdf...`); 
       try {
-         // Convert Node.js Buffer to Uint8Array
+         // Convert Node.js Buffer to Uint8Array for PDF extraction
          const [fileBuffer] = await fileRef.download();
          const fileUint8Array = new Uint8Array(fileBuffer); 
          console.log(`[route.ts] Converted Buffer (length: ${fileBuffer.length}) to Uint8Array (length: ${fileUint8Array.length}) for unpdf.`);
@@ -568,134 +566,128 @@ export async function POST(req: NextRequest) {
         (msg): msg is CoreMessage => typeof msg === 'object' && msg !== null && 'role' in msg && 'content' in msg
     );
 
+    // Log the final request payload for debugging
+    console.log(`[route.ts] Final messages before API call:`, 
+      JSON.stringify(finalMessagesForApi.map(m => ({ role: m.role, content_length: typeof m.content === 'string' ? m.content.length : 'array' })))
+    );
+    console.log(`[route.ts] System prompt length: ${systemPrompt.length}`);
+
     const result = await streamText({
       model: vercelAnthropic(MODEL_NAME),
       system: systemPrompt,
       messages: finalMessagesForApi, // Use the correctly typed and filtered array
       maxTokens: MAX_TOKENS,
-      // --- Define the Tool ---
+      maxSteps: 5, // Allow the model to iterate after tool execution
+      // --- Define the Tool with execute ---
       tools: {
         excelOperation: {
           description: 'Performs operations on Excel files (create or edit).',
           parameters: z.object({
             action: z.enum(['createExcelFile', 'editExcelFile']),
-            args: z.object({
-              operations: z.array(z.any()).describe('Array of operation objects (e.g., { type: "createSheet", name: "Sheet1" }, { type: "addRow", row: ["A", "B"] })'),
-              fileName: z.string().optional().describe('Optional desired filename for the new Excel file.'),
-              sheetName: z.string().optional().describe('Optional target sheet name (often handled by createSheet operation).')
-            })
+            operations: z.array(z.any()),
+            fileName: z.string().optional(),
+            sheetName: z.string().optional()
           }),
+          execute: async ({ action, operations, fileName, sheetName }: { action: 'createExcelFile' | 'editExcelFile'; operations: any[]; fileName?: string; sheetName?: string }) => {
+            console.log('[route.ts][tool.execute] excelOperation called with', { action, operationsLength: operations?.length, fileName, sheetName });
+            if (!authorizationHeader) {
+              console.error('[route.ts][tool.execute] Missing auth token, rejecting excelOperation.');
+              return { success: false, message: 'Authentication token was missing.' };
+            }
+            try {
+              const documentIdToUse = documentContext?.id || documentId || null;
+              const finalAction = (action === 'editExcelFile' && !documentIdToUse) ? 'createExcelFile' : action;
+              const result = await processExcelOperation(
+                finalAction,
+                documentIdToUse,
+                operations,
+                userId,
+                fileName || (documentContext?.name ? extractBaseFilename(documentContext.name).baseName : undefined),
+                sheetName || activeSheet
+              );
+
+              console.log('[route.ts][tool.execute] processExcelOperation result:', result);
+              return result;
+            } catch (err: any) {
+              console.error('[route.ts][tool.execute] Error:', err);
+              return { success: false, message: err?.message || 'Unknown error' };
+            }
+          }
         },
       },
-      onFinish: async ({ text, toolCalls, toolResults, usage, finishReason, logprobs }) => {
-        console.log(`[route.ts][onFinish] Stream finished. Reason: ${finishReason}. Text length: ${text?.length ?? 0}. Tool calls: ${toolCalls?.length ?? 0}`);
+      // --- MODIFIED: onFinish --- 
+      onFinish: async ({ 
+        text, 
+        toolCalls, 
+        toolResults, 
+        usage, 
+        finishReason, 
+        logprobs 
+      }) => {
+        console.log(`[route.ts][onFinish] Stream finished. Reason: ${finishReason}. Text: ${text?.length}. Tool Calls: ${toolCalls?.length}. Tool Results: ${toolResults?.length}`);
 
-        try {
-          let finalAiMessageContent = text || ''; // Default to any text response
-          let excelResult: any = null;
-          let isExcelOperation = false;
+        let finalAiMessageContent = text || '';
+        let excelFileUrl: string | null = null;
 
-          // Check if the Excel tool was called
-          const excelToolCall = toolCalls?.find(call => call.toolName === 'excelOperation');
+        // Extract excel operation result if present
+        const excelToolResult = toolResults?.find(tr => tr.toolName === 'excelOperation') as (ToolResultPart | undefined);
+        const excelProcessingResult: any = excelToolResult?.result;
 
-          if (excelToolCall) {
-            isExcelOperation = true;
-            console.log(`[route.ts][onFinish] Detected 'excelOperation' tool call.`);
-
-            // Check auth token
-            if (!authorizationHeader) {
-              console.error("[route.ts][onFinish] Auth token missing for Excel tool call.");
-              finalAiMessageContent = "Error: Authentication token was missing unexpectedly.";
-              excelResult = { success: false, message: finalAiMessageContent }; // Set error state
-            } else {
-              try {
-                // Extract validated arguments from the tool call
-                // SDK automatically parses args based on schema if valid
-                const { action, args } = excelToolCall.args as { action: 'createExcelFile' | 'editExcelFile', args: { operations: any[], fileName?: string, sheetName?: string } };
-                const { operations, fileName, sheetName } = args;
-                const documentIdToUse = documentId || null;
-
-                // Basic check for required args
-                if (!action || !operations) {
-                  throw new Error("Missing required arguments ('action', 'args.operations') in tool call.");
-                }
-
-                console.log(`[route.ts][onFinish] Calling processExcelOperation via tool: action=${action}, docId=${documentIdToUse}, ops=${operations.length}, file=${fileName}, sheet=${sheetName}`);
-
-                // Call processExcelOperation
-                excelResult = await processExcelOperation(
-                  action,
-                  documentIdToUse,
-                  operations,
-                  userId,
-                  fileName,
-                  sheetName
-                );
-
-                console.log('[route.ts][onFinish] processExcelOperation result:', excelResult);
-
-                // Set the final message based on the result
-                if (excelResult.success) {
-                  finalAiMessageContent = excelResult.message || (action === 'editExcelFile' ? 'Excel file updated.' : 'Excel file created.');
-                  // Optionally include file URL if available and successful
-                  if (excelResult.fileUrl) {
-                    // Append a markdown link or similar - adjust formatting as needed
-                    // Attempting to get filename from result, fallback to generic
-                    const displayFileName = excelResult.name || (fileName ? extractBaseFilename(fileName).baseName + '.xlsx' : 'Excel File');
-                    finalAiMessageContent += `\n\n[Download ${displayFileName}](${excelResult.fileUrl})`;
-                  }
-                } else {
-                  finalAiMessageContent = excelResult.message || 'An error occurred during the Excel operation.';
-                }
-
-              } catch (opError: any) {
-                console.error("[route.ts][onFinish] Error during processExcelOperation call (tool):", opError);
-                const isTimeout = opError.message && opError.message.includes('timeout');
-                finalAiMessageContent = isTimeout
-                  ? `The Excel operation timed out. Please try again with a simpler request.`
-                  : `Error performing Excel operation: ${opError.message || 'Unknown error'}`;
-                excelResult = { success: false, message: finalAiMessageContent }; // Ensure excelResult reflects the error
-              }
-            }
-          } else if (text) {
-            // Handle regular text responses if no tool was called
-            console.log('[route.ts][onFinish] No Excel tool call detected, using text response.');
-            finalAiMessageContent = text;
+        if (excelProcessingResult) {
+          console.log('[route.ts][onFinish] excelOperation result detected:', excelProcessingResult);
+          if (excelProcessingResult.success) {
+            const successMessage = excelProcessingResult.message || (excelProcessingResult.action === 'editExcelFile' ? 'Excel file updated.' : 'Excel file created.');
+            finalAiMessageContent = `${successMessage} [EXCEL_DOCUMENT_UPDATED]`;
+            excelFileUrl = excelProcessingResult.fileUrl || null;
           } else {
-            // Handle cases where there's neither text nor a relevant tool call
-            console.warn('[route.ts][onFinish] Stream finished with no text and no relevant tool call.');
-            finalAiMessageContent = ''; // Or some default message like "Processing complete."
+            finalAiMessageContent = excelProcessingResult.message || 'An error occurred during the Excel operation.';
           }
+        }
 
-          // --- Save Assistant's Final Message in onFinish --- 
-          // Determine Firestore path based on chatId primarily
+        // Save assistant message
+        try {
           const messagesCollectionPath = `users/${userId}/chats/${chatId}/messages`;
           const messagesCollectionRef = db.collection(messagesCollectionPath);
-          console.log(`[route.ts][onFinish] Using Firestore path: ${messagesCollectionPath}`);
-
-          // Save assistant message (could be text response or Excel result message)
           await messagesCollectionRef.add({
             role: 'assistant',
-            content: finalAiMessageContent, // This now holds the correct message
-            userId: userId, // Use userId directly
-            chatId: chatId, // Save chatId
-            // documentId: documentId, // Optionally save documentId if relevant
+            content: finalAiMessageContent,
+            userId,
+            chatId,
             createdAt: firestore.FieldValue.serverTimestamp(),
-            // Add excelFileUrl only if the operation was successful and resulted in a file
-            ...(isExcelOperation && excelResult?.success && excelResult?.fileUrl ? { excelFileUrl: excelResult.fileUrl } : {}),
+            ...(excelProcessingResult?.success && excelFileUrl ? { excelFileUrl } : {})
           });
-          console.log(`[route.ts][onFinish] Assistant message saved (tool/text) for chatId ${chatId}`);
-        } catch (onFinishError: any) {
-          console.error('[route.ts][onFinish] Error during onFinish processing:', onFinishError);
+          console.log(`[route.ts][onFinish] Assistant message saved for chatId ${chatId}. Content: ${finalAiMessageContent.substring(0,100)}...`);
+        } catch (saveErr) {
+          console.error('[route.ts][onFinish] Error saving assistant message:', saveErr);
         }
       }, // End onFinish
+      onError: async (err) => {
+        console.error('[route.ts][streamText onError]', err);
+      },
+      onStepFinish: async ({ toolCalls, toolResults }) => {
+        console.log(`[route.ts][onStepFinish] ToolCalls: ${toolCalls?.length}, ToolResults: ${toolResults?.length}`);
+        if (toolCalls && toolCalls.length) {
+          console.log('[route.ts][onStepFinish] ToolCall sample:', JSON.stringify(toolCalls[0], null, 2).substring(0,500));
+        }
+        if (toolResults && toolResults.length) {
+          console.log('[route.ts][onStepFinish] ToolResult sample:', JSON.stringify(toolResults[0], null, 2).substring(0,500));
+        }
+      },
     }); // End streamText call
 
     // Return the stream response
     return result.toDataStreamResponse();
   } // End of try block
   catch (error: any) {
+    // Detailed error logging
     console.error("Error calling Anthropic API:", error);
+    console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    console.error("Error name:", error.name);
+    console.error("Error message:", error.message);
+    if (error.response) {
+      console.error("Response status:", error.response.status);
+      console.error("Response data:", error.response.data);
+    }
     // --- SAVE HISTORY EVEN ON ERROR? --- 
     // Decide if you want to save history when the AI call fails.
     // It might be useful for debugging, but could store incomplete conversations.

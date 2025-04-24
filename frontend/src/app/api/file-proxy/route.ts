@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
   // Define variables at the top level of the function so they're available in catch blocks
   let filePath: string | null = null;
   let userId: string | null = null;
+  let originalDecodedPath: string = '';
   let decodedPath: string = '';
   let bucketName: string = '';
   
@@ -41,39 +42,48 @@ export async function GET(request: NextRequest) {
     console.log(`[file-proxy] Using bucket name: ${bucketName}`);
     const bucket = storage.bucket(bucketName);
     
-    // Decode the file path and normalize spaces
-    decodedPath = decodeURIComponent(filePath);
-    // Normalize Unicode and replace non-ASCII spaces to prevent ByteString conversion errors
-    // Use a more aggressive approach to remove all non-ASCII characters from the path
-    decodedPath = decodedPath.normalize('NFKD');
-    decodedPath = decodedPath.replace(/[^\x00-\x7F]/g, ''); // Remove all non-ASCII characters
-    // Ensure consistent space handling (replace multiple spaces with single space)
-    decodedPath = decodedPath.replace(/\s+/g, ' ');
-    console.log(`File path after decoding and normalization: ${decodedPath}`);
+    // Decode the file path once – **do not mutate this original version** so that we attempt
+    // the _exact_ path first. Some Unicode normalisations can change the underlying byte
+    // sequence which leads to a "file not found" even though the object exists. We therefore
+    // keep the original decoded path for the first lookup and create a _separate_ normalised
+    // version for the similarity search fallback.
+    originalDecodedPath = decodeURIComponent(filePath);
+
+    // Prepare a normalised variant (used only if the exact lookup fails)
+    decodedPath = originalDecodedPath
+      .normalize('NFKC') // unify different unicode representations
+      .replace(/\s{2,}/g, ' '); // collapse double spaces
+    
+    console.log(`File path (original): ${originalDecodedPath}`);
+    console.log(`File path (normalised): ${decodedPath}`);
     
     // Get the file from Firebase Storage
-    const file = bucket.file(decodedPath);
-    console.log(`[file-proxy] Attempting to access file at: gs://${bucketName}/${decodedPath}`);
+    const file = bucket.file(originalDecodedPath);
+    console.log(`[file-proxy] Attempting to access file at: gs://${bucketName}/${originalDecodedPath}`);
     
     // Check if file exists
     console.log('[file-proxy] Checking if file exists...');
     const [exists] = await file.exists();
     if (!exists) {
-      console.log(`[file-proxy] File not found: gs://${bucketName}/${decodedPath}`);
+      console.log(`[file-proxy] File not found: gs://${bucketName}/${originalDecodedPath}`);
       
       // Try to find a similar file if the exact match doesn't exist
       try {
         // Get parent directory path and filename parts
-        const parentDir = decodedPath.split('/').slice(0, -1).join('/');
-        const fileName = decodedPath.split('/').pop() || '';
+        const parentDir = originalDecodedPath.split('/').slice(0, -1).join('/');
+        const fileName = originalDecodedPath.split('/').pop() || '';
         
-        // Extract base name without timestamp (assuming format is filename-timestamp)
-        // This handles the case where timestamps in filenames might be different
-        const baseNameParts = fileName.split('-');
-        // If we have at least 2 parts (name and timestamp), use all but the last part as the base name
-        const baseName = baseNameParts.length >= 2 
-          ? baseNameParts.slice(0, -1).join('-')
-          : fileName;
+        // Extract base name without timestamp (supports ASCII dash "-" and common Unicode dashes)
+        // e.g. "report-1711231231231.png" or "report–1711231231231.png" → "report"
+        // If no timestamp suffix is matched we fall back to original basename.
+        
+        // Remove extension first
+        const lastDotIdx = fileName.lastIndexOf('.');
+        const fileNameNoExt = lastDotIdx > -1 ? fileName.slice(0, lastDotIdx) : fileName;
+        
+        // Regex to capture a dash ("-", en dash, em dash) followed by 10+ digits at the end of string
+        const timestampPattern = /[\-\u2013\u2014](\d{10,})$/;
+        const baseName = fileNameNoExt.replace(timestampPattern, '');
         
         console.log(`[file-proxy] Original file not found. Looking for similar files with base name: ${baseName}`);
         

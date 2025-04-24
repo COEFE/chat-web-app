@@ -1,5 +1,5 @@
 import { getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 
 /**
  * This is a test script for the Excel API functionality

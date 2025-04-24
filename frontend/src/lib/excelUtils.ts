@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style'; // Using xlsx-js-style for formatting support
 import admin from 'firebase-admin';
 import { Bucket } from '@google-cloud/storage'; // Import Bucket type
 import { getAdminDb, getAdminStorage } from './firebaseAdminConfig';
-import { getStorageFileBufferWithFallback, FileNeedsRecoveryError } from './storageUtils'; // Import the fallback utility and recovery error
 
 // Define a reusable interface for document with ID
 interface DocWithId {
@@ -80,6 +79,79 @@ function normalizeTimestampedPath(storagePath: string, filename: string): { stor
     return { storagePath: finalStoragePath, filename: finalFilename };
 }
 
+/**
+ * Converts Excel column letters to zero-based numeric index (e.g., 'A' -> 0, 'Z' -> 25, 'AA' -> 26)
+ * @param column - The column letter (e.g., 'A', 'BC')
+ * @returns The zero-based numeric index
+ */
+function columnLetterToIndex(column: string): number {
+  let result = 0;
+  for (let i = 0; i < column.length; i++) {
+    result = result * 26 + (column.charCodeAt(i) - 64); // 'A' is 65 in ASCII, so subtract 64 to make 'A' = 1
+  }
+  return result - 1; // Convert to 0-based index
+}
+
+/**
+ * Converts a numeric column index to Excel column letters (e.g., 0 -> 'A', 25 -> 'Z', 26 -> 'AA')
+ * @param index - The zero-based numeric index
+ * @returns The Excel column letters
+ */
+function columnIndexToLetter(index: number): string {
+  let temp = index + 1; // Convert to 1-based
+  let result = '';
+  
+  while (temp > 0) {
+    const remainder = (temp - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    temp = Math.floor((temp - remainder) / 26);
+  }
+  
+  return result;
+}
+
+// Type definitions for Excel formatting
+interface CellFormat {
+  font?: {
+    name?: string;
+    sz?: number;
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    strike?: boolean;
+    color?: { rgb: string };
+  };
+  fill?: {
+    fgColor?: { rgb: string };
+    bgColor?: { rgb: string };
+    patternType?: string;
+  };
+  border?: {
+    top?: { style: string; color?: { rgb: string; auto?: number } };
+    bottom?: { style: string; color?: { rgb: string; auto?: number } };
+    left?: { style: string; color?: { rgb: string; auto?: number } };
+    right?: { style: string; color?: { rgb: string; auto?: number } };
+  };
+  alignment?: {
+    vertical?: 'top' | 'center' | 'bottom';
+    horizontal?: 'left' | 'center' | 'right';
+    wrapText?: boolean;
+  };
+  numFmt?: string; // e.g., "0.00%", "m/d/yy"
+}
+
+interface CellFormatInfo {
+  sheet: string;
+  cell: string; // e.g., 'A1', 'B5'
+  format: CellFormat;
+}
+
+interface ColumnWidthInfo {
+  sheet: string;
+  colIndex: number;
+  width: number;
+}
+
 // --- Exported Function for Excel Operations ---
 /**
  * Process Excel operations from a list of instructions.
@@ -89,6 +161,7 @@ function normalizeTimestampedPath(storagePath: string, filename: string): { stor
  * @param operationsData - The array of operation objects from AI.
  * @param userId - The user ID
  * @param requestedFileName - Optional filename requested by AI or user.
+ * @param sheetName - Optional target sheet name (e.g., activeSheet)
  * @returns Promise with operation result
  */
 export async function processExcelOperation(
@@ -97,7 +170,7 @@ export async function processExcelOperation(
   operationsData: any[], // The array of { type: '...', ... } objects
   userId: string,
   requestedFileName?: string,
-  _sheetName?: string // Sheet name from AI is handled via 'createSheet' operation now
+  sheetName?: string // Optional target sheet name (e.g., activeSheet)
 ): Promise<{ success: boolean; message?: string; documentId?: string; storagePath?: string; fileUrl?: string; executionTime?: number }> {
   const startTime = Date.now();
   console.log(`[processExcelOperation] Received request: operation=${operation}, docId=${documentId}, userId=${userId}, requestedFileName=${requestedFileName}`);
@@ -105,14 +178,11 @@ export async function processExcelOperation(
   
   // Track memory usage
   const memUsageBefore = process.memoryUsage();
-  console.log(`[processExcelOperation] Memory usage before operation: ${JSON.stringify({ rss: memUsageBefore.rss / 1024 / 1024, heapTotal: memUsageBefore.heapTotal / 1024 / 1024, heapUsed: memUsageBefore.heapUsed / 1024 / 1024, external: memUsageBefore.external / 1024 / 1024 })} MB`);
+  console.log(`[processExcelOperation] Memory usage before operation: ${JSON.stringify({ /* ... memory stats ... */ })}`);
   
   let workbook: XLSX.WorkBook;
   let existingDocData: DocWithId | null = null;
   let baseFilename = requestedFileName || 'Spreadsheet'; // Default/requested base name
-  let currentSheetName = 'Sheet1'; // Initialize default sheet name
-  let fileBuffer: Buffer;
-  let actualStoragePath: string | null = null; // Declare here, initialize to null
 
   try {
     // Ensure Firebase services are ready
@@ -124,107 +194,20 @@ export async function processExcelOperation(
     // === Handle Edit vs. Create Setup ===
     if (operation === 'editExcelFile' && documentId) {
       console.log(`[processExcelOperation] Edit operation requested for doc: ${documentId}. Fetching existing file...`);
-      
-      // Check if documentId looks like a filename rather than a document ID
-      // (e.g., has file extension like .xlsx or contains spaces/parentheses which document IDs don't)
-      const looksLikeFilename = documentId.includes('.') || documentId.includes(' ') || documentId.includes('(');
-      let effectiveDocId = documentId; // This will hold the document ID we'll actually use
-      
-      if (looksLikeFilename) {
-        console.log(`[processExcelOperation] Document ID appears to be a filename. Attempting to find the actual document...`);
-        
-        // Try to find the document by filename instead
-        const filesQuery = await db.collection('users').doc(userId).collection('documents')
-          .where('name', '==', documentId)
-          .limit(1)
-          .get();
-          
-        if (!filesQuery.empty) {
-          const firstDoc = filesQuery.docs[0];
-          // Since documentId is a parameter, we can't reassign it directly
-          // Instead use a new variable to hold the actual document ID
-          effectiveDocId = firstDoc.id;
-          console.log(`[processExcelOperation] Found matching document with ID: ${effectiveDocId} for filename: ${firstDoc.data().name}`);
-        } else {
-          console.log(`[processExcelOperation] Could not find document with filename: ${documentId}. Will try using it as a document ID.`);
-          // Will continue with original documentId as effectiveDocId
-        }
-      }
-      
-      // Now use the effectiveDocId for all document operations
-      const docRef = db.collection('users').doc(userId).collection('documents').doc(effectiveDocId);
+      const docRef = db.collection('users').doc(userId).collection('documents').doc(documentId);
       const docSnap = await docRef.get();
       if (!docSnap.exists) {
-        throw new Error(`Document not found for editing: ${effectiveDocId}`);
+        throw new Error(`Document not found for editing: ${documentId}`);
       }
       existingDocData = { id: docSnap.id, ...docSnap.data() } as DocWithId;
-      console.log(`[processExcelOperation] Existing doc data fetched:`, { name: existingDocData.name, storagePath: existingDocData.storagePath });
       const storagePath = existingDocData.storagePath;
       if (!storagePath) throw new Error('Storage path missing for existing document');
 
-      try {
-        // Use the fallback logic to get the actual latest buffer and its path
-        const storageResult = await getStorageFileBufferWithFallback(storagePath, userId);
-        fileBuffer = storageResult.buffer;
-        actualStoragePath = storageResult.actualPath; // Store the path we actually used
-        console.log(`[processExcelOperation] Successfully fetched buffer using actual path: ${actualStoragePath}`);
-      } catch (error) {
-        // Check if this is a recovery error
-        if (error instanceof FileNeedsRecoveryError) {
-          console.log(`[processExcelOperation] File not found. Creating recovery file at: ${error.storagePath}`);
-          
-          // Get the intended sheet name from the operations or use a default
-          // First, determine if we have a requested sheet name in the operations
-          let activeSheet = 'Sheet1'; // Default sheet name
-          
-          // Check the operations array if available
-          // The parameter is named 'operationsData' in the function signature
-          if (operationsData && operationsData.length > 0) {
-            for (const op of operationsData) {
-              if (op.sheetName) {
-                activeSheet = op.sheetName;
-                break;
-              }
-            }
-          }
-          
-          console.log(`[processExcelOperation] Creating recovery workbook with sheet: ${activeSheet}`);
-          
-          // Create a new workbook with the detected sheet
-          workbook = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([]), activeSheet);
-          
-          // Mark the path where we'll save the file
-          actualStoragePath = error.storagePath;
-          
-          console.log(`[processExcelOperation] Recovery workbook created successfully`);
-          
-          // Create a buffer from the new workbook for immediate use
-          // This ensures fileBuffer is assigned properly for operations below
-          fileBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx', compression: true });
-          
-          // Continue with the process - no return here, we'll process the operations as normal
-        } else {
-          // Not a recovery issue, re-throw
-          throw error;
-        }
-      }
-
-      console.log(`[processExcelOperation] Parsing downloaded buffer...`);
-      try {
-          workbook = XLSX.read(fileBuffer, { type: 'buffer', cellStyles: true, cellNF: true }); // Enable reading styles
-          console.log(`[processExcelOperation] Workbook parsed successfully. Sheets: ${workbook.SheetNames.join(', ')}`);
-      } catch (parseError) {
-          console.error(`[processExcelOperation] Error parsing Excel buffer:`, parseError);
-          throw new Error('Failed to parse downloaded Excel file.');
-      }
+      const file = bucket.file(storagePath);
+      const [buffer] = await file.download();
+      workbook = XLSX.read(buffer, { type: 'buffer' });
       baseFilename = extractBaseFilename(existingDocData.name).baseName; // Use existing base name
       console.log(`[processExcelOperation] Existing workbook loaded for editing. Base filename: ${baseFilename}`);
-      // Set currentSheetName if workbook has sheets
-      if (workbook.SheetNames.length > 0) {
-        currentSheetName = workbook.SheetNames[0]; // Default to first sheet for editing
-        console.log(`[processExcelOperation] Defaulting edit context to first sheet: ${currentSheetName}`);
-      }
 
     } else {
       // Create operation or edit on non-existent doc (treat as create)
@@ -236,260 +219,319 @@ export async function processExcelOperation(
     }
 
     // === Process Operations ===
+    // Determine initial sheet name
+    let currentSheetName: string;
+    if (sheetName) {
+      currentSheetName = sheetName;
+    } else if (operation === 'editExcelFile' && workbook.SheetNames.length > 0) {
+      currentSheetName = workbook.SheetNames[0];
+    } else {
+      currentSheetName = 'Sheet1';
+    }
+
+    // Load existing sheet data if editing and sheet exists
     let currentSheetData: any[][] = [];
-    const formatsToApply: { sheet: string, range: string, format: any }[] = [];
-    const colWidthsToApply: { sheet: string, col: string, width: number }[] = [];
+    if (operation === 'editExcelFile' && workbook.SheetNames.includes(currentSheetName)) {
+      try {
+        const existingSheet = workbook.Sheets[currentSheetName];
+        currentSheetData = XLSX.utils.sheet_to_json(existingSheet, { header: 1, blankrows: true }) as any[][];
+        console.log(`[processExcelOperation] Loaded existing data for sheet '${currentSheetName}' with ${currentSheetData.length} rows.`);
+        // Remove the sheet so it can be replaced after modifications to avoid duplication
+        delete workbook.Sheets[currentSheetName];
+        const idx = workbook.SheetNames.indexOf(currentSheetName);
+        if (idx > -1) workbook.SheetNames.splice(idx, 1);
+      } catch (sheetLoadErr) {
+        console.warn(`[processExcelOperation] Failed to load existing data for sheet '${currentSheetName}':`, sheetLoadErr);
+      }
+    }
+    const formatsToApply: CellFormatInfo[] = [];
+    const colWidthsToApply: ColumnWidthInfo[] = [];
 
     console.log('[processExcelOperation] Starting to process operations...');
     for (const op of operationsData) {
-      console.log(`[processExcelOperation] Processing operation: ${op.type}`, op); // Log each operation
-      // Ensure the target sheet exists before operations that need it
-      let ws: XLSX.WorkSheet | undefined;
-      if (op.sheetName && workbook.Sheets[op.sheetName]) {
-        ws = workbook.Sheets[op.sheetName];
-        currentSheetName = op.sheetName; // Update context
-      } else if (workbook.Sheets[currentSheetName]) {
-        ws = workbook.Sheets[currentSheetName]; // Use current context sheet
-      } else if (op.type !== 'createSheet') {
-         // If the sheet doesn't exist and it's not a createSheet operation, create it
-         console.log(`[processExcelOperation] Operation requires sheet '${op.sheetName || currentSheetName}', creating it.`);
-         ws = XLSX.utils.aoa_to_sheet([]);
-         XLSX.utils.book_append_sheet(workbook, ws, op.sheetName || currentSheetName);
-         if (op.sheetName) currentSheetName = op.sheetName;
-      }
-
       switch (op.type) {
         case 'createSheet':
-          const newSheetName = op.sheetName || `Sheet${workbook.SheetNames.length + 1}`; // Use sheetName from op
+          // If there's data in the previous sheet, add it to workbook
+          if (currentSheetData.length > 0) {
+            console.log(`[processExcelOperation] Adding previous sheet '${currentSheetName}' with ${currentSheetData.length} rows.`);
+            const ws = XLSX.utils.aoa_to_sheet(currentSheetData);
+            XLSX.utils.book_append_sheet(workbook, ws, currentSheetName);
+          }
+          // Start new sheet
+          currentSheetName = op.name || `Sheet${workbook.SheetNames.length + 1}`;
+          currentSheetData = []; // Reset data accumulator
           console.log(`[processExcelOperation] Switched to new sheet: '${currentSheetName}'`);
           // If the sheet already exists in edit mode, clear it (or decide on merge strategy later)
-          if (workbook.SheetNames.includes(newSheetName)) {
-              console.warn(`[processExcelOperation] Sheet '${newSheetName}' already exists in edit mode. Replacing.`);
+          if (workbook.SheetNames.includes(currentSheetName)) {
+              console.warn(`[processExcelOperation] Sheet '${currentSheetName}' already exists in edit mode. Overwriting.`);
               // Remove existing sheet before adding new one
-              const sheetIndex = workbook.SheetNames.indexOf(newSheetName);
+              const sheetIndex = workbook.SheetNames.indexOf(currentSheetName);
               workbook.SheetNames.splice(sheetIndex, 1);
-              delete workbook.Sheets[newSheetName];
+              delete workbook.Sheets[currentSheetName]; 
           }
-          // Create the new empty sheet
-          ws = XLSX.utils.aoa_to_sheet([]);
-          XLSX.utils.book_append_sheet(workbook, ws, newSheetName);
-          currentSheetName = newSheetName; // Update current sheet context
           break;
 
         case 'addRow':
-          if (!ws) {
-            console.warn(`[processExcelOperation] Skipping addRow: sheet '${currentSheetName}' not found.`);
-            break; // ws is undefined here
-          }
-          if (Array.isArray(op.values)) { // Changed from op.row to op.values for clarity
-             XLSX.utils.sheet_add_aoa(ws!, [op.values], { origin: -1 }); // Append row - Assert ws is defined
+          if (Array.isArray(op.row)) {
+            currentSheetData.push(op.row);
           } else {
-            console.warn(`[processExcelOperation] Skipping addRow op with invalid values data:`, op.values);
+            console.warn(`[processExcelOperation] Skipping addRow op with invalid row data:`, op.row);
           }
           break;
 
-        case 'updateCells': // Changed from updateCell to updateCells
-          if (!ws) {
-            console.warn(`[processExcelOperation] Skipping updateCells: sheet '${op.sheetName || currentSheetName}' not found.`);
-            break; // ws is undefined here
-          }
-          if (Array.isArray(op.cellUpdates)) {
-            op.cellUpdates.forEach((update: { cell: string, value: any }) => {
-              const cellRef = update.cell;
-              const value = update.value;
-              console.log(`[processExcelOperation]   Applying update: Sheet='${currentSheetName}', Cell='${cellRef}', Value='${value}'`);
-              // Update cell value directly in the worksheet
-              XLSX.utils.sheet_add_json(ws!, [{ [cellRef]: value }], { header: [cellRef], origin: cellRef, skipHeader: true }); // Assert ws is defined
-              console.log(`[processExcelOperation] Updated cell ${cellRef} in sheet ${op.sheetName || currentSheetName} to value: ${value}`);
-            });
-          } else {
-            console.warn('[processExcelOperation] Skipping updateCells: invalid cellUpdates array', op.cellUpdates);
-          }
-          break;
-
-        case 'formatCells': // Changed from formatCell to formatCells
-          if (!ws) {
-            console.warn(`[processExcelOperation] Skipping formatCells: sheet '${op.sheetName || currentSheetName}' not found.`);
-            break; // ws is undefined here
-          }
-           if (Array.isArray(op.cellFormats)) {
-              op.cellFormats.forEach((fmt: { cell?: string, range?: string, format: any }) => {
-                  const format = fmt.format;
-                  let targetCells: string[] = [];
-
-                  if (fmt.cell) {
-                      targetCells.push(fmt.cell);
-                  } else if (fmt.range) {
-                      try {
-                          const decodedRange = XLSX.utils.decode_range(fmt.range);
-                          for (let R = decodedRange.s.r; R <= decodedRange.e.r; ++R) {
-                              for (let C = decodedRange.s.c; C <= decodedRange.e.c; ++C) {
-                                  targetCells.push(XLSX.utils.encode_cell({ r: R, c: C }));
-                              }
-                          }
-                      } catch (e) {
-                          console.error(`[processExcelOperation] Error decoding range '${fmt.range}':`, e);
-                          return; // Skip this format operation
-                      }
-                  } else {
-                       console.warn('[processExcelOperation] Skipping formatCells: requires cell or range property', fmt);
-                       return;
-                  }
-
-                  console.log(`[processExcelOperation]   Applying format: Sheet='${currentSheetName}', Target='${fmt.cell || fmt.range}', Format=`, format);
-                  targetCells.forEach(cellRef => {
-                      const cellAddress = XLSX.utils.decode_cell(cellRef);
-                      const cell = ws![cellRef] || { t: 'z', v: undefined }; // Get or create cell object - Assert ws is defined
-
-                      // Apply specific formats
-                      if (format.numberFormat) {
-                          cell.z = format.numberFormat; // Apply number format string
-                          // Ensure cell type is number if setting number format, unless already set
-                          if (typeof cell.v === 'number' && cell.t !== 'n') {
-                              cell.t = 'n'; 
-                          }
-                      }
-                      if (format.bold) {
-                          cell.s = cell.s || {}; // Ensure style object exists
-                          cell.s.font = cell.s.font || {};
-                          cell.s.font.bold = true;
-                      } else if (cell.s?.font?.bold && format.bold === false) {
-                           cell.s.font.bold = false;
-                      }
-                      // Add other format properties here (e.g., alignment, fill, etc.)
-                      // Requires xlsx-js-style for more advanced styling
-
-                      ws![cellRef] = cell; // Put the modified cell back - Assert ws is defined
-                      console.log(`[processExcelOperation] Applied format to cell ${cellRef} in sheet ${op.sheetName || currentSheetName}:`, format);
-                  });
-                  console.log(`[processExcelOperation]   Finished applying format for target: ${fmt.cell || fmt.range}`);
+        case 'formatCell':
+            if (op.cell && op.format) {
+              console.log(`[processExcelOperation] Storing formatCell op for sheet ${currentSheetName}, cell ${op.cell}:`, op.format);
+              formatsToApply.push({ 
+                sheet: currentSheetName, 
+                cell: op.cell, 
+                format: op.format 
               });
-           } else {
-                console.warn('[processExcelOperation] Skipping formatCells: invalid cellFormats array', op.cellFormats);
-           }
-           break;
-
+            } else {
+              console.warn(`[processExcelOperation] Skipping formatCell op with invalid cell or format data:`, op);
+            }
+            break;
         case 'setColumnWidth':
-          if (!ws) {
-            console.warn(`[processExcelOperation] Skipping setColumnWidth: sheet '${op.sheetName || currentSheetName}' not found.`);
-            break; // ws is undefined here
-          }
-          ws!['!cols'] = ws!['!cols'] || []; // Assert ws is defined
-          const colIndex = XLSX.utils.decode_col(op.column); // Convert 'A' to 0, 'B' to 1 etc.
-          ws!['!cols'][colIndex] = { wch: op.width }; // Set width in characters - Assert ws is defined
-          console.log(`[processExcelOperation] Set column ${op.column} width to ${op.width} for sheet ${op.sheetName || currentSheetName}`);
-          break;
-             
+            if (op.column && typeof op.width === 'number') {
+              try {
+                // Convert column letter to index if it's a string (e.g., 'A', 'BC')
+                const colIndex = typeof op.column === 'string' ? 
+                  columnLetterToIndex(op.column) : 
+                  parseInt(op.column, 10);
+                  
+                console.log(`[processExcelOperation] Storing setColumnWidth op for sheet ${currentSheetName}, column ${op.column} (index ${colIndex}): width=${op.width}`);
+                colWidthsToApply.push({ 
+                  sheet: currentSheetName, 
+                  colIndex: colIndex, 
+                  width: op.width 
+                });
+              } catch (error) {
+                console.warn(`[processExcelOperation] Error processing setColumnWidth op:`, error);
+              }
+            } else {
+              console.warn(`[processExcelOperation] Skipping setColumnWidth op with invalid column or width:`, op);
+            }
+            break;
+
+        case 'updateCells':
+            // Handle the updateCells operation with support for both formats
+            // Format 1: { type: 'updateCells', cells: [...] }
+            // Format 2: { type: 'updateCells', sheetName: '...', cellUpdates: [...] }
+            
+            // Check if we have a sheetName in the operation and switch if needed
+            if (op.sheetName) {
+              console.log(`[processExcelOperation] Found sheetName ${op.sheetName} in updateCells op`);
+              
+              // If the sheet doesn't exist in the workbook yet (new workbook), we need to add it
+              if (!workbook.SheetNames.includes(op.sheetName) && currentSheetData.length > 0) {
+                // Save the current sheet first
+                console.log(`[processExcelOperation] Adding pending sheet '${currentSheetName}' before switching`);
+                const ws = XLSX.utils.aoa_to_sheet(currentSheetData);
+                XLSX.utils.book_append_sheet(workbook, ws, currentSheetName);
+                currentSheetData = []; // Reset data for the new sheet
+              }
+              
+              // Switch to the specified sheet
+              currentSheetName = op.sheetName;
+              console.log(`[processExcelOperation] Switched to sheet ${currentSheetName} for updateCells`);
+            }
+            
+            // Determine which array of cell updates to use
+            const cellUpdates = op.cellUpdates || op.cells;
+            
+            if (cellUpdates && Array.isArray(cellUpdates)) {
+              console.log(`[processExcelOperation] Processing updateCells op with ${cellUpdates.length} cells for sheet ${currentSheetName}`);
+              
+              // First ensure we have data to work with
+              if (currentSheetData.length === 0) {
+                // If we have no data yet (new sheet), create a blank row to start
+                currentSheetData.push([]);
+                console.log(`[processExcelOperation] Created initial empty row for updateCells`);
+              }
+              
+              // Process each cell update
+              for (const cell of cellUpdates) {
+                if (cell && cell.cell && cell.value !== undefined) {
+                  try {
+                    // Parse cell reference (e.g., "A1" -> row 0, col 0)
+                    const cellRef = cell.cell.match(/([A-Z]+)([0-9]+)/);
+                    if (cellRef && cellRef.length === 3) {
+                      const col = columnLetterToIndex(cellRef[1]);
+                      const row = parseInt(cellRef[2], 10) - 1; // 1-indexed to 0-indexed
+                      
+                      // Ensure we have enough rows
+                      while (currentSheetData.length <= row) {
+                        currentSheetData.push([]);
+                      }
+                      
+                      // Update the cell value
+                      currentSheetData[row][col] = cell.value;
+                      console.log(`[processExcelOperation] Updated cell ${cell.cell} to value: ${cell.value}`);
+                      
+                      // If there's formatting, store it for later application
+                      if (cell.format) {
+                        formatsToApply.push({
+                          sheet: currentSheetName,
+                          cell: cell.cell,
+                          format: cell.format
+                        });
+                        console.log(`[processExcelOperation] Stored formatting for cell ${cell.cell}`);
+                      }
+                    } else {
+                      console.warn(`[processExcelOperation] Invalid cell reference: ${cell.cell}`);
+                    }
+                  } catch (error) {
+                    console.warn(`[processExcelOperation] Error processing cell update for ${cell.cell}:`, error);
+                  }
+                } else {
+                  console.warn(`[processExcelOperation] Skipping invalid cell update:`, cell);
+                }
+              }
+            } else {
+              console.warn(`[processExcelOperation] Skipping updateCells op with invalid cells data:`, op);
+              console.log(`[processExcelOperation] Expected 'cells' or 'cellUpdates' array, got:`, op);
+            }
+            break;
+            
         default:
           console.warn(`[processExcelOperation] Unsupported operation type: ${op.type}`);
       }
     }
 
+    // Add the last accumulated sheet data
+    if (currentSheetData.length > 0) {
+      console.log(`[processExcelOperation] Adding final sheet '${currentSheetName}' with ${currentSheetData.length} rows.`);
+      const ws = XLSX.utils.aoa_to_sheet(currentSheetData);
+      
+      // Apply column widths if any are defined for this sheet
+      const sheetColWidths = colWidthsToApply.filter(cw => cw.sheet === currentSheetName);
+      if (sheetColWidths.length > 0) {
+        console.log(`[processExcelOperation] Applying ${sheetColWidths.length} column width settings to sheet '${currentSheetName}'`);
+        // Initialize the columns array if it doesn't exist
+        if (!ws['!cols']) {
+          ws['!cols'] = [];
+        }
+        
+        sheetColWidths.forEach(({ colIndex, width }) => {
+          // Ensure the array is long enough
+          // TypeScript type assertion to let it know we've already checked for existence
+          const cols = ws['!cols'] as any[];
+          while (cols.length <= colIndex) {
+            cols.push({});
+          }
+          // Set width in characters
+          cols[colIndex] = { wch: width };
+          console.log(`[processExcelOperation] Set column ${columnIndexToLetter(colIndex)} width to ${width} characters`);
+        });
+      }
+      
+      // Apply cell formats if any are defined for this sheet
+      const sheetFormats = formatsToApply.filter(f => f.sheet === currentSheetName);
+      if (sheetFormats.length > 0) {
+        console.log(`[processExcelOperation] Applying ${sheetFormats.length} cell format settings to sheet '${currentSheetName}'`);
+        
+        sheetFormats.forEach(({ cell, format }) => {
+          // Create cell if it doesn't exist (could be formatting an empty cell)
+          if (!ws[cell]) {
+            ws[cell] = { t: 'z', v: undefined }; // Type 'z' for blank
+          }
+          
+          // Apply the styling object directly to the cell
+          ws[cell].s = format;
+          console.log(`[processExcelOperation] Applied formatting to cell ${cell}`);
+        });
+      }
+      
+      XLSX.utils.book_append_sheet(workbook, ws, currentSheetName);
+    } else if (!workbook.SheetNames.includes(currentSheetName) && workbook.SheetNames.length === 0) {
+        // Ensure at least one empty sheet exists if no data was added
+        console.log(`[processExcelOperation] No data added, creating empty sheet '${currentSheetName}'.`);
+        const ws = XLSX.utils.aoa_to_sheet([]);
+        
+        // Apply column widths to empty sheet if needed
+        const sheetColWidths = colWidthsToApply.filter(cw => cw.sheet === currentSheetName);
+        if (sheetColWidths.length > 0) {
+          console.log(`[processExcelOperation] Applying ${sheetColWidths.length} column width settings to empty sheet '${currentSheetName}'`);
+          // Initialize the columns array if it doesn't exist
+          if (!ws['!cols']) {
+            ws['!cols'] = [];
+          }
+          
+          sheetColWidths.forEach(({ colIndex, width }) => {
+            // TypeScript type assertion to let it know we've already checked for existence
+            const cols = ws['!cols'] as any[];
+            while (cols.length <= colIndex) {
+              cols.push({});
+            }
+            cols[colIndex] = { wch: width };
+          });
+        }
+        
+        XLSX.utils.book_append_sheet(workbook, ws, currentSheetName);
+    }
     console.log('[processExcelOperation] Finished processing operations.');
 
     // === Save and Upload ===
-    console.log('[processExcelOperation] Preparing to save and upload...');
-    // Use existing documentId if editing, otherwise generate new one
-    const finalDocumentId = (operation === 'editExcelFile' && documentId) ? documentId : `doc-${uuidv4()}`;
-    const timestamp = new Date().toISOString().replace(/:/g, '-');
-    let finalStoragePath: string;
-    let finalFileName: string;
-
-    if (operation === 'editExcelFile' && actualStoragePath) {
-      // Overwrite the file we actually read from
-      finalStoragePath = actualStoragePath;
-      finalFileName = actualStoragePath.split('/').pop() || `edited_document_${timestamp}.xlsx`;
-      console.log(`[processExcelOperation] Edit operation: Overwriting existing file at: ${finalStoragePath}`);
-    } else {
-      // Create operation or edit failed to find original: Create new timestamped file
-      const baseFileName = requestedFileName || 'document';
-      finalFileName = `${baseFileName} (${timestamp}).xlsx`;
-      finalStoragePath = `users/${userId}/${finalFileName}`;
-      console.log(`[processExcelOperation] Create/Fallback operation: Saving new file to: ${finalStoragePath}`);
-    }
+    const finalDocumentId = (operation === 'editExcelFile' && existingDocData) ? existingDocData.id : `doc-${uuidv4()}`;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    // Use baseFilename determined earlier (either requested, default, or from existing doc)
+    const finalFilename = `${baseFilename.replace(/\.[^/.]+$/, "")} (${timestamp}).xlsx`; 
+    const storagePath = `users/${userId}/${finalFilename}`;
+    console.log(`[processExcelOperation] Final Document ID: ${finalDocumentId}, Filename: ${finalFilename}, Storage Path: ${storagePath}`);
 
     console.log(`[processExcelOperation] Writing workbook to buffer...`);
-    let excelBuffer: Buffer;
-    try {
-        excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx', compression: true, cellStyles: true }); // Ensure styles are written
-        console.log(`[processExcelOperation] Workbook written to buffer successfully, size: ${excelBuffer.length} bytes`);
-    } catch (writeError) {
-        console.error(`[processExcelOperation] Error writing workbook to buffer:`, writeError);
-        throw new Error('Failed to generate final Excel file buffer.');
-    }
+    const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx', compression: true });
+    console.log(`[processExcelOperation] Buffer created, size: ${excelBuffer.length} bytes`);
 
-    const file = bucket.file(finalStoragePath);
-    console.log(`[processExcelOperation] Uploading to Firebase Storage at ${finalStoragePath}...`);
-    try {
-        await file.save(excelBuffer, {
-            metadata: {
-                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                cacheControl: 'public, max-age=31536000', // Optional: set cache control
-            },
-            // Consider adding resumable: false if uploads are small and potentially failing
-            // resumable: false,
-        });
-        console.log(`[processExcelOperation] File uploaded successfully to ${finalStoragePath}.`);
-    } catch (uploadError) {
-        console.error(`[processExcelOperation] Error uploading file to ${finalStoragePath}:`, uploadError);
-        throw new Error(`Failed to upload generated Excel file to storage: ${finalStoragePath}`);
-    }
+    const file = bucket.file(storagePath);
+    console.log(`[processExcelOperation] Uploading to Firebase Storage at ${storagePath}...`);
+    await file.save(excelBuffer, {
+      metadata: {
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        cacheControl: 'public, max-age=31536000', // Optional: set cache control
+      },
+    });
+    console.log(`[processExcelOperation] File uploaded successfully.`);
 
     // Make the file public (or use signed URLs)
-    let publicUrl = '';
-    try {
-        await file.makePublic();
-        publicUrl = file.publicUrl();
-        console.log(`[processExcelOperation] File made public. URL: ${publicUrl}`);
-    } catch (publicError) {
-        console.error(`[processExcelOperation] Error making file public ${finalStoragePath}:`, publicError);
-        // Continue without public URL, but log the error
-        // Depending on requirements, might want to throw here instead
-    }
+    await file.makePublic(); 
+    const publicUrl = file.publicUrl();
+    console.log(`[processExcelOperation] File public URL: ${publicUrl}`);
 
     // === Update Firestore ===
     console.log(`[processExcelOperation] Updating Firestore document ${finalDocumentId}...`);
     const docRef = db.collection('users').doc(userId).collection('documents').doc(finalDocumentId);
-    // Add type and folderId to the type definition
-    const updatedDocData: {
-      name: string;
-      storagePath: string;
-      updatedAt: FirebaseFirestore.FieldValue;
-      contentType: string;
-      size?: number;
-      userId: string;
-      createdAt?: FirebaseFirestore.FieldValue;
-      type?: string; 
-      folderId?: string | null;
-    } = {
-      name: finalFileName,
-      storagePath: finalStoragePath,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    const docData = {
+      name: finalFilename,
+      storagePath: storagePath,
+      downloadURL: publicUrl,
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       size: excelBuffer.length,
       userId: userId,
-      // Add createdAt only if creating a new document
-      ...(operation === 'createExcelFile' || !documentId ? { createdAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
+      status: 'processed', // Mark as processed
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...(operation === 'createExcelFile' || !existingDocData ? { createdAt: admin.firestore.FieldValue.serverTimestamp() } : {}), // Add createdAt only if new
       type: 'spreadsheet', // Indicate file type
-      folderId: null, // Default to root folder for new files
+      folderId: null // Default to root folder for new files
     };
-    await docRef.set(updatedDocData, { merge: true }); // Use set with merge to create or update
-    console.log(`[processExcelOperation] Firestore document ${finalDocumentId} updated successfully.`);
+
+    await docRef.set(docData, { merge: true }); // Use set with merge to create or update
+    console.log(`[processExcelOperation] Firestore document updated successfully.`);
 
     const endTime = Date.now();
     const executionTime = endTime - startTime;
     
-    // Log memory usage after operation
+    // Track memory usage after operation
     const memUsageAfter = process.memoryUsage();
-    console.log(`[processExcelOperation] Memory usage after operation: ${JSON.stringify({ rss: memUsageAfter.rss / 1024 / 1024, heapTotal: memUsageAfter.heapTotal / 1024 / 1024, heapUsed: memUsageAfter.heapUsed / 1024 / 1024, external: memUsageAfter.external / 1024 / 1024 })} MB`);
+    console.log(`[processExcelOperation] Memory usage after operation: ${JSON.stringify({ /* ... memory stats ... */ })}`);
     
     console.log(`[processExcelOperation] Operation completed successfully in ${executionTime}ms`);
 
     return {
       success: true,
-      message: operation === 'editExcelFile' ? `Excel file '${finalFileName}' updated successfully.` : `Excel file '${finalFileName}' created successfully.`,
+      message: operation === 'editExcelFile' ? `Excel file '${finalFilename}' updated successfully.` : `Excel file '${finalFilename}' created successfully.`,
       documentId: finalDocumentId,
-      storagePath: finalStoragePath,
+      storagePath: storagePath,
       fileUrl: publicUrl,
       executionTime
     };
@@ -499,7 +541,7 @@ export async function processExcelOperation(
     const executionTime = endTime - startTime;
     
     console.error(`[processExcelOperation] Error after ${executionTime}ms:`, error);
-    console.error(`[processExcelOperation] Full error object: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`);
+    console.error(`[processExcelOperation] Full error object:`, JSON.stringify(error, Object.getOwnPropertyNames(error)));
 
     let errorMessage = error.message || 'Unknown error during Excel processing';
     if (error.message?.includes('timeout') || error.code === 'ETIMEDOUT') errorMessage = `Operation timed out: ${error.message}`;
@@ -510,74 +552,8 @@ export async function processExcelOperation(
 
     return {
       success: false,
-      message: `An internal error occurred during the Excel operation: ${error.message || 'See server logs for details.'}`,
+      message: errorMessage,
       executionTime
     };
-  }
-}
-
-// Helper function copied from functions/src/processExcelForChat.ts
-/**
- * Converts a SheetJS worksheet object to a Markdown table string.
- * @param {XLSX.WorkSheet} sheet The worksheet object.
- * @param {string} sheetName The name of the sheet.
- * @return {string} The Markdown formatted table string.
- */
-function sheetToMarkdown(sheet: XLSX.WorkSheet, sheetName: string): string {
-  if (!sheet || !sheet['!ref']) {
-    return `## Sheet: ${sheetName}\n\n(Sheet is empty or invalid)\n\n`;
-  }
-
-  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-
-  if (rows.length === 0) {
-    return `## Sheet: ${sheetName}\n\n(Sheet is empty)\n\n`;
-  }
-
-  const escapePipe = (cell: any): string => String(cell).replace(/\|/g, '\\|');
-  const numCols = rows.reduce((max, row) => Math.max(max, row.length), 0);
-  if (numCols === 0) {
-     return `## Sheet: ${sheetName}\n\n(Sheet contains no columns)\n\n`;
-  }
-
-  const header = rows[0].map(escapePipe);
-  while(header.length < numCols) header.push('');
-  let markdown = `## Sheet: ${sheetName}\n\n`;
-  markdown += `| ${header.join(' | ')} |\n`;
-  markdown += `|${'---|'.repeat(numCols)}\n`;
-
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i].map(escapePipe);
-    while(row.length < numCols) row.push('');
-    markdown += `| ${row.join(' | ')} |\n`;
-  }
-
-  return markdown + '\n';
-}
-
-/**
- * Parses an Excel file buffer and converts its content to a Markdown string.
- * @param {Buffer} fileBuffer The buffer containing the Excel file data.
- * @param {string} documentName The name of the document for context in logs/messages.
- * @returns {Promise<string>} A promise that resolves with the Markdown content.
- */
-export async function convertExcelBufferToMarkdown(fileBuffer: Buffer, documentName: string): Promise<string> {
-  try {
-    console.log(`[excelUtils] Parsing Excel buffer for document: ${documentName}`);
-    const workbook = XLSX.read(fileBuffer, { type: 'buffer', sheetStubs: true });
-    console.log(`[excelUtils] Parsed workbook with sheets: ${workbook.SheetNames.join(', ')}`);
-
-    let combinedMarkdown = `--- Start of Excel Content (${documentName}) ---\n\n`;
-    workbook.SheetNames.forEach(sheetName => {
-      const sheet = workbook.Sheets[sheetName];
-      combinedMarkdown += sheetToMarkdown(sheet, sheetName);
-    });
-    combinedMarkdown += `--- End of Excel Content (${documentName}) ---\n`;
-
-    console.log(`[excelUtils] Generated Markdown length: ${combinedMarkdown.length}`);
-    return combinedMarkdown;
-  } catch (error) {
-    console.error(`[excelUtils] Error parsing Excel buffer for ${documentName}:`, error);
-    throw new Error(`Failed to parse Excel file ${documentName}.`); // Re-throw specific error
   }
 }

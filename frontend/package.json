@@ -11,8 +11,8 @@
     "postinstall": "node scripts/copy-pdf-worker.js"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^1.2.9",
-    "@ai-sdk/react": "^1.2.8",
+    "@ai-sdk/anthropic": "^1.2.10",
+    "@ai-sdk/react": "^1.2.9",
     "@anthropic-ai/sdk": "^0.39.0",
     "@handsontable/react": "^15.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.6",
@@ -35,7 +35,8 @@
     "@radix-ui/react-toggle-group": "^1.1.3",
     "@radix-ui/react-tooltip": "^1.2.0",
     "@tanstack/react-table": "^8.21.3",
-    "ai": "^4.3.5",
+    "ai": "^4.3.9",
+    "aria-hidden": "1.2.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
@@ -66,7 +67,7 @@
     "tw-animate-css": "^1.2.5",
     "unpdf": "^0.12.1",
     "uuid": "^11.1.0",
-    "xlsx": "^0.18.5",
+    "xlsx-js-style": "^1.2.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
@@ -85,5 +86,8 @@
     "pdfjs-dist": "^4.10.38",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "overrides": {
+    "aria-hidden": "1.2.4"
   }
 }

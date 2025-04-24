@@ -1,6 +1,6 @@
 // frontend/src/app/api/excel-test/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 
 console.log("--- MODULE LOAD: /api/excel-test ---");
 

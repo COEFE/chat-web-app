@@ -151,15 +151,32 @@ export async function DELETE(req: NextRequest) {
   const userId = auth.userId;
   console.log(`DELETE /api/documents - Authenticated user ID from token: ${userId}`);
   
-  // Get document ID from URL or request body
   const url = new URL(req.url);
-  const documentId = url.searchParams.get('id');
-  
-  if (!documentId) {
-    console.error('DELETE /api/documents - Bad request: Missing document ID');
-    return NextResponse.json({ error: 'Bad request: Missing document ID' }, { status: 400 });
+  const idsParam = url.searchParams.get('ids');
+  let documentIds: string[] = [];
+  if (idsParam) {
+    documentIds = idsParam.split(',').filter(Boolean);
+  } else {
+    const documentId = url.searchParams.get('id');
+    if (documentId) documentIds = [documentId];
+    else {
+      // Attempt to read JSON body for ids array
+      try {
+        const body = await req.json();
+        if (Array.isArray(body?.ids)) {
+          documentIds = body.ids;
+        }
+      } catch (_) {
+        // ignore JSON parse errors
+      }
+    }
   }
-  
+
+  if (documentIds.length === 0) {
+    console.error('DELETE /api/documents - Bad request: Missing document ID(s)');
+    return NextResponse.json({ error: 'Bad request: Missing document ID(s)' }, { status: 400 });
+  }
+
   try {
     // Ensure Firebase Admin is initialized before getting services
     try {
@@ -173,51 +190,37 @@ export async function DELETE(req: NextRequest) {
     const storage = getAdminStorage();
     console.log('Successfully got Firestore DB and Storage instances');
     
-    // Get the document reference
-    const docRef = db.collection('users').doc(userId).collection('documents').doc(documentId);
-    
-    // Get the document data to find storage path
-    const docSnapshot = await docRef.get();
-    
-    if (!docSnapshot.exists) {
-      console.error(`DELETE /api/documents - Document not found: ${documentId}`);
-      return NextResponse.json({ error: 'Document not found' }, { status: 404 });
-    }
-    
-    const docData = docSnapshot.data();
-    
-    // Delete from storage if storagePath exists
-    if (docData?.storagePath) {
+    const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com';
+    const bucket = storage.bucket(bucketName);
+
+    for (const docId of documentIds) {
       try {
-        // Get the bucket name from environment variables or use default
-        const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com';
-        console.log(`DELETE /api/documents - Using bucket: ${bucketName}`);
-        
-        // Get the bucket with the specific name
-        const bucket = storage.bucket(bucketName);
-        
-        await bucket.file(docData.storagePath).delete();
-        console.log(`DELETE /api/documents - Deleted file from storage: ${docData.storagePath}`);
-      } catch (storageError: any) {
-        // Log but continue - we still want to delete the document record
-        console.error(`DELETE /api/documents - Error deleting file from storage: ${docData.storagePath}`, storageError);
-        console.error('Storage error details:', { 
-          message: storageError.message, 
-          stack: storageError.stack,
-          code: storageError.code,
-          errorInfo: storageError.errorInfo
-        });
+        const docRef = db.collection('users').doc(userId).collection('documents').doc(docId);
+        const snap = await docRef.get();
+        if (!snap.exists) {
+          console.warn(`DELETE /api/documents - Document not found: ${docId}`);
+          continue;
+        }
+        const data = snap.data();
+        if (data?.storagePath) {
+          try {
+            await bucket.file(data.storagePath).delete();
+            console.log(`Deleted storage file ${data.storagePath}`);
+          } catch (err: any) {
+            console.error(`Error deleting storage file ${data.storagePath}`, err);
+          }
+        }
+        await docRef.delete();
+        console.log(`Deleted Firestore document ${docId}`);
+      } catch (err: any) {
+        console.error(`DELETE error for ${docId}:`, err);
       }
     }
-    
-    // Delete the document from Firestore
-    await docRef.delete();
-    console.log(`DELETE /api/documents - Deleted document: ${documentId}`);
-    
-    return NextResponse.json({ success: true, message: 'Document deleted successfully' }, { status: 200 });
+
+    return NextResponse.json({ success: true, message: 'Document(s) deleted successfully' }, { status: 200 });
   } catch (error: any) {
-    console.error(`DELETE /api/documents - Error deleting document ${documentId}:`, error);
+    console.error(`DELETE /api/documents - Error deleting document(s):`, error);
     console.error('Error details:', { message: error.message, stack: error.stack });
-    return NextResponse.json({ error: 'Failed to delete document', details: error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to delete document(s)', details: error.message }, { status: 500 });
   }
 }

@@ -82,10 +82,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   // Use primaryDocument and userId prop
   const documentContext = primaryDocument && userId && primaryDocument.storagePath && primaryDocument.contentType
     ? {
+        id: primaryDocument.id,
         storagePath: primaryDocument.storagePath,
         contentType: primaryDocument.contentType,
         name: primaryDocument.name,
-        userId: userId, // Use userId prop
+        userId: userId, // Use userId prop to validate on server
       }
     : undefined;
 
@@ -98,6 +99,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     headers: chatHeaders, 
     body: {
       chatId: chatId, // Always include chatId
+      ...(primaryDocument && { documentId: primaryDocument.id }),
       // Pass all linked document IDs
       ...(allDocumentIds.length > 0 && { linkedDocumentIds: allDocumentIds }), 
       // Pass all linked documents data
