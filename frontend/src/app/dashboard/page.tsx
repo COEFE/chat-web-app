@@ -384,7 +384,7 @@ const createColumns = (
                   e.stopPropagation();
                   onFolderClick(item.id, item.name);
                 }}
-                className="hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm truncate max-w-[220px] sm:max-w-[300px]"
+                className="hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm truncate max-w-[220px] sm:max-w-[345px]"
                 title={item.name}
               >
                 {item.name}
@@ -400,7 +400,7 @@ const createColumns = (
                   e.stopPropagation();
                   onSelectItem(item);
                 }}
-                className="truncate max-w-[220px] sm:max-w-[300px] cursor-pointer hover:underline"
+                className="truncate max-w-[220px] sm:max-w-[345px] cursor-pointer hover:underline"
                 title={item.name}
               >
                 {item.name}
@@ -409,7 +409,7 @@ const createColumns = (
           );
         }
       },
-      meta: { className: "px-0 sm:px-4" }, // Force no padding on mobile
+      meta: { className: "px-0 sm:px-4 sm:w-[345px]" }, // Expand Name column width by 15% on desktop
     },
     {
       accessorKey: "type",
@@ -1050,10 +1050,15 @@ function DocumentTable({
     if (item.type === "folder") {
       onFolderClick(item.id, item.name);
     } else {
-      // Toggle selection or select if not selected
-      onSelectItem(item); // Let parent handle selection logic if needed
+      onSelectItem(item);
+      if (isMobile) {
+        // Do not toggle row selection to avoid checking delete box
+      }
     }
   };
+
+  // Local highlight state for mobile row indication
+  const [activeRowId, setActiveRowId] = useState<string | null>(null);
 
   // Touch event handlers to distinguish between scrolling and tapping
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -1081,9 +1086,13 @@ function DocumentTable({
     (row: Row<FilesystemItem>) => (e: React.TouchEvent) => {
       const touchDuration = Date.now() - touchStartTime;
 
-      // Only trigger click if the touch was brief (< 300ms) and didn't move much
+      // Trigger selection only on quick taps not moved and not on controls
       if (touchDuration < 300 && !isTouchMoved) {
-        handleRowClick(row);
+        const target = e.target as HTMLElement;
+        // ignore taps on inputs, buttons, links, or labels
+        if (!target.closest('input, button, a, label')) {
+          handleRowClick(row);
+        }
       }
 
       // Reset touch state
@@ -1382,6 +1391,11 @@ function DocumentTable({
                               {
                                 "bg-blue-100 dark:bg-blue-900":
                                   row.getIsSelected(),
+                              },
+                              {
+                                "bg-blue-50 dark:bg-blue-900/50":
+                                  !row.getIsSelected() &&
+                                  activeRowId === row.original.id,
                               }
                             )}
                             onClick={(e) => {
