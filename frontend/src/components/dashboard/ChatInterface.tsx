@@ -13,6 +13,7 @@ import { getFirestore, collection, query, orderBy, getDocs, } from 'firebase/fir
 import ReactMarkdown from 'react-markdown'; // Import ReactMarkdown
 import remarkGfm from 'remark-gfm'; // Import remark-gfm for GitHub Flavored Markdown
 import { format } from 'date-fns'; // Import date-fns for formatting
+import Link from 'next/link'; // Import Link for navigation
 
 export interface ChatInterfaceProps { 
   chatId: string; 
@@ -264,51 +265,132 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 </p>
               </div>
             )}
-            {messages.map((message: Message) => (
-              <div
-                key={message.id} // Outer container for the row alignment
-                className={cn(
-                  "flex mb-3 sm:mb-4", // Responsive margin
-                  message.role === 'user' ? 'justify-end' : 'justify-start'
-                )}
-              >
-                <div className={cn( // Inner container for vertical stacking (bubble + timestamp)
-                  "flex flex-col",
-                  message.role === 'user' ? 'items-end' : 'items-start'
-                )}>
-                  <div
-                    // The actual message bubble
-                    className={cn(
-                      'rounded-lg px-4 py-2 max-w-[80%] overflow-hidden',
-                      message.role === 'user'
-                        ? 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-50'
-                        : 'bg-primary text-primary-foreground'
-                    )}
-                  >
-                    <div
-                      // Prose wrapper for Markdown styling
-                      className="prose prose-sm max-w-none dark:prose-invert prose-p:my-0 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1"
-                      style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}
-                    >
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          a: ({node, ...props}) => <a className="text-blue-600 underline dark:text-blue-400" {...props} />,
-                          p: ({node, ...props}) => <p className="mb-0" {...props} />
-                        }}
+            {messages.map((message: Message) => {
+              // --- START: Excel Operation Feedback Logic ---
+              let isExcelToolCall = false;
+              let isExcelToolResult = false;
+              let excelResultData: any = null;
+
+              // Check if it's an assistant initiating the excel tool call
+              if (message.role === 'assistant' && message.toolInvocations) {
+                isExcelToolCall = message.toolInvocations.some(
+                  (tool) => tool.toolName === 'excelOperation'
+                );
+              }
+
+              // Check if it's the result of the excel tool call
+              // Adjusted check to avoid role === 'tool' comparison due to TS type mismatch
+              // Use type assertion 'as any' because toolName exists at runtime but not in official Message type
+              if ((message as any).toolName === 'excelOperation') {
+                isExcelToolResult = true;
+                try {
+                  // Use type assertion 'as any' because content holds JSON string for tool result
+                  excelResultData = JSON.parse((message as any).content);
+                } catch (e) {
+                  console.error("[ChatInterface] Failed to parse excel tool result:", e);
+                  // Keep excelResultData null or set an error flag
+                  excelResultData = { success: false, message: "Failed to parse tool result." };
+                }
+              }
+              // --- END: Excel Operation Feedback Logic ---
+
+              // --- Render based on message type ---
+              
+              // 1. Render Excel Tool Result (Formatted)
+              if (isExcelToolResult && excelResultData) {
+                return (
+                  <div key={message.id} className="flex justify-start mb-3 sm:mb-4">
+                    <div className="flex flex-col items-start">
+                      <div
+                        className={cn(
+                          'rounded-lg px-4 py-2 max-w-[80%] overflow-hidden shadow-md',
+                          excelResultData.success
+                            ? 'bg-green-100 dark:bg-green-900 text-green-900 dark:text-green-100'
+                            : 'bg-red-100 dark:bg-red-900 text-red-900 dark:text-red-100'
+                        )}
                       >
-                        {message.content}
-                      </ReactMarkdown>
+                        <p className="mb-0">{excelResultData.message}</p>
+                        {excelResultData.success && excelResultData.documentId && (
+                          <Link href={`/document-chat/${excelResultData.documentId}`}>
+                            <Button variant="link" className="p-0 h-auto text-blue-600 dark:text-blue-400 underline">
+                              View Document
+                            </Button>
+                          </Link>
+                        )}
+                        {/* Optional: Display execution time? */}
+                        {/* {excelResultData.executionTime && <p className="text-xs mt-1">Time: {excelResultData.executionTime}ms</p>} */} 
+                      </div>
+                      {message.createdAt && (
+                         <div className="text-xs text-muted-foreground mt-1 px-1"> 
+                          {format(message.createdAt, 'p P')} (System Process)
+                         </div>
+                       )}
                     </div>
                   </div>
-                  {message.createdAt && (
-                    <div className="text-xs text-muted-foreground mt-1 px-1"> {/* Simple styling, alignment handled by parent */}
-                      {format(message.createdAt, 'p P')}
-                    </div>
+                );
+              }
+
+              // 2. Render Normal User/Assistant Messages (or Loading state for Excel call)
+              // Don't render the raw 'tool' role message if we handled it above
+              // Keep this check as toolName check above handles the rendering
+              // Use type assertion 'as any' because role 'tool' exists at runtime but not in official Message type
+              if ((message as any).role === 'tool') return null; 
+
+              return (
+                <div
+                  key={message.id} // Outer container for the row alignment
+                  className={cn(
+                    "flex mb-3 sm:mb-4", // Responsive margin
+                    message.role === 'user' ? 'justify-end' : 'justify-start'
                   )}
+                >
+                  <div className={cn( // Inner container for vertical stacking (bubble + timestamp)
+                    "flex flex-col",
+                    message.role === 'user' ? 'items-end' : 'items-start'
+                  )}>
+                    <div
+                      // The actual message bubble
+                      className={cn(
+                        'rounded-lg px-4 py-2 max-w-[80%] overflow-hidden',
+                        message.role === 'user'
+                          ? 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-50'
+                          : 'bg-primary text-primary-foreground'
+                      )}
+                    >
+                       {/* START: Conditional content: Loading or Markdown */} 
+                      {isExcelToolCall ? (
+                        <div className="flex items-center text-muted-foreground">
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Processing Excel request...
+                        </div>
+                      ) : (
+                        <div
+                          // Prose wrapper for Markdown styling
+                          className="prose prose-sm max-w-none dark:prose-invert prose-p:my-0 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1"
+                          style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}
+                        >
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              a: ({node, ...props}) => <a className="text-blue-600 underline dark:text-blue-400" {...props} />,
+                              p: ({node, ...props}) => <p className="mb-0" {...props} />
+                            }}
+                          >
+                            {message.content}
+                          </ReactMarkdown>
+                        </div>
+                       )} 
+                       {/* END: Conditional content */} 
+                    </div>
+                    {message.createdAt && (
+                      <div className="text-xs text-muted-foreground mt-1 px-1"> {/* Simple styling, alignment handled by parent */} 
+                        {format(message.createdAt, 'p P')}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {isLoading && (
               <div className="flex items-center justify-center p-4">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
