@@ -244,7 +244,9 @@ const createColumns = (
     currentStatus: boolean
   ) => Promise<void>,
   togglingFavoriteId: string | null,
-  onOpenShareDialog: (doc: { id: string; name: string }) => void // Add the missing prop
+  onOpenShareDialog: (doc: { id: string; name: string }) => void, // Add the missing prop
+  isMobile: boolean,
+  highlightRow: (id: string) => void
 ): ColumnDef<FilesystemItem>[] => {
   // Helper to get the appropriate icon based on item type and content type
   const getFileTypeIcon = (item: FilesystemItem) => {
@@ -399,6 +401,7 @@ const createColumns = (
                 onClick={(e) => {
                   e.stopPropagation();
                   onSelectItem(item);
+                  if (isMobile) highlightRow(item.id);
                 }}
                 className="truncate max-w-[220px] sm:max-w-[345px] cursor-pointer hover:underline"
                 title={item.name}
@@ -614,7 +617,7 @@ const createColumns = (
 
         return dateA - dateB;
       },
-      enableSorting: true,
+      enableSorting: true, // Allow sorting by date
       enableGrouping: true, // Enable grouping by Date Added
       getGroupingValue: (item: FilesystemItem) => {
         // Use item directly
@@ -880,7 +883,6 @@ function DocumentTable({
   } | null>(null);
   const [isTouchMoved, setIsTouchMoved] = useState<boolean>(false);
 
-  // Local mobile detection to conditionally render elements (e.g., Columns dropdown)
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -889,6 +891,8 @@ function DocumentTable({
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
+
+  const [activeRowId, setActiveRowId] = useState<string | null>(null);
 
   // Use useMemo to calculate hasMoreItems and slicedData to prevent infinite updates
   const { hasMoreItems, slicedData } = useMemo(() => {
@@ -920,7 +924,9 @@ function DocumentTable({
         favoriteIds,
         handleToggleFavorite,
         togglingFavoriteId,
-        onOpenShareDialog // Pass the handler
+        onOpenShareDialog, // Pass the handler
+        isMobile,
+        setActiveRowId,
       ),
     [
       onSelectItem,
@@ -934,6 +940,7 @@ function DocumentTable({
       handleToggleFavorite,
       togglingFavoriteId,
       onOpenShareDialog,
+      isMobile,
     ]
   );
 
@@ -1056,9 +1063,6 @@ function DocumentTable({
       }
     }
   };
-
-  // Local highlight state for mobile row indication
-  const [activeRowId, setActiveRowId] = useState<string | null>(null);
 
   // Touch event handlers to distinguish between scrolling and tapping
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -1387,10 +1391,6 @@ function DocumentTable({
                                 "cursor-pointer hover:bg-muted/50":
                                   cell.column.id !== "actions" &&
                                   cell.column.id !== "select",
-                              },
-                              {
-                                "bg-blue-100 dark:bg-blue-900":
-                                  row.getIsSelected(),
                               },
                               {
                                 "bg-blue-50 dark:bg-blue-900/50":
