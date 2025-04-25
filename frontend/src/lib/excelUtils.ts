@@ -314,33 +314,46 @@ export async function processExcelOperation(
             break;
 
         case 'updateCells':
-            // Handle the updateCells operation with support for both formats
-            // Format 1: { type: 'updateCells', cells: [...] }
-            // Format 2: { type: 'updateCells', sheetName: '...', cellUpdates: [...] }
-            
-            // Check if we have a sheetName in the operation and switch if needed
-            if (op.sheetName) {
-              console.log(`[processExcelOperation] Found sheetName ${op.sheetName} in updateCells op`);
-              
-              // If the sheet doesn't exist in the workbook yet (new workbook), we need to add it
-              if (!workbook.SheetNames.includes(op.sheetName) && currentSheetData.length > 0) {
-                // Save the current sheet first
-                console.log(`[processExcelOperation] Adding pending sheet '${currentSheetName}' before switching`);
-                const ws = XLSX.utils.aoa_to_sheet(currentSheetData);
-                XLSX.utils.book_append_sheet(workbook, ws, currentSheetName);
-                currentSheetData = []; // Reset data for the new sheet
+            // Determine which array of cell updates to use, checking multiple possible keys
+            const cellValues = op.values; // Prioritize 'values' for range-based updates
+            const cellUpdates = op.cellUpdates || op.cells || op.updates; // Check other common keys
+
+            // --- Add detailed logging --- 
+            console.log(`[updateCells Debug] Operation received:`, JSON.stringify(op));
+            console.log(`[updateCells Debug] Derived cellUpdates (from cellUpdates/cells/updates):`, cellUpdates); // Log the combined check
+            console.log(`[updateCells Debug] Derived cellValues (from values) isArray:`, Array.isArray(cellValues));
+            console.log(`[updateCells Debug] op.range exists:`, !!op.range);
+            // --- End detailed logging ---
+
+            // Handle the format { range: 'A1:G51', values: [[...], [...]] }
+            if (cellValues && Array.isArray(cellValues) && op.range) {
+              console.log(`[processExcelOperation] Processing updateCells op (values format) for range ${op.range} on sheet ${currentSheetName}`);
+              try {
+                const decodedRange = XLSX.utils.decode_range(op.range);
+                const startRow = decodedRange.s.r;
+                const startCol = decodedRange.s.c;
+
+                for (let r = 0; r < cellValues.length; r++) {
+                  const targetRow = startRow + r;
+                  // Ensure enough rows exist
+                  while (currentSheetData.length <= targetRow) {
+                    currentSheetData.push([]);
+                  }
+                  const rowData = cellValues[r];
+                  if (Array.isArray(rowData)) {
+                    for (let c = 0; c < rowData.length; c++) {
+                      const targetCol = startCol + c;
+                      currentSheetData[targetRow][targetCol] = rowData[c];
+                    }
+                  }
+                }
+                console.log(`[processExcelOperation] Populated ${cellValues.length} rows from 'values' array starting at ${op.range.split(':')[0]}`);
+              } catch (rangeError) {
+                console.warn(`[processExcelOperation] Error processing range-based updateCells op for range ${op.range}:`, rangeError);
               }
-              
-              // Switch to the specified sheet
-              currentSheetName = op.sheetName;
-              console.log(`[processExcelOperation] Switched to sheet ${currentSheetName} for updateCells`);
-            }
-            
-            // Determine which array of cell updates to use
-            const cellUpdates = op.cellUpdates || op.cells;
-            
-            if (cellUpdates && Array.isArray(cellUpdates)) {
-              console.log(`[processExcelOperation] Processing updateCells op with ${cellUpdates.length} cells for sheet ${currentSheetName}`);
+            // Handle the format { cells/cellUpdates/updates: [{ cell: 'A1', value: ... }] }
+            } else if (cellUpdates && Array.isArray(cellUpdates)) {
+              console.log(`[processExcelOperation] Processing updateCells op (cells/cellUpdates/updates format) with ${cellUpdates.length} cells for sheet ${currentSheetName}`);
               
               // First ensure we have data to work with
               if (currentSheetData.length === 0) {
@@ -388,11 +401,23 @@ export async function processExcelOperation(
                 }
               }
             } else {
-              console.warn(`[processExcelOperation] Skipping updateCells op with invalid cells data:`, op);
-              console.log(`[processExcelOperation] Expected 'cells' or 'cellUpdates' array, got:`, op);
+              console.warn(`[processExcelOperation] Skipping updateCells op with invalid data structure:`, op);
+              console.log(`[processExcelOperation] Expected 'cells', 'cellUpdates', 'updates', or 'values' array, got:`, op);
             }
             break;
             
+        // --- Add placeholder cases for missing operations ---    
+        case 'formatRange':
+          console.log(`[processExcelOperation] Received 'formatRange' operation (not yet implemented):`, op);
+          // Placeholder: Logic to apply formatting to a range would go here
+          break;
+          
+        case 'autoFitColumns':
+          console.log(`[processExcelOperation] Received 'autoFitColumns' operation (not yet implemented):`, op);
+          // Placeholder: Logic to adjust column widths would go here
+          break;
+        // --- End placeholder cases ---
+          
         default:
           console.warn(`[processExcelOperation] Unsupported operation type: ${op.type}`);
       }
