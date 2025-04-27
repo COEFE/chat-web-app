@@ -24,7 +24,7 @@ export function initializeAdminApp() {
       admin.initializeApp({
         credential: admin.credential.applicationDefault(),
         // Add storageBucket if necessary, e.g., from process.env.FIREBASE_STORAGE_BUCKET
-        storageBucket: process.env.FIREBASE_STORAGE_BUCKET
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${process.env.FIREBASE_PROJECT_ID}.appspot.com`
       });
     } 
     // Fallback to individual environment variables (common in Vercel)
@@ -38,7 +38,7 @@ export function initializeAdminApp() {
           clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
           privateKey: privateKey,
         }),
-        storageBucket: process.env.FIREBASE_STORAGE_BUCKET
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${process.env.FIREBASE_PROJECT_ID}.appspot.com`
       });
     } else {
       console.error('[firebaseAdmin] Missing Firebase Admin credentials. Set GOOGLE_APPLICATION_CREDENTIALS or FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY environment variables.');

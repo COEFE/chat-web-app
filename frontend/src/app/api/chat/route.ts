@@ -46,7 +46,8 @@ const EXCEL_MAX_TOKENS = 4000;
 const ANTHROPIC_TIMEOUT_MS = 30000; // 30 seconds for Anthropic API calls
 const EXCEL_OPERATION_TIMEOUT_MS = 25000; // 25 seconds for Excel operations
 const DEFAULT_SYSTEM_PROMPT = `You are Claude, a helpful AI assistant integrated into a web chat application. Provide concise and accurate responses.
-**CRITICAL:** When the user asks you to create OR edit an Excel file, you MUST call the 'excelOperation' tool. DO NOT just describe the action, EXECUTE it with the tool.
+**CRITICAL:** Only call the 'excelOperation' tool when the user EXPLICITLY requests you to *create* or *edit* an Excel workbook (e.g. "create a budget sheet", "update cell B2").
+If the user is merely asking questions about the contents of an existing spreadsheet—such as calculating a total, listing values, or explaining data—DO **NOT** call the tool. Just answer directly in plain text.
 Use the following arguments for the tool:
 - action: "createExcelFile" or "editExcelFile"
 - operations: An array of operation objects.
@@ -347,6 +348,22 @@ export async function POST(req: NextRequest) {
   const userMessageContent = lastMessage.content;
   console.log(`Last user message content: "${userMessageContent}"`);
   console.log(`Active Sheet provided: ${activeSheet}`);
+
+  // --- Persist user message so it shows after refresh ---
+  try {
+    const messagesCollectionPath = `users/${userId}/chats/${chatId}/messages`;
+    const messagesCollectionRef = db.collection(messagesCollectionPath);
+    await messagesCollectionRef.add({
+      role: 'user',
+      content: userMessageContent,
+      userId,
+      chatId,
+      createdAt: firestore.FieldValue.serverTimestamp(),
+    });
+    console.log(`[Chat API] User message persisted for chatId ${chatId}`);
+  } catch(saveUserErr) {
+    console.error('[Chat API] Failed to save user message:', saveUserErr);
+  }
 
   let systemPrompt = DEFAULT_SYSTEM_PROMPT;
   let fileContent: string | Buffer | null = null;

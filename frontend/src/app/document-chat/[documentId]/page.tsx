@@ -67,10 +67,13 @@ export default function DocumentChatPage() {
         const docSnap = await getDoc(docRef);
         
         if (docSnap.exists()) {
-          // Add the document to the documents array
+          // Add the document to the documents array with name fallback
+          const rawData = docSnap.data();
+          const displayName = (rawData as any).name || (rawData as any).fileName || docSnap.id;
           setDocuments([{
             id: docSnap.id,
-            ...docSnap.data(),
+            ...rawData,
+            name: displayName,
           } as MyDocumentData]);
           
           // Set this document as active
@@ -128,9 +131,13 @@ export default function DocumentChatPage() {
       const docSnap = await getDoc(docRef);
       
       if (docSnap.exists()) {
+        // Append selected document with name fallback
+        const rawData = docSnap.data();
+        const displayName = (rawData as any).name || (rawData as any).fileName || docSnap.id;
         const newDoc = {
           id: docSnap.id,
-          ...docSnap.data(),
+          ...rawData,
+          name: displayName,
         } as MyDocumentData;
         
         // Add the new document to the documents array

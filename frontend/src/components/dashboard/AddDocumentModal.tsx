@@ -83,16 +83,12 @@ export function AddDocumentModal({
           // Log the document data to help diagnose issues
           // console.log('Document data:', doc.id, docData);
           
-          // Make sure we have the required fields
-          if (!docData.name) {
-            console.warn('Document missing name:', doc.id);
-            docData.name = 'Unnamed document';
-          }
-          
-          // Add to our array
+          // Determine display name, prioritizing fileName
+          const displayName = docData.name || docData.fileName || 'Unnamed document';
           fetchedDocs.push({
             id: doc.id,
-            ...docData
+            ...docData,
+            name: displayName
           } as MyDocumentData);
         } catch (e) {
           console.error('Error processing document:', doc.id, e);

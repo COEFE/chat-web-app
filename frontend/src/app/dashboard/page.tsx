@@ -89,6 +89,7 @@ import {
   Moon,
   Sun,
   MessageSquarePlus, // Import the new icon
+  Receipt, // Import Receipt icon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 // Badge component removed
@@ -926,7 +927,7 @@ function DocumentTable({
         togglingFavoriteId,
         onOpenShareDialog, // Pass the handler
         isMobile,
-        setActiveRowId,
+        setActiveRowId
       ),
     [
       onSelectItem,
@@ -1094,7 +1095,7 @@ function DocumentTable({
       if (touchDuration < 300 && !isTouchMoved) {
         const target = e.target as HTMLElement;
         // ignore taps on inputs, buttons, links, or labels
-        if (!target.closest('input, button, a, label')) {
+        if (!target.closest("input, button, a, label")) {
           handleRowClick(row);
         }
       }
@@ -1203,7 +1204,11 @@ function DocumentTable({
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 {/* Using SlidersHorizontal icon */}
-                <Button variant="outline" size="sm" className="h-8 border-dashed">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 border-dashed"
+                >
                   <SlidersHorizontal className="mr-2 h-4 w-4" />
                   Columns
                 </Button>
@@ -1675,37 +1680,12 @@ function DashboardPage() {
         }))
       );
 
-      // Fetch documents in the current folder
-      let documentSnapshot;
-      try {
-        const documentsQueryByCreatedAt = query(
-          collection(db, "users", userId, "documents"),
-          where("folderId", "==", targetFolderId),
-          orderBy("createdAt", "desc")
-        );
-
-        console.log(
-          `[Dashboard] Executing Firestore query for documents with folderId: ${targetFolderId}`
-        );
-        documentSnapshot = await getDocs(documentsQueryByCreatedAt);
-        console.log(
-          "[Dashboard] Successfully retrieved documents sorted by creation date"
-        );
-      } catch (indexError) {
-        console.warn(
-          "[Dashboard] Index error, falling back to name sorting:",
-          indexError
-        );
-
-        const documentsQueryByName = query(
-          collection(db, "users", userId, "documents"),
-          where("folderId", "==", targetFolderId),
-          orderBy("name", "asc")
-        );
-
-        console.log("[Dashboard] Falling back to name-based sorting query...");
-        documentSnapshot = await getDocs(documentsQueryByName);
-      }
+      // Fetch documents in the current folder (no ordering to avoid index issues)
+      const documentsQuery = query(
+        collection(db, "users", userId, "documents"),
+        where("folderId", "==", targetFolderId)
+      );
+      const documentSnapshot = await getDocs(documentsQuery);
 
       console.log(
         `[Dashboard] Document query complete for folderId: ${targetFolderId}, found: ${documentSnapshot.docs.length} documents`
@@ -1718,7 +1698,7 @@ function DashboardPage() {
         const docData: MyDocumentData = {
           id: doc.id,
           userId: data.userId,
-          name: data.name,
+          name: data.name || data.fileName || doc.id, // Fallback to fileName or doc ID
           storagePath: data.storagePath,
           folderId: data.folderId ?? null,
           uploadedAt: data.uploadedAt as Timestamp,
@@ -1749,20 +1729,16 @@ function DashboardPage() {
         `[Dashboard] Processed ${fetchedDocs.length} documents into UI items`
       );
 
-      // Combine and sort folders first, then by name
-      const combinedItems: FilesystemItem[] = [
-        ...folderItems,
-        ...documentItems,
-      ].sort((a, b) => {
-        // Sort folders before documents
-        if (a.type === "folder" && b.type !== "folder") return -1;
-        if (a.type !== "folder" && b.type === "folder") return 1;
-
-        // If both are the same type, sort by name (case-insensitive)
-        const nameA = a.name || "";
-        const nameB = b.name || "";
-        return nameA.localeCompare(nameB, undefined, { sensitivity: "base" });
+      // Sort folders alphabetically, then documents by newest first
+      const sortedFolders = [...folderItems].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+      );
+      const sortedDocs = [...documentItems].sort((a, b) => {
+        const aTime = a.createdAt?.toMillis() || a.updatedAt?.toMillis() || 0;
+        const bTime = b.createdAt?.toMillis() || b.updatedAt?.toMillis() || 0;
+        return bTime - aTime;
       });
+      const combinedItems: FilesystemItem[] = [...sortedFolders, ...sortedDocs];
 
       setFilesystemItems(combinedItems);
       console.log(
@@ -2502,6 +2478,13 @@ function DashboardPage() {
           >
             Chat History
           </Link>
+          {/* Add Prepaid Expenses Link for Desktop */}
+          <Link
+            href="/prepaid-expenses"
+            className="text-base font-medium text-[var(--primary)] hover:underline ml-4"
+          >
+            Prepaid Expenses
+          </Link>
         </div>
 
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
@@ -2544,6 +2527,17 @@ function DashboardPage() {
                 >
                   <FileText className="h-5 w-5" />
                   Chat History
+                </Link>
+                {/* Add Prepaid Expenses Link for Mobile */}
+                <Link
+                  href="/prepaid-expenses"
+                  className="text-base font-medium hover:underline flex items-center gap-2"
+                  onClick={() => {
+                    // Add logic to close the sheet if needed, depending on Sheet component behavior
+                  }}
+                >
+                  <Receipt className="h-5 w-5" />
+                  Prepaid Expenses
                 </Link>
                 <Button
                   variant="outline"
@@ -2978,8 +2972,15 @@ function DashboardPage() {
                               | "updatedAt"
                               | "size"
                               | "type"
-                            )[] = ["none", "uploadedAt", "updatedAt", "size", "type"];
-                            const currentIndex = views.indexOf(mobileViewColumn);
+                            )[] = [
+                              "none",
+                              "uploadedAt",
+                              "updatedAt",
+                              "size",
+                              "type",
+                            ];
+                            const currentIndex =
+                              views.indexOf(mobileViewColumn);
                             const nextIndex = (currentIndex + 1) % views.length;
                             setMobileViewColumn(views[nextIndex]);
                           }}

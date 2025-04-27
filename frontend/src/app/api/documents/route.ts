@@ -117,7 +117,8 @@ export async function GET(req: NextRequest) {
       
       return {
         id: doc.id,
-        name: data.name || data.filename || data.originalName || doc.id,
+        // Use fileName if name missing
+        name: data.name || data.fileName || data.filename || data.originalName || doc.id,
         contentType: contentType,
         downloadURL: data.downloadURL || null,
         uploadedAt: uploadedAt,

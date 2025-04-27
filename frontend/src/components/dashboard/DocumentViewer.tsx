@@ -92,8 +92,8 @@ export default function DocumentViewer({ document, className }: DocumentViewerPr
       const userId = docToLoad.userId || '';
       const proxyUrl = `/api/file-proxy?path=${encodeURIComponent(storagePath)}&userId=${encodeURIComponent(userId)}&v=${currentRefreshKey}`;
       console.log('[fetchAndProcessContent] Using proxy URL:', proxyUrl);
-      console.log('[fetchAndProcessContent] Document metadata:', { 
-        name: docToLoad.name, 
+      console.log('[fetchAndProcessContent] Document metadata:', {
+        name: docToLoad.name,
         storagePath: docToLoad.storagePath,
         userId: docToLoad.userId,
         contentType: docToLoad.contentType
@@ -113,12 +113,12 @@ export default function DocumentViewer({ document, className }: DocumentViewerPr
         const text = await response.text();
         console.log('[fetchAndProcessContent] Setting text content:', text);
         setTextContent(text);
-      } else if ([
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
-          'application/vnd.ms-excel', // .xls
-          'text/csv' // .csv
-        ].includes(docToLoad.contentType || '')) 
-      {
+      } else if (docToLoad.contentType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
+        docToLoad.contentType === 'application/vnd.ms-excel' || 
+        docToLoad.contentType === 'text/csv' || 
+        ['xlsx', 'xls', 'csv'].includes((docToLoad.name || '').split('.').pop()?.toLowerCase() || '') || 
+        ['xlsx', 'xls', 'csv'].includes((docToLoad.storagePath || '').split('.').pop()?.toLowerCase() || '')
+      ) {
         const data = await response.arrayBuffer();
         if (data) {
           try {
@@ -373,11 +373,16 @@ export default function DocumentViewer({ document, className }: DocumentViewerPr
     'text/markdown', 
     'application/json'
   ].includes(document?.contentType || '');
-  const isSheet = [
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
-    'application/vnd.ms-excel', // .xls
-    'text/csv' // .csv
-  ].includes(document?.contentType || '');
+  // Robust spreadsheet detection: MIME or extension from name or path
+  const extName = document?.name?.split('.')?.pop()?.toLowerCase() || '';
+  const extPath = document?.storagePath?.split('.')?.pop()?.toLowerCase() || '';
+  const fileExtUI = extName || extPath;
+  const isSheet = (
+    ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel','text/csv']
+      .includes(document?.contentType || '')
+    || ['xlsx','xls','csv'].includes(fileExtUI)
+  );
+  console.log(`[DocumentViewer] Preview support: isPdf=${isPdf}, isText=${isText}, isSheet=${isSheet}, contentType=${document?.contentType}, extension=${fileExtUI}`);
   const isImage = document?.contentType?.startsWith('image/');
   const isDocx = document?.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 

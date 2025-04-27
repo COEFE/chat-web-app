@@ -91,6 +91,7 @@ export function FileUpload({
 
       const storagePath = `users/${user.uid}/${uniqueFileName}`;
       console.log(`Using standard storage path: ${storagePath}`);
+      // Use configured storage instance (with emulator/auth) from firebaseConfig
       const storageRef = ref(getStorage(), storagePath);
       
       // Add metadata to the upload that the Cloud Function can use
@@ -114,7 +115,23 @@ export function FileUpload({
         
         console.log(`Starting direct upload for ${file.name}`);
         console.log(`[FileUpload] About to upload to storagePath: ${storagePath} with metadata:`, metadata);
-        const snapshot = await firebaseUploadBytesResumable(storageRef, file, metadata);
+        const snapshot = await new Promise<any>((resolve, reject) => {
+          const uploadTask = firebaseUploadBytesResumable(storageRef, file, metadata);
+          uploadTask.on(
+            'state_changed',
+            (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              console.log(`Upload is ${progress}% done`);
+              setUploadingFiles((prev) =>
+                prev.map((uf) =>
+                  uf.id === fileState.id ? { ...uf, progress, status: 'uploading' } : uf
+                )
+              );
+            },
+            (error) => reject(error),
+            () => resolve(uploadTask.snapshot)
+          );
+        });
         console.log(`Upload SUCCESS for ${file.name}`, snapshot);
 
         setUploadingFiles((prev) =>
