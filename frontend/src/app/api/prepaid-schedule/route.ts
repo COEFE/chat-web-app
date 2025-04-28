@@ -1,22 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminAuth as getAuth, getAdminDb as getFirestore, getAdminStorage as getStorage } from '@/lib/firebaseAdminConfig';
+import { getAuth, getFirestore, getStorage } from '@/lib/firebaseAdmin';
 import * as XLSX from 'xlsx';
 import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic(); // Assumes ANTHROPIC_API_KEY is in env
 
 export async function POST(req: NextRequest) {
+  console.log('[api/prepaid-schedule] Authorization header:', req.headers.get('Authorization'));
+  const authHeader = req.headers.get('Authorization');
+  console.log('[api/prepaid-schedule] raw authHeader:', authHeader);
   try {
     // Authenticate
-    const idToken = req.headers.get('Authorization')?.split('Bearer ')[1];
+    const idToken = authHeader?.split('Bearer ')[1];
+    console.log('[api/prepaid-schedule] Extracted idToken:', idToken ? `${idToken.substring(0,8)}...${idToken.slice(-8)}` : idToken);
     if (!idToken) {
       return NextResponse.json({ error: 'Unauthorized: No token provided' }, { status: 401 });
     }
+    console.log('[api/prepaid-schedule] Verifying ID token...');
     const auth = getAuth();
     let decodedToken;
     try {
       decodedToken = await auth.verifyIdToken(idToken);
     } catch (err) {
+      console.error('[api/prepaid-schedule] verifyIdToken error:', err);
       return NextResponse.json({ error: 'Unauthorized: Invalid token' }, { status: 401 });
     }
     const userId = decodedToken.uid;

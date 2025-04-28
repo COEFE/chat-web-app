@@ -1,5 +1,4 @@
-import admin from 'firebase-admin';
-import { getApps } from 'firebase-admin/app';
+import * as admin from 'firebase-admin';
 
 // For singleton pattern
 let firebaseApp: admin.app.App | undefined;
@@ -9,8 +8,9 @@ let firebaseApp: admin.app.App | undefined;
  * Uses environment variables for configuration.
  */
 export function initializeFirebaseAdmin(): admin.app.App {
+  console.log('[FirebaseAdmin] ENV VARs]', { hasServiceAccount: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT), hasEnvCreds: Boolean(process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PROJECT_ID) });
   // Check if already initialized
-  if (getApps().length > 0) {
+  if (admin.apps.length > 0) {
     return admin.apps[0]!;
   }
 

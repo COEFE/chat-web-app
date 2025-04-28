@@ -199,6 +199,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
     setError(null);
     try {
       const token = await user.getIdToken();
+      console.log('[PrepaidWorkflow] Token snippet:', token ? `${token.substring(0,8)}...${token.slice(-8)}` : token);
       console.log('[PrepaidWorkflow] Generating schedule for documentId:', selectedDocId); // Log the ID
       const res = await fetch('/api/prepaid-schedule', {
         method: 'POST',
