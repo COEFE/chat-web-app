@@ -30,7 +30,7 @@ export function initializeAdminApp() {
     // Fallback to individual environment variables (common in Vercel)
     else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
       console.log('[firebaseAdmin] Initializing using individual environment variables.');
-      const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\n/g, '\n'); // Handle escaped newlines
+      const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'); // Handle escaped newline sequences correctly
       
       admin.initializeApp({
         credential: admin.credential.cert({
