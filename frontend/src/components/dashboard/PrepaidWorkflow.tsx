@@ -37,6 +37,7 @@ interface Document {
 
 interface ScheduleItem {
   postingDate: string;
+  invoiceNumber?: string;
   vendor: string;
   amountPosted: number;
   startDate: string;
@@ -214,6 +215,49 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
       if (!res.ok) throw new Error(data.error || 'Failed to generate schedule.');
       setScheduleData(data.schedule);
       setScheduleDocId(data.documentId);
+
+      // Store schedule and docId
+      setScheduleData(data.schedule);
+      setScheduleDocId(data.documentId);
+
+      /* --------------------------------------------
+         Auto-generate monthly breakdown (former Step 3)
+      ---------------------------------------------*/
+      try {
+        // Optionally indicate secondary loading state
+        setIsLoadingBreakdown(true);
+        const breakdownRes = await fetch('/api/prepaid-schedule/add-monthly', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ documentId: data.documentId, currentMonth, currentYear }),
+        });
+        const breakdownJson = await breakdownRes.json();
+        console.log('[PrepaidWorkflow] Breakdown API response:', breakdownJson);
+        if (!breakdownRes.ok) throw new Error(breakdownJson.error || 'Failed to create monthly breakdown');
+
+        const rawSchedule = breakdownJson.schedule;
+        // Rotate breakdown according to fiscalStart
+        const rotated = rawSchedule.map((item: any) => {
+          const mb = item.monthlyBreakdown || Array(12).fill(0);
+          const rotatedMB = [...mb.slice(fiscalStart), ...mb.slice(0, fiscalStart)];
+          return { ...item, monthlyBreakdown: rotatedMB };
+        });
+        setBreakdownData(rotated);
+        // Generate month labels starting from fiscalStart
+        const labels = Array.from({ length: 12 }, (_, i) => new Date(0, (i + fiscalStart) % 12, 1).toLocaleString('default', { month: 'short' }));
+        setMonthLabels(labels);
+
+        // Jump directly to breakdown view (Step 3)
+        setCurrentStep(3);
+      } catch (breakErr: any) {
+        console.error('Error generating breakdown automatically:', breakErr);
+        setError(breakErr.message || 'Failed to generate monthly breakdown.');
+      } finally {
+        setIsLoadingBreakdown(false);
+      }
     } catch (err) {
       console.error('Error generating schedule:', err);
       setError(err instanceof Error ? err.message : 'An unknown error occurred.');
@@ -263,11 +307,11 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
 
   const handleDownloadExcel = () => {
     if (!breakdownData || !monthLabels) return;
-    const headers = ['Vendor','Posting Date','Original Cost','Start Date','End Date', 'Monthly Amount', ...monthLabels, 'Remaining Balance','Total'];
+    const headers = ['Vendor','Posting Date','Invoice #','Original Cost','Start Date','End Date', 'Monthly Amount', ...monthLabels, 'Remaining Balance','Total'];
     const rows = breakdownData.map(item => {
       const total = item.monthlyBreakdown.reduce((sum,val) => sum+val, 0);
       const remaining = item.amountPosted - total;
-      return [item.vendor, item.postingDate, item.amountPosted, item.startDate, item.endDate, item.monthlyAmount ?? (total/(item.monthlyBreakdown.filter(v=>v>0).length||1)), ...item.monthlyBreakdown, remaining, total];
+      return [item.vendor, item.postingDate, item.invoiceNumber || '', item.amountPosted, item.startDate, item.endDate, item.monthlyAmount ?? (total/(item.monthlyBreakdown.filter(v=>v>0).length||1)), ...item.monthlyBreakdown, remaining, total];
     });
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     const wb = XLSX.utils.book_new();
@@ -287,11 +331,11 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
     setError(null);
     try {
       // generate blob as above
-      const headers = ['Vendor','Posting Date','Original Cost','Start Date','End Date', 'Monthly Amount', ...monthLabels, 'Remaining Balance','Total'];
+      const headers = ['Vendor','Posting Date','Invoice #','Original Cost','Start Date','End Date', 'Monthly Amount', ...monthLabels, 'Remaining Balance','Total'];
       const rows = breakdownData.map(item => {
         const total = item.monthlyBreakdown.reduce((sum,val) => sum+val, 0);
         const remaining = item.amountPosted - total;
-        return [item.vendor, item.postingDate, item.amountPosted, item.startDate, item.endDate, item.monthlyAmount ?? (total/(item.monthlyBreakdown.filter(v=>v>0).length||1)), ...item.monthlyBreakdown, remaining, total];
+        return [item.vendor, item.postingDate, item.invoiceNumber || '', item.amountPosted, item.startDate, item.endDate, item.monthlyAmount ?? (total/(item.monthlyBreakdown.filter(v=>v>0).length||1)), ...item.monthlyBreakdown, remaining, total];
       });
 
       // Calculate totals
@@ -315,6 +359,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
       const totalRow = [
         'Total', 
         '', // Posting Date
+        '', // Invoice #
         totalOriginalCost, 
         '', // Start Date
         '', // End Date
@@ -487,6 +532,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                   <TableHeader>
                     <TableRow>
                       <TableHead>Posting Date</TableHead>
+                      <TableHead>Invoice #</TableHead>
                       <TableHead>Vendor</TableHead>
                       <TableHead className="text-right">Amount Posted</TableHead>
                       <TableHead>Start Date</TableHead>
@@ -498,6 +544,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                     {scheduleData.map((item, index) => (
                       <TableRow key={index}>
                         <TableCell>{item.postingDate}</TableCell>
+                        <TableCell>{item.invoiceNumber || ''}</TableCell>
                         <TableCell>{item.vendor}</TableCell>
                         <TableCell className="text-right">${item.amountPosted.toFixed(2)}</TableCell>
                         <TableCell>{item.startDate}</TableCell>
@@ -534,6 +581,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                 <TableRow>
                   <TableHead>Vendor</TableHead>
                   <TableHead>Posting Date</TableHead>
+                  <TableHead>Invoice #</TableHead>
                   <TableHead className="text-right">Original Cost</TableHead>
                   <TableHead className="text-right">Remaining Balance</TableHead>
                   <TableHead>Start Date</TableHead>
@@ -550,6 +598,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                   <TableRow key={idx}>
                     <TableCell>{item.vendor}</TableCell>
                     <TableCell>{item.postingDate}</TableCell>
+                    <TableCell>{item.invoiceNumber || ''}</TableCell>
                     <TableCell className="text-right">${item.amountPosted.toFixed(2)}</TableCell>
                     <TableCell className="text-right">${(item.amountPosted - item.monthlyBreakdown.reduce((sum, val) => sum + val, 0)).toFixed(2)}</TableCell>
                     <TableCell>{item.startDate}</TableCell>
@@ -563,24 +612,26 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                     </TableCell>
                   </TableRow>
                 ))}
-                {/* Sum totals for each month */}
-                <TableRow>
-                  <TableCell className="font-semibold">Total</TableCell>
-                  <TableCell></TableCell>
-                  <TableCell></TableCell>
-                  <TableCell></TableCell>
-                  <TableCell></TableCell>
-                  <TableCell></TableCell>
-                  <TableCell></TableCell>
-                  {monthLabels.map((_, i) => (
-                    <TableCell key={i} className="text-right font-semibold">
-                      ${breakdownData.reduce((sum, item) => sum + item.monthlyBreakdown[i], 0).toFixed(2)}
-                    </TableCell>
-                  ))}
-                  <TableCell className="text-right font-semibold">
-                    ${breakdownData.reduce((sum, item) => sum + item.monthlyBreakdown.reduce((s, v) => s + v, 0), 0).toFixed(2)}
-                  </TableCell>
-                </TableRow>
+                {/* Dynamic totals row */}
+                {(() => {
+                  const totalOriginalCost = breakdownData.reduce((s, it) => s + it.amountPosted, 0);
+                  const totalPerMonth = monthLabels.map((_, idx) => breakdownData.reduce((sum, it) => sum + (it.monthlyBreakdown[idx] || 0), 0));
+                  const grandTotal = totalPerMonth.reduce((s, v) => s + v, 0);
+                  const totalRemaining = totalOriginalCost - grandTotal;
+                  return (
+                    <TableRow>
+                      <TableCell className="font-semibold">Total</TableCell>
+                      <TableCell colSpan={2} />
+                      <TableCell className="text-right font-semibold">${totalOriginalCost.toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-semibold">${totalRemaining.toFixed(2)}</TableCell>
+                      <TableCell colSpan={3} />
+                      {totalPerMonth.map((val, i) => (
+                        <TableCell key={i} className="text-right font-semibold">${val.toFixed(2)}</TableCell>
+                      ))}
+                      <TableCell className="text-right font-semibold">${grandTotal.toFixed(2)}</TableCell>
+                    </TableRow>
+                  );
+                })()}
               </TableBody>
             </Table>
             {/* Finish & Save button at bottom of step 3 */}

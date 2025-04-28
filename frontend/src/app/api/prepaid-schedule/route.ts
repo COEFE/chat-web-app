@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
     const vendorIdx = colIdx('vendor');
     const postingIdx = colIdx('posting');
     const amountIdx = colIdx('amount');
+    const invoiceIdx = colIdx('invoice');
     const startIdx = colIdx('start') !== -1 ? colIdx('start') : colIdx('begin');
     const endIdx = colIdx('end') !== -1 ? colIdx('end') : colIdx('finish');
     const periodIdx = colIdx('service period') !== -1 ? colIdx('service period') : colIdx('period');
@@ -115,6 +116,7 @@ export async function POST(req: NextRequest) {
         let posting=row[postingIdx];
         if(typeof posting==='number') posting=serialToISO(posting);
         const amount=Number(row[amountIdx])||0;
+        const invoice = invoiceIdx!==-1 ? row[invoiceIdx] : '';
         let sd=startIdx!==-1?row[startIdx]:'';
         let ed=endIdx!==-1?row[endIdx]:'';
         if(typeof sd==='number') sd=serialToISO(sd);
@@ -128,7 +130,7 @@ export async function POST(req: NextRequest) {
           ed = ed || end;
         }
 
-        deterministicSchedule.push({ postingDate:String(posting), vendor:String(vendor), amountPosted:amount, startDate:String(sd), endDate:String(ed), monthlyAmount:0});
+        deterministicSchedule.push({ postingDate:String(posting), vendor:String(vendor), invoiceNumber:String(invoice), amountPosted:amount, startDate:String(sd), endDate:String(ed), monthlyAmount:0});
       }
     }
 
@@ -157,6 +159,7 @@ IMPORTANT: Produce an output object for **every transaction row** (except the he
 For each identified prepaid expense, determine the following fields:
 - postingDate: The date the expense was recorded.
 - vendor: The name of the vendor.
+- invoiceNumber: The invoice or reference number if available (empty string if unknown).
 - amountPosted: The total amount paid.
 - startDate: The date the service/benefit period begins (empty string if unknown).
 - endDate: The date the service/benefit period ends (empty string if unknown).
@@ -164,7 +167,7 @@ For each identified prepaid expense, determine the following fields:
 
 Return a JSON array with exactly the same number of objects as data rows (excluding header). No additional prose or code fences.
 Example:
-[{"postingDate":"YYYY-MM-DD","vendor":"Vendor Inc.","amountPosted":1200.00,"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","monthlyAmount":100.00}]
+[{"postingDate":"YYYY-MM-DD","vendor":"Vendor Inc.","invoiceNumber":"12345","amountPosted":1200.00,"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","monthlyAmount":100.00}]
 `;
 
     // --- Call Anthropic API --- 
@@ -193,6 +196,7 @@ Example:
     let schedule: { 
       postingDate: string; 
       vendor: string; 
+      invoiceNumber?: string;
       amountPosted: number; 
       startDate: string; 
       endDate: string; 
