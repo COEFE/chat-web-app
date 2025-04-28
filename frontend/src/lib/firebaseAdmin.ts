@@ -18,6 +18,13 @@ export function initializeAdminApp() {
   }
 
   try {
+    console.log('[firebaseAdmin] ENV vars:', {
+      GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+      FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+      FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL,
+      FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY ? '<SET>' : '<NONE>',
+    });
+
     // Prefer service account key JSON if path is provided
     if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
       console.log('[firebaseAdmin] Initializing using GOOGLE_APPLICATION_CREDENTIALS path.');
@@ -41,8 +48,19 @@ export function initializeAdminApp() {
         storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${process.env.FIREBASE_PROJECT_ID}.appspot.com`
       });
     } else {
-      console.error('[firebaseAdmin] Missing Firebase Admin credentials. Set GOOGLE_APPLICATION_CREDENTIALS or FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY environment variables.');
-      throw new Error('Missing Firebase Admin credentials.');
+      console.warn('[firebaseAdmin] No credentials in env. Trying JSON fallback...');
+      try {
+        const serviceAccount = require(process.cwd() + '/web-chat-app-fa7f0-86be58d508da.json');
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+          storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${serviceAccount.project_id}.appspot.com`,
+        });
+        console.log('[firebaseAdmin] Firebase Admin SDK initialized via JSON fallback.');
+        isInitialized = true;
+      } catch (fallbackError) {
+        console.error('[firebaseAdmin] JSON fallback failed:', fallbackError);
+        throw new Error('Missing Firebase Admin credentials and JSON fallback failed.');
+      }
     }
 
     console.log('[firebaseAdmin] Firebase Admin SDK initialized successfully.');

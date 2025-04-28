@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuth, getFirestore, getStorage } from '@/lib/firebaseAdmin';
+import { getAdminAuth as getAuth, getAdminDb as getFirestore, getAdminStorage as getStorage } from '@/lib/firebaseAdminConfig';
 import * as XLSX from 'xlsx';
 import Anthropic from '@anthropic-ai/sdk';
 
