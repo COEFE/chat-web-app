@@ -3,6 +3,7 @@ import admin from 'firebase-admin';
 import { getFirestore as getFirebaseFirestore } from 'firebase-admin/firestore';
 import { getAuth as getFirebaseAuth } from 'firebase-admin/auth';
 import { getStorage as getFirebaseStorage } from 'firebase-admin/storage';
+import fs from 'fs';
 
 let isInitialized = false;
 
@@ -23,22 +24,28 @@ export function initializeAdminApp() {
       FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
       FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL,
       FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY ? '<SET>' : '<NONE>',
+      FIREBASE_SERVICE_ACCOUNT: process.env.FIREBASE_SERVICE_ACCOUNT ? '<SET>' : '<NONE>',
     });
 
-    // Prefer service account key JSON if path is provided
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      console.log('[firebaseAdmin] Initializing using GOOGLE_APPLICATION_CREDENTIALS path.');
-      admin.initializeApp({
-        credential: admin.credential.applicationDefault(),
-        // Add storageBucket if necessary, e.g., from process.env.FIREBASE_STORAGE_BUCKET
-        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${process.env.FIREBASE_PROJECT_ID}.appspot.com`
-      });
-    } 
-    // Fallback to individual environment variables (common in Vercel)
-    else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+    // 1) Service account JSON string in env (preferred on Vercel)
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      try {
+        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+        console.log('[firebaseAdmin] Initializing using FIREBASE_SERVICE_ACCOUNT env var');
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+          storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${serviceAccount.project_id}.appspot.com`,
+        });
+      } catch (jsonErr) {
+        console.error('[firebaseAdmin] Failed parsing FIREBASE_SERVICE_ACCOUNT JSON:', jsonErr);
+      }
+    }
+
+    // 2) Individual env var credentials
+    if (!isInitialized && process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
       console.log('[firebaseAdmin] Initializing using individual environment variables.');
       const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'); // Handle escaped newline sequences correctly
-      
+
       admin.initializeApp({
         credential: admin.credential.cert({
           projectId: process.env.FIREBASE_PROJECT_ID,
@@ -48,18 +55,34 @@ export function initializeAdminApp() {
         storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${process.env.FIREBASE_PROJECT_ID}.appspot.com`
       });
     } else {
-      console.warn('[firebaseAdmin] No credentials in env. Trying JSON fallback...');
-      try {
-        const serviceAccount = require(process.cwd() + '/web-chat-app-fa7f0-86be58d508da.json');
-        admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount),
-          storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${serviceAccount.project_id}.appspot.com`,
-        });
-        console.log('[firebaseAdmin] Firebase Admin SDK initialized via JSON fallback.');
-        isInitialized = true;
-      } catch (fallbackError) {
-        console.error('[firebaseAdmin] JSON fallback failed:', fallbackError);
-        throw new Error('Missing Firebase Admin credentials and JSON fallback failed.');
+      // 3) GOOGLE_APPLICATION_CREDENTIALS path if file exists
+      if (!isInitialized && process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+        const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+        if (fs.existsSync(credPath)) {
+          console.log('[firebaseAdmin] Initializing using GOOGLE_APPLICATION_CREDENTIALS file path');
+          const serviceAccount = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
+          admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${serviceAccount.project_id}.appspot.com`,
+          });
+        } else {
+          console.warn('[firebaseAdmin] GOOGLE_APPLICATION_CREDENTIALS path not found, skipping:', credPath);
+        }
+      }
+
+      // 4) Local JSON fallback (for dev)
+      if (!isInitialized) {
+        console.warn('[firebaseAdmin] Using bundled JSON fallback credentials');
+        try {
+          const serviceAccount = require(process.cwd() + '/web-chat-app-fa7f0-86be58d508da.json');
+          admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${serviceAccount.project_id}.appspot.com`,
+          });
+        } catch (fallbackError) {
+          console.error('[firebaseAdmin] JSON fallback failed:', fallbackError);
+          throw new Error('Missing Firebase Admin credentials after all strategies.');
+        }
       }
     }
 
