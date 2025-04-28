@@ -60,12 +60,44 @@ export async function POST(req: NextRequest) {
     const vendorIdx = colIdx('vendor');
     const postingIdx = colIdx('posting');
     const amountIdx = colIdx('amount');
-    const startIdx = colIdx('start');
-    const endIdx = colIdx('end');
+    const startIdx = colIdx('start') !== -1 ? colIdx('start') : colIdx('begin');
+    const endIdx = colIdx('end') !== -1 ? colIdx('end') : colIdx('finish');
+    const periodIdx = colIdx('service period') !== -1 ? colIdx('service period') : colIdx('period');
 
     function serialToISO(serial:number){
       const epoch=new Date(Date.UTC(1899,11,30));
       return new Date(epoch.getTime()+serial*86400000).toISOString().split('T')[0];
+    }
+
+    // Helper to parse "May 1 - May 31, 2023" style strings
+    function parseServicePeriod(str: string): { start: string; end: string } {
+      if (typeof str !== 'string' || !str.includes('-')) return { start: '', end: '' };
+      try {
+        const [rawStart, rawEnd] = str.split(/\s*-\s*/); // split on dash with optional spaces
+        if (!rawStart || !rawEnd) return { start: '', end: '' };
+
+        // Extract year (assume it appears in the end part or start part)
+        const yearMatch = rawEnd.match(/(\d{4})/);
+        const year = yearMatch ? yearMatch[1] : undefined;
+
+        // Normalise helper
+        const normalise = (segment: string, fallbackYear?: string) => {
+          let cleaned = segment.replace(/,/g, '').trim();
+          // Append year if not present but fallbackYear exists
+          if (!/\d{4}/.test(cleaned) && fallbackYear) {
+            cleaned += ` ${fallbackYear}`;
+          }
+          const date = new Date(cleaned);
+          return isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
+        };
+
+        const startISO = normalise(rawStart, year);
+        const endISO = normalise(rawEnd, year);
+        return { start: startISO, end: endISO };
+      } catch (err) {
+        console.warn('[api/prepaid-schedule] Failed to parse service period string:', str, err);
+        return { start: '', end: '' };
+      }
     }
 
     let deterministicSchedule: any[] = [];
@@ -81,14 +113,17 @@ export async function POST(req: NextRequest) {
         let ed=endIdx!==-1?row[endIdx]:'';
         if(typeof sd==='number') sd=serialToISO(sd);
         if(typeof ed==='number') ed=serialToISO(ed);
+
+        // If start/end missing and combined Service Period column exists, parse it
+        if((!sd || !ed) && periodIdx!==-1){
+          const periodVal=row[periodIdx];
+          const {start, end}=parseServicePeriod(typeof periodVal==='number'?String(periodVal):periodVal);
+          sd = sd || start;
+          ed = ed || end;
+        }
+
         deterministicSchedule.push({ postingDate:String(posting), vendor:String(vendor), amountPosted:amount, startDate:String(sd), endDate:String(ed), monthlyAmount:0});
       }
-    }
-
-    if(deterministicSchedule.length>=rows.length-1 || deterministicSchedule.length>=10){
-      console.log('[api/prepaid-schedule] Deterministic parse yielded',deterministicSchedule.length,'rows; skipping AI.');
-      await docRef.update({ schedule: deterministicSchedule, status: 'generated' });
-      return NextResponse.json({ schedule: deterministicSchedule, documentId }, { status: 200 });
     }
 
     // --- Format Excel data for AI --- 
@@ -107,15 +142,22 @@ export async function POST(req: NextRequest) {
     // --- Define AI Prompt ---
     const systemPrompt = `You are an expert accounting assistant specializing in prepaid expense amortization. Analyze the following transaction data extracted from an Excel file. Identify all potential prepaid expenses.
 
-For each identified prepaid expense, determine the following:
+The sheet headers, column order, and date formats can vary widely. If explicit "start"/"end" columns are missing, derive the service period from ANY human-readable range in the row (e.g. "Apr 15 – May 14, 2023", "1 Jun 23 - 30 Jun 23", or similar) that might appear in columns such as Description, Memo, Service Period, or elsewhere.
+
+When a date range omits the year on the first date (e.g. "Apr 15 – May 14, 2023"), assume the same year unless the period obviously crosses year-end (e.g. "Dec 15 – Jan 14, 2024"). Always output ISO format YYYY-MM-DD.
+
+IMPORTANT: Produce an output object for **every transaction row** (except the header) in the sheet, even if the service period or dates are unclear. If you cannot infer startDate or endDate, leave them as empty strings "" but still include the row. Do not exclude any transaction.
+
+For each identified prepaid expense, determine the following fields:
 - postingDate: The date the expense was recorded.
 - vendor: The name of the vendor.
 - amountPosted: The total amount paid.
-- startDate: The date the service/benefit period begins.
-- endDate: The date the service/benefit period ends.
-- monthlyAmount: The calculated monthly amortization expense (amountPosted divided by number of months).
+- startDate: The date the service/benefit period begins (empty string if unknown).
+- endDate: The date the service/benefit period ends (empty string if unknown).
+- monthlyAmount: If start and end dates are available, calculate monthly amortization (amountPosted divided by number of months, rounded to 2 decimals). Otherwise 0.
 
-Respond with a single JSON array only, with no additional text or code fences. For example:
+Return a JSON array with exactly the same number of objects as data rows (excluding header). No additional prose or code fences.
+Example:
 [{"postingDate":"YYYY-MM-DD","vendor":"Vendor Inc.","amountPosted":1200.00,"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","monthlyAmount":100.00}]
 `;
 

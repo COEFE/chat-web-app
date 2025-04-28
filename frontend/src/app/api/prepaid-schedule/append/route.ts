@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuth, getFirestore, getStorage } from '@/lib/firebaseAdmin';
 import * as XLSX from 'xlsx';
+import Anthropic from '@anthropic-ai/sdk';
 
 interface BreakdownItem {
   postingDate: string;
@@ -52,68 +53,161 @@ export async function POST(req: NextRequest) {
     // Retrieve existing schedule array; if missing, attempt to reconstruct from the workbook
     let existingSchedule: any[] = Array.isArray(docData.schedule) ? docData.schedule : [];
 
-    if (existingSchedule.length === 0) {
-      try {
-        const fileUrl = docData.downloadURL;
-        if (fileUrl) {
-          console.log('[api/prepaid-schedule/append] Attempting to parse schedule from file', fileUrl);
-          const resp = await fetch(fileUrl);
-          if (resp.ok) {
-            const ab = await resp.arrayBuffer();
-            const wb = XLSX.read(new Uint8Array(ab), { type: 'array', sheetStubs: true });
-            const sheetName = wb.SheetNames[0];
-            const ws = wb.Sheets[sheetName];
-            const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-            if (data.length > 1) {
-              const normalize = (s: any) => (typeof s === 'string' ? s.toLowerCase().replace(/[^a-z]/g, '') : '');
-              const header = data[0].map(normalize);
-              const findIdx = (patterns: string[]) => header.findIndex((h: string) => patterns.some(p => h.includes(p)));
-              const vendorIdx = findIdx(['vendor','vendorname','payee']);
-              const postingIdx = findIdx(['postingdate','postdate','date']);
-              const amountIdx = findIdx(['originalcost','amountposted','amount','cost']);
-              const startIdx = findIdx(['startdate','begindate','servicebegin','servicestart']);
-              const endIdx = findIdx(['enddate','finishdate','serviceend','servicefinish']);
-              const monthIdxStart = findIdx(['january','jan']);
-              const monthIdxEnd = monthIdxStart !== -1 ? monthIdxStart + 11 : -1;
+    // Global container for sheet-derived month headers
+    let monthHeadersFromSheet: string[] | null = null;
 
+    // Fetch workbook for header detection and optional schedule reconstruction
+    const fileUrl = docData.downloadURL;
+    if (fileUrl) {
+      try {
+        const resp = await fetch(fileUrl);
+        if (resp.ok) {
+          const ab = await resp.arrayBuffer();
+          const wb = XLSX.read(new Uint8Array(ab), { type: 'array', sheetStubs: true });
+          const sheetName = wb.SheetNames[0];
+          const ws = wb.Sheets[sheetName];
+          const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+          if (data.length > 1) {
+            // Normalize headers and detect month columns
+            const normalize = (s: any) => (typeof s === 'string' ? s.toLowerCase().replace(/[^a-z]/g, '') : '');
+            const headerNormalized = data[0].map(normalize);
+            const baseMonths = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            const baseMonthsNormalized = baseMonths.map(normalize);
+            // Detect month columns by full name or 3-letter abbreviation
+            const monthIndices: number[] = [];
+            headerNormalized.forEach((h, i) => {
+              const fullIdx = baseMonthsNormalized.indexOf(h);
+              const abbrIdx = baseMonthsNormalized.findIndex(m => m.startsWith(h));
+              if (fullIdx !== -1 || abbrIdx !== -1) monthIndices.push(i);
+            });
+            console.log('[api/prepaid-schedule/append] Debug monthIndices:', monthIndices);
+            if (monthIndices.length === 12) {
+              monthHeadersFromSheet = monthIndices.map(i => String(data[0][i]));
+              console.log('[api/prepaid-schedule/append] Captured sheet monthHeaders:', monthHeadersFromSheet);
+            }
+            // Identify other column indices
+            const vendorIdx = headerNormalized.findIndex(h => ['vendor','vendorname','payee'].some(p => h.includes(p)));
+            const postingIdx = headerNormalized.findIndex(h => ['postingdate','postdate','date'].some(p => h.includes(p)));
+            const amountIdx = headerNormalized.findIndex(h => ['originalcost','amountposted','amount','cost'].some(p => h.includes(p)));
+            const startIdx = headerNormalized.findIndex(h => ['startdate','begindate','servicebegin','servicestart'].some(p => h.includes(p)));
+            const endIdx = headerNormalized.findIndex(h => ['enddate','finishdate','serviceend','servicefinish'].some(p => h.includes(p)));
+            // Reconstruct existingSchedule if empty
+            if (existingSchedule.length === 0) {
               const bodyRows = data.slice(1).filter(row => row.some(cell => cell !== '') && (vendorIdx === -1 ? true : String(row[vendorIdx]).toLowerCase() !== 'total'));
               existingSchedule = bodyRows.map(row => {
-                const monthly = monthIdxStart !== -1 ? row.slice(monthIdxStart, monthIdxEnd + 1).map((v: any)=>Number(v)||0) : [];
-
-                const postingVal = row[postingIdx];
-                let postingDate = postingVal;
-                if (typeof postingVal === 'number') {
-                  // Convert Excel serial to date string (assuming 1900 date system)
+                const monthly = monthIndices.length === 12 ? monthIndices.map(i => Number(row[i]) || 0) : [];
+                let postingDate: any = row[postingIdx];
+                if (typeof row[postingIdx] === 'number') {
                   const epoch = new Date(Date.UTC(1899,11,30));
-                  const date = new Date(epoch.getTime() + postingVal * 86400000);
-                  postingDate = date.toISOString().split('T')[0];
+                  postingDate = new Date(epoch.getTime() + row[postingIdx] * 86400000).toISOString().split('T')[0];
                 }
-
+                const monthlyAmount = monthly.length ? monthly.reduce((s, v) => s + v, 0) / (monthly.filter(v => v !== 0).length || 1) : 0;
                 return {
                   vendor: row[vendorIdx] ?? '',
                   postingDate,
                   amountPosted: Number(row[amountIdx]) || 0,
                   startDate: row[startIdx] ?? '',
                   endDate: row[endIdx] ?? '',
-                  monthlyAmount: monthly.reduce((s:number,v:number)=>s+v,0)/(monthly.filter((v:number)=>v!==0).length||1),
+                  monthlyAmount,
                   monthlyBreakdown: monthly,
                 };
               });
               console.log('[api/prepaid-schedule/append] Parsed', existingSchedule.length, 'rows from workbook');
             }
-          } else {
-            console.warn('[api/prepaid-schedule/append] Failed to download file for parsing, status', resp.status);
           }
+        } else {
+          console.warn('[api/prepaid-schedule/append] Failed to download file for parsing, status', resp.status);
         }
-      } catch(parseErr) {
+      } catch (parseErr) {
         console.error('[api/prepaid-schedule/append] Error parsing workbook:', parseErr);
       }
     }
     console.log('[api/prepaid-schedule/append] existingSchedule length=', existingSchedule.length);
 
-    // Merge schedules by simple concatenation
-    const mergedSchedule = existingSchedule.concat(breakdownData);
-    console.log('[api/prepaid-schedule/append] Merged schedule length=', mergedSchedule.length);
+    // ------------------- AI Inference Section -------------------
+    const anthropic = new Anthropic(); // API key via env
+
+    // Determine headers to use: sheet-originated headers first
+    let detectedMonthHeaders: string[] = [];
+
+    if (monthHeadersFromSheet && monthHeadersFromSheet.length === 12) {
+      detectedMonthHeaders = monthHeadersFromSheet;
+    } else if (docData.monthHeaders && Array.isArray(docData.monthHeaders)) {
+      detectedMonthHeaders = docData.monthHeaders;
+    } else {
+      // fallback from fiscalStartMonth
+      const buildMonthHeadersLocal = (startIdx:number)=>{
+        const base=['January','February','March','April','May','June','July','August','September','October','November','December'];
+        return base.slice(startIdx).concat(base.slice(0,startIdx));
+      };
+      detectedMonthHeaders = buildMonthHeadersLocal(typeof docData.fiscalStartMonth === 'number' ? docData.fiscalStartMonth : 0);
+    }
+    console.log('[api/prepaid-schedule/append] Using detectedMonthHeaders:', detectedMonthHeaders);
+
+    // Determine Fiscal Start Month Deterministically
+    const baseMonths = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    let fiscalStartMonth = 0; // Default to January
+    if (detectedMonthHeaders.length === 12) {
+      const firstMonth = detectedMonthHeaders[0].toLowerCase();
+      const idx = baseMonths.findIndex(m => m.toLowerCase() === firstMonth);
+      if (idx !== -1) {
+        fiscalStartMonth = idx;
+      }
+    }
+    console.log(`[api/prepaid-schedule/append] Determined fiscalStartMonth: ${fiscalStartMonth} (${baseMonths[fiscalStartMonth]})`);
+
+    // Use provided currentMonth/Year from original document
+    const providedMonth = typeof docData.currentMonth === 'number' ? docData.currentMonth : 0;
+    const providedYear = typeof docData.currentYear === 'number' ? docData.currentYear : new Date().getFullYear();
+    console.log(`[api/prepaid-schedule/append] Using provided currentMonth: ${providedMonth}, currentYear: ${providedYear}`);
+
+    // Build prompt
+    const systemPrompt = `You are an expert accounting assistant specialising in prepaid expense schedules.
+The fiscal year starts in month ${fiscalStartMonth} (${baseMonths[fiscalStartMonth]}). The month headers must remain exactly as provided.
+1. Use the provided currentMonth (${providedMonth}) and currentYear (${providedYear}); do NOT infer or modify them.
+2. For each transaction in newTransactions: compute its monthlyBreakdown array (length 12). The array indices MUST align exactly with the provided monthHeaders (index 0 = ${detectedMonthHeaders[0]}, index 11 = ${detectedMonthHeaders[11]}). Calculate based on each transaction's startDate, endDate, and amountPosted.
+3. Append these processed new transactions to the end of the existingSchedule.
+4. Return JSON ONLY with the following exact structure (no additional keys or prose):
+{"currentMonth":${providedMonth},"currentYear":${providedYear},"mergedSchedule":[ /* existingSchedule then processed newTransactions */ ]}`;
+
+    const userContentObj = {
+      monthHeaders: detectedMonthHeaders,
+      existingSchedule,
+      newTransactions: breakdownData,
+      currentMonth: providedMonth,
+      currentYear: providedYear,
+    };
+
+    let aiMerged: any = null;
+    try {
+      const aiResp = await anthropic.messages.create({
+        model: 'claude-3-5-haiku-20241022',
+        max_tokens: 8192,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: JSON.stringify(userContentObj) }
+        ]
+      });
+      const raw = aiResp.content && aiResp.content.length>0 && aiResp.content[0].type==='text' ? aiResp.content[0].text.trim() : '';
+      aiMerged = JSON.parse(raw);
+    } catch(err){
+      console.error('[api/prepaid-schedule/append] AI merge failed:', err);
+    }
+
+    let mergedSchedule: any[];
+    let currentMonth = providedMonth;
+    let currentYear = providedYear;
+
+    if(aiMerged && Array.isArray(aiMerged.mergedSchedule)){
+      mergedSchedule = aiMerged.mergedSchedule;
+      currentMonth = aiMerged.currentMonth ?? providedMonth;
+      currentYear = aiMerged.currentYear ?? providedYear;
+      console.log('[api/prepaid-schedule/append] AI produced merged schedule length', mergedSchedule.length);
+    } else {
+      // Fallback simple merge
+      console.warn('[api/prepaid-schedule/append] Falling back to simple concatenation.');
+      mergedSchedule = existingSchedule.concat(breakdownData);
+    }
 
     // We'll create a NEW document rather than modifying the existing one
     // Copy relevant metadata from original doc to preserve folder placement etc.
@@ -140,6 +234,9 @@ export async function POST(req: NextRequest) {
       updatedAt: new Date(),
       parentId: documentId,
       schedule: mergedSchedule,
+      fiscalStartMonth,
+      currentMonth,
+      currentYear,
     });
     const newDocId = newDocRef.id;
 
@@ -147,9 +244,15 @@ export async function POST(req: NextRequest) {
        Re-generate Excel workbook to reflect updated schedule
     ---------------------------------------------------------*/
     try {
-      const monthHeaders = [
-        'January','February','March','April','May','June','July','August','September','October','November','December'
-      ];
+      // Helper to build month header array starting at fiscalStartMonth
+      function buildMonthHeaders(startIdx: number) {
+        const base = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        return base.slice(startIdx).concat(base.slice(0, startIdx));
+      }
+
+      const monthHeaders = detectedMonthHeaders && detectedMonthHeaders.length === 12
+        ? detectedMonthHeaders
+        : buildMonthHeaders(fiscalStartMonth);
       const headersRow = ['Vendor','Posting Date','Original Cost','Start Date','End Date',...monthHeaders,'Remaining Balance','Total'];
       const dataRows = mergedSchedule.map((item: any) => {
         const total = (item.monthlyBreakdown||[]).reduce((s: number,v: number)=>s+v,0);
@@ -200,7 +303,16 @@ export async function POST(req: NextRequest) {
       newDownloadURL = fileRef.publicUrl();
 
       // Update document with new file info
-      await newDocRef.update({ downloadURL: newDownloadURL, storagePath: newStoragePath, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', updatedAt: new Date() });
+      await newDocRef.update({ 
+        downloadURL: newDownloadURL, 
+        storagePath: newStoragePath, 
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+        updatedAt: new Date(), 
+        monthHeaders: detectedMonthHeaders, // Save the correct headers used
+        fiscalStartMonth, // Save the determined fiscal start
+        currentMonth, // Save the inferred current month
+        currentYear // Save the inferred current year
+      });
 
       console.log('[api/prepaid-schedule/append] Excel regenerated and uploaded');
     } catch(excelErr) {

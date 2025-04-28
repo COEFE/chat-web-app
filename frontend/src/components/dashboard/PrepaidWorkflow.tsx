@@ -77,6 +77,10 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
   const [isAppendModalOpen, setIsAppendModalOpen] = useState(false);
   const [isLoadingAppend, setIsLoadingAppend] = useState(false);
   const [appendError, setAppendError] = useState<string | null>(null);
+  const [fiscalStart, setFiscalStart] = useState<number>(0); // 0=Jan
+  const today = new Date();
+  const [currentMonth, setCurrentMonth] = useState<number>(today.getMonth());
+  const [currentYear, setCurrentYear] = useState<number>(today.getFullYear());
 
   // Load previously used schedule ID from localStorage
   useEffect(() => {
@@ -202,7 +206,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ documentId: selectedDocId }),
+        body: JSON.stringify({ documentId: selectedDocId, currentMonth, currentYear }),
       });
       const data = await res.json();
       console.log('[PrepaidWorkflow] Schedule API response:', data);
@@ -229,15 +233,20 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ documentId: scheduleDocId }),
+        body: JSON.stringify({ documentId: scheduleDocId, currentMonth, currentYear }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to augment schedule')
-      setBreakdownData(data.schedule);
-      // Fixed month labels January through December
-      const labels = Array.from({ length: 12 }, (_, i) =>
-        new Date(0, i, 1).toLocaleString('default', { month: 'short' })
-      );
+      const rawSchedule = data.schedule;
+      // Rotate breakdown according to fiscalStart
+      const rotated = rawSchedule.map((item: any) => {
+        const mb = item.monthlyBreakdown || Array(12).fill(0);
+        const rotatedMB = [...mb.slice(fiscalStart), ...mb.slice(0, fiscalStart)];
+        return { ...item, monthlyBreakdown: rotatedMB };
+      });
+      setBreakdownData(rotated);
+      // Generate month labels starting from fiscalStart
+      const labels = Array.from({ length: 12 }, (_, i) => new Date(0, (i + fiscalStart) % 12, 1).toLocaleString('default', { month: 'short' }));
       setMonthLabels(labels);
       setCurrentStep(3);
     } catch (err: any) {
@@ -253,11 +262,11 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
 
   const handleDownloadExcel = () => {
     if (!breakdownData || !monthLabels) return;
-    const headers = ['Vendor','Posting Date','Original Cost','Start Date','End Date', ...monthLabels, 'Remaining Balance','Total'];
+    const headers = ['Vendor','Posting Date','Original Cost','Start Date','End Date', 'Monthly Amount', ...monthLabels, 'Remaining Balance','Total'];
     const rows = breakdownData.map(item => {
       const total = item.monthlyBreakdown.reduce((sum,val) => sum+val, 0);
       const remaining = item.amountPosted - total;
-      return [item.vendor, item.postingDate, item.amountPosted, item.startDate, item.endDate, ...item.monthlyBreakdown, remaining, total];
+      return [item.vendor, item.postingDate, item.amountPosted, item.startDate, item.endDate, item.monthlyAmount ?? (total/(item.monthlyBreakdown.filter(v=>v>0).length||1)), ...item.monthlyBreakdown, remaining, total];
     });
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     const wb = XLSX.utils.book_new();
@@ -277,11 +286,11 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
     setError(null);
     try {
       // generate blob as above
-      const headers = ['Vendor','Posting Date','Original Cost','Start Date','End Date', ...monthLabels, 'Remaining Balance','Total'];
+      const headers = ['Vendor','Posting Date','Original Cost','Start Date','End Date', 'Monthly Amount', ...monthLabels, 'Remaining Balance','Total'];
       const rows = breakdownData.map(item => {
         const total = item.monthlyBreakdown.reduce((sum,val) => sum+val, 0);
         const remaining = item.amountPosted - total;
-        return [item.vendor, item.postingDate, item.amountPosted, item.startDate, item.endDate, ...item.monthlyBreakdown, remaining, total];
+        return [item.vendor, item.postingDate, item.amountPosted, item.startDate, item.endDate, item.monthlyAmount ?? (total/(item.monthlyBreakdown.filter(v=>v>0).length||1)), ...item.monthlyBreakdown, remaining, total];
       });
 
       // Calculate totals
@@ -308,6 +317,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
         totalOriginalCost, 
         '', // Start Date
         '', // End Date
+        '', // Monthly Amount
         ...monthlyTotals, 
         totalRemaining, 
         grandTotal
@@ -380,6 +390,9 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
     }
   };
 
+  const monthOptions = Array.from({length:12},(_,i)=>({value:i,label:new Date(0,i,1).toLocaleString('default',{month:'long'})}));
+  const yearOptions = Array.from({length:6},(_,i)=>today.getFullYear()-2+i); // range currentYear-2 to +3
+
   return (
     <Card>
       <CardHeader>
@@ -433,6 +446,22 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
               />
             </div>
             {error && <p className="text-sm text-red-600">{error}</p>}
+            <div className="mt-4">
+              <Label htmlFor="fiscalStart" className="mr-2">Fiscal Year Start Month</Label>
+              <select id="fiscalStart" className="border rounded p-2" value={fiscalStart} onChange={(e)=>setFiscalStart(parseInt(e.target.value))}>
+                {monthOptions.map(opt=>(<option key={opt.value} value={opt.value}>{opt.label}</option>))}
+              </select>
+            </div>
+            <div className="mt-4">
+              <Label htmlFor="currentMonth" className="mr-2">Current Month</Label>
+              <select id="currentMonth" className="border rounded p-2" value={currentMonth} onChange={(e)=>setCurrentMonth(parseInt(e.target.value))}>
+                {monthOptions.map(opt=>(<option key={opt.value} value={opt.value}>{opt.label}</option>))}
+              </select>
+              <Label htmlFor="currentYear" className="ml-4 mr-2">Current Year</Label>
+              <select id="currentYear" className="border rounded p-2" value={currentYear} onChange={(e)=>setCurrentYear(parseInt(e.target.value))}>
+                {yearOptions.map(y=>(<option key={y} value={y}>{y}</option>))}
+              </select>
+            </div>
           </div>
         )}
         {currentStep === 2 && (
@@ -508,6 +537,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                   <TableHead className="text-right">Remaining Balance</TableHead>
                   <TableHead>Start Date</TableHead>
                   <TableHead>End Date</TableHead>
+                  <TableHead className="text-right">Monthly Dep Amount</TableHead>
                   {monthLabels.map((label, i) => (
                     <TableHead key={i}>{label}</TableHead>
                   ))}
@@ -523,6 +553,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                     <TableCell className="text-right">${(item.amountPosted - item.monthlyBreakdown.reduce((sum, val) => sum + val, 0)).toFixed(2)}</TableCell>
                     <TableCell>{item.startDate}</TableCell>
                     <TableCell>{item.endDate}</TableCell>
+                    <TableCell className="text-right">${item.monthlyAmount?.toFixed(2) ?? ((item.monthlyBreakdown.reduce((s,v)=>s+v,0)/(item.monthlyBreakdown.filter(v=>v>0).length||1)).toFixed(2))}</TableCell>
                     {item.monthlyBreakdown.map((val, j) => (
                       <TableCell key={j} className="text-right">${val.toFixed(2)}</TableCell>
                     ))}
@@ -534,6 +565,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                 {/* Sum totals for each month */}
                 <TableRow>
                   <TableCell className="font-semibold">Total</TableCell>
+                  <TableCell></TableCell>
                   <TableCell></TableCell>
                   <TableCell></TableCell>
                   <TableCell></TableCell>

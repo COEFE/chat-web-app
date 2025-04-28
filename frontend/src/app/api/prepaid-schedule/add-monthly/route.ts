@@ -53,6 +53,7 @@ Respond ONLY with the complete updated JSON array and nothing else.`;
     /* ------------------------------------------------------------------
        Call Anthropic and robustly extract the JSON array from the reply
     ------------------------------------------------------------------*/
+    const { currentMonth = null, currentYear = null } = body;
     const maxAttempts = 3;
     let updatedSchedule: any = null;
     let lastSanitized = '';
@@ -138,6 +139,63 @@ Respond ONLY with the complete updated JSON array and nothing else.`;
     }
 
     console.log('[api/prepaid-schedule/add-monthly] Parsed updatedSchedule length:', updatedSchedule.length);
+
+    // --- Deterministically compute monthly breakdown to ensure totals align ---
+    function monthsBetweenInclusive(start: Date, end: Date) {
+      return (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1;
+    }
+
+    function generateBreakdown(item: any) {
+      const start = new Date(item.startDate);
+      const end = new Date(item.endDate);
+      if (isNaN(start.valueOf()) || isNaN(end.valueOf()) || start > end) return item;
+      const totalMonths = monthsBetweenInclusive(start, end);
+      if (totalMonths <= 0) return item;
+      const monthlyAmt = Number((item.amountPosted / totalMonths).toFixed(2));
+      const breakdown = Array(12).fill(0);
+      for (let i = 0; i < totalMonths; i++) {
+        const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+        const idx = d.getMonth();
+        breakdown[idx] += monthlyAmt;
+      }
+      // adjust rounding difference to ensure sum equals amountPosted
+      const diff = Number((item.amountPosted - breakdown.reduce((s: number, v: number) => s + v, 0)).toFixed(2));
+      if (Math.abs(diff) >= 0.01) {
+        // add diff to last month of service period
+        breakdown[(new Date(end)).getMonth()] += diff;
+      }
+      return { ...item, monthlyAmount: monthlyAmt, monthlyBreakdown: breakdown };
+    }
+
+    updatedSchedule = updatedSchedule.map(generateBreakdown);
+
+    if (currentMonth !== null && currentYear !== null) {
+      // catch-up depreciation when prior months exist
+      const cutOff = new Date(currentYear, currentMonth, 1);
+      updatedSchedule = updatedSchedule.map((item: any) => {
+        const mb = item.monthlyBreakdown;
+        if (!Array.isArray(mb) || mb.length !== 12) return item;
+        const start = new Date(item.startDate);
+        const monthsDiffTotal = (cutOff.getFullYear() - start.getFullYear()) * 12 + (cutOff.getMonth() - start.getMonth());
+        if (monthsDiffTotal <= 0) return item; // no catch-up needed
+
+        // limit to array length
+        const monthsDiff = Math.min(monthsDiffTotal, mb.length);
+        let catchUp = 0;
+        const adjusted = mb.map((val: number, idx: number) => {
+          if (idx < monthsDiff) {
+            catchUp += val;
+            return 0;
+          }
+          return val;
+        });
+        const currentIdx = currentMonth;
+        if (currentIdx >= 0 && currentIdx < adjusted.length) {
+          adjusted[currentIdx] += catchUp;
+        }
+        return { ...item, monthlyBreakdown: adjusted };
+      });
+    }
 
     // Update Firestore with monthly breakdown if using documentId
     if (docRef) {
