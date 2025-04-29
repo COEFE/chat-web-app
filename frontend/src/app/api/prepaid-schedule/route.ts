@@ -28,7 +28,8 @@ export async function POST(req: NextRequest) {
     const userId = decodedToken.uid;
 
     // Parse body
-    const { documentId } = await req.json();
+    const bodyJson = await req.json();
+    const { documentId, mapping = {} } = bodyJson;
     if (!documentId) {
       return NextResponse.json({ error: 'No documentId provided' }, { status: 400 });
     }
@@ -61,15 +62,32 @@ export async function POST(req: NextRequest) {
     /* -----------------------------------------------
        Deterministic extraction of prepaid rows
     -----------------------------------------------*/
-    const header = rows.length ? rows[0].map((h:any)=>typeof h==='string'?h.toLowerCase().trim():'') : [];
-    const colIdx = (label:string)=> header.findIndex((h:string)=>h.includes(label));
-    const vendorIdx = colIdx('vendor');
-    const postingIdx = colIdx('posting');
-    const amountIdx = colIdx('amount');
-    const invoiceIdx = colIdx('invoice');
-    const startIdx = colIdx('start') !== -1 ? colIdx('start') : colIdx('begin');
-    const endIdx = colIdx('end') !== -1 ? colIdx('end') : colIdx('finish');
-    const periodIdx = colIdx('service period') !== -1 ? colIdx('service period') : colIdx('period');
+    // Dynamic header mapping
+    const headerRaw = rows.length ? (rows[0] as any[]).map(h => String(h).trim()) : [];
+    const headerNormalized = headerRaw.map(h => h.toLowerCase());
+    const baseKeys = ['vendor','posting','invoice','amount','start','end','period'];
+
+    const headerIndices: Record<string, number> = {};
+    for (const [key, label] of Object.entries(mapping as Record<string,string>)) {
+      headerIndices[key] = headerNormalized.findIndex(h => h === String(label).toLowerCase().trim());
+    }
+
+    // Ensure default keys still map even if not explicitly provided
+    baseKeys.forEach(def => {
+      if (!(def in headerIndices)) {
+        const fallbackLabel = def; // use the key itself as fallback label
+        headerIndices[def] = headerNormalized.findIndex(h => h === fallbackLabel);
+      }
+    });
+
+    // Helper getters for main indices
+    const vendorIdx = headerIndices.vendor ?? -1;
+    const postingIdx = headerIndices.posting ?? -1;
+    const invoiceIdx = headerIndices.invoice ?? -1;
+    const amountIdx = headerIndices.amount ?? -1;
+    const startIdx = headerIndices.start ?? -1;
+    const endIdx = headerIndices.end ?? -1;
+    const periodIdx = headerIndices.period ?? -1;
 
     function serialToISO(serial:number){
       const epoch=new Date(Date.UTC(1899,11,30));
@@ -112,6 +130,8 @@ export async function POST(req: NextRequest) {
       for(let i=1;i<rows.length;i++){
         const row=rows[i];
         if(!row || !row[vendorIdx]) continue;
+
+        // core fields
         const vendor=row[vendorIdx];
         let posting=row[postingIdx];
         if(typeof posting==='number') posting=serialToISO(posting);
@@ -130,7 +150,15 @@ export async function POST(req: NextRequest) {
           ed = ed || end;
         }
 
-        deterministicSchedule.push({ postingDate:String(posting), vendor:String(vendor), invoiceNumber:String(invoice), amountPosted:amount, startDate:String(sd), endDate:String(ed), monthlyAmount:0});
+        const item: any = { postingDate:String(posting), vendor:String(vendor), invoiceNumber:String(invoice), amountPosted:amount, startDate:String(sd), endDate:String(ed), monthlyAmount:0 };
+
+        // Add any additional mapped columns
+        for (const [key, idx] of Object.entries(headerIndices)) {
+          if(baseKeys.includes(key)) continue; // already handled
+          item[key] = idx !== -1 ? row[idx] : '';
+        }
+
+        deterministicSchedule.push(item);
       }
     }
 
@@ -148,27 +176,17 @@ export async function POST(req: NextRequest) {
     console.log('[api/prepaid-schedule] Formatted Excel data length:', formattedExcelData.length);
 
     // --- Define AI Prompt ---
-    const systemPrompt = `You are an expert accounting assistant specializing in prepaid expense amortization. Analyze the following transaction data extracted from an Excel file. Identify all potential prepaid expenses.
+    const extraKeys = Object.keys(mapping as Record<string,string>).filter(k => !baseKeys.includes(k));
+    const extraInstr = extraKeys.length
+      ? ` In addition, include the field(s) ${extraKeys.join(', ')} exactly as they appear in the source row. Do not rename them or modify their values.`
+      : '';
 
-The sheet headers, column order, and date formats can vary widely. If explicit "start"/"end" columns are missing, derive the service period from ANY human-readable range in the row (e.g. "Apr 15 – May 14, 2023", "1 Jun 23 - 30 Jun 23", or similar) that might appear in columns such as Description, Memo, Service Period, or elsewhere.
-
-When a date range omits the year on the first date (e.g. "Apr 15 – May 14, 2023"), assume the same year unless the period obviously crosses year-end (e.g. "Dec 15 – Jan 14, 2024"). Always output ISO format YYYY-MM-DD.
-
-IMPORTANT: Produce an output object for **every transaction row** (except the header) in the sheet, even if the service period or dates are unclear. If you cannot infer startDate or endDate, leave them as empty strings "" but still include the row. Do not exclude any transaction.
-
-For each identified prepaid expense, determine the following fields:
-- postingDate: The date the expense was recorded.
-- vendor: The name of the vendor.
-- invoiceNumber: The invoice or reference number if available (empty string if unknown).
-- amountPosted: The total amount paid.
-- startDate: The date the service/benefit period begins (empty string if unknown).
-- endDate: The date the service/benefit period ends (empty string if unknown).
-- monthlyAmount: If start and end dates are available, calculate monthly amortization (amountPosted divided by number of months, rounded to 2 decimals). Otherwise 0.
-
-Return a JSON array with exactly the same number of objects as data rows (excluding header). No additional prose or code fences.
-Example:
-[{"postingDate":"YYYY-MM-DD","vendor":"Vendor Inc.","invoiceNumber":"12345","amountPosted":1200.00,"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","monthlyAmount":100.00}]
-`;
+    const systemPrompt = `You are an expert accounting assistant specializing in prepaid expense amortization.` +
+      ` Analyze the following transaction data extracted from an Excel file. Identify all potential prepaid expenses.` +
+      ` For each prepaid expense return a JSON object with:` +
+      ` vendor (string), postingDate (YYYY-MM-DD), invoiceNumber (string or empty), amountPosted (number), startDate (YYYY-MM-DD), endDate (YYYY-MM-DD).` +
+      `${extraInstr}` +
+      ` Respond ONLY with a JSON array, no markdown.`;
 
     // --- Call Anthropic API --- 
     console.log('[api/prepaid-schedule] Calling Anthropic API...');
@@ -193,15 +211,7 @@ Example:
       console.log('[api/prepaid-schedule] Raw AI response content missing or not text.');
     }
 
-    let schedule: { 
-      postingDate: string; 
-      vendor: string; 
-      invoiceNumber?: string;
-      amountPosted: number; 
-      startDate: string; 
-      endDate: string; 
-      monthlyAmount: number; 
-    }[] = [];
+    let schedule: any[] = [];
     try {
       if (aiResponse.content && aiResponse.content.length > 0 && aiResponse.content[0].type === 'text') {
         const rawText = aiResponse.content[0].text.trim();

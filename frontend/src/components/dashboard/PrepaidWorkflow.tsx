@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Upload, FileText, CheckCircle, XCircle, Loader2, Calendar } from 'lucide-react';
+import { Upload, FileText, CheckCircle, XCircle, Loader2, Calendar, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from "@/components/ui/use-toast";
 import { FileUpload } from '@/components/dashboard/FileUpload';
@@ -82,6 +82,56 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
   const today = new Date();
   const [currentMonth, setCurrentMonth] = useState<number>(today.getMonth());
   const [currentYear, setCurrentYear] = useState<number>(today.getFullYear());
+
+  // Dynamic field mapping state
+  const [fieldHeaders, setFieldHeaders] = useState<string[]>([]);
+  const [isLoadingFields, setIsLoadingFields] = useState(false);
+  const [mapping, setMapping] = useState<Record<string,string>>({ vendor:'vendor', posting:'posting', invoice:'invoice', amount:'amount', start:'start', end:'end', period:'service period' });
+  const [mappingConfirmed, setMappingConfirmed] = useState(false);
+  const [addingField, setAddingField] = useState(false);
+  const [newFieldName, setNewFieldName] = useState('');
+  const [newFieldHeader, setNewFieldHeader] = useState('');
+  const [displayOrder, setDisplayOrder] = useState<string[]>(() => Object.keys(mapping));
+  // Reordering helpers
+  const swapUp = (idx: number) => setDisplayOrder(prev => { const a = [...prev]; [a[idx-1],a[idx]]=[a[idx],a[idx-1]]; return a; });
+  const swapDown = (idx: number) => setDisplayOrder(prev => { const a = [...prev]; [a[idx],a[idx+1]]=[a[idx+1],a[idx]]; return a; });
+  // Map keys to properties for dynamic tables
+  const propKeyMap: Record<string, (item: any) => React.ReactNode> = {
+    vendor: it => it.vendor,
+    posting: it => it.postingDate,
+    invoice: it => it.invoiceNumber || '',
+    amount: it => it.amountPosted,
+    start: it => it.startDate,
+    end: it => it.endDate,
+    period: it => `${it.startDate} - ${it.endDate}`,
+  };
+
+  const formatMoney = (val:any) => {
+    const num = typeof val === 'number' ? val : Number(val);
+    return isNaN(num) ? '' : `$${num.toFixed(2)}`;
+  };
+
+  const renderCell = (item: any, key: string) => {
+    if (propKeyMap[key]) return propKeyMap[key](item);
+    const val = item[key];
+    if (val === undefined || val === null) return '';
+    if (typeof val === 'number') return val.toString();
+    return String(val);
+  };
+
+  const handleBreakdownCellChange = (rowIdx: number, monthIdx: number, value: string) => {
+    const num = Number(value);
+    setBreakdownData(prev => prev.map((item, i) => {
+      if (i !== rowIdx) return item;
+      const mb = [...item.monthlyBreakdown];
+      mb[monthIdx] = isNaN(num) ? 0 : num;
+      return { ...item, monthlyBreakdown: mb };
+    }));
+  };
+
+  const handleFieldCellChange = (rowIdx:number, key:string, value:string) => {
+    setBreakdownData(prev => prev.map((item,i)=> i===rowIdx ? { ...item, [key]: value } : item));
+  };
 
   // Load previously used schedule ID from localStorage
   useEffect(() => {
@@ -208,7 +258,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ documentId: selectedDocId, currentMonth, currentYear }),
+        body: JSON.stringify({ documentId: selectedDocId, currentMonth, currentYear, mapping }),
       });
       const data = await res.json();
       console.log('[PrepaidWorkflow] Schedule API response:', data);
@@ -436,8 +486,30 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
     }
   };
 
+  const [isEditingBreakdown, setIsEditingBreakdown] = useState(false);
+
   const monthOptions = Array.from({length:12},(_,i)=>({value:i,label:new Date(0,i,1).toLocaleString('default',{month:'long'})}));
   const yearOptions = Array.from({length:6},(_,i)=>today.getFullYear()-2+i); // range currentYear-2 to +3
+
+  // Fetch available headers for mapping when doc selected
+  useEffect(() => {
+    if (!selectedDocId || !user) return;
+    (async () => {
+      setIsLoadingFields(true);
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch(`/api/prepaid-schedule/fields?documentId=${selectedDocId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const json = await res.json();
+        if (res.ok && Array.isArray(json.headers)) setFieldHeaders(json.headers);
+      } catch (e) {
+        console.error('Error fetching headers', e);
+      } finally {
+        setIsLoadingFields(false);
+      }
+    })();
+  }, [selectedDocId, user]);
 
   return (
     <Card>
@@ -512,10 +584,93 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
         )}
         {currentStep === 2 && (
           <div className="space-y-4">
-            {!scheduleData && (
-              <Button onClick={handleGenerateSchedule} disabled={isLoadingSchedule || !selectedDocId} className="mb-4">
+            {/* Field mapping before schedule generation */}
+            {!mappingConfirmed && (
+              <div className="space-y-2 p-4 border rounded">
+                <h3 className="text-lg font-semibold">Map Columns</h3>
+                {isLoadingFields ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  displayOrder.map((key, idx) => {
+                    const header = mapping[key];
+                    const labelMap: Record<string,string> = {
+                      vendor: 'Vendor', posting: 'Posting Date', invoice: 'Invoice #',
+                      amount: 'Amount', start: 'Start Date', end: 'End Date', period: 'Service Period'
+                    };
+                    const label = labelMap[key] || key;
+                    return (
+                      <div key={key} className="flex items-center space-x-2">
+                        <Label htmlFor={key}>{label}</Label>
+                        <select
+                          id={key}
+                          className="border rounded p-1"
+                          value={header}
+                          onChange={e => setMapping(prev => ({ ...prev, [key]: e.target.value }))}
+                        >
+                          {fieldHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                        </select>
+                        <Button size="sm" variant="ghost" disabled={idx===0} onClick={() => swapUp(idx)}>
+                          <ChevronUp size={16} />
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={idx===displayOrder.length-1} onClick={() => swapDown(idx)}>
+                          <ChevronDown size={16} />
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-red-500" onClick={() => {
+                          const newMap = { ...mapping }; delete newMap[key]; setMapping(newMap);
+                          setDisplayOrder(prev => prev.filter(k => k!==key));
+                        }}>
+                          <XCircle size={16} />
+                        </Button>
+                      </div>
+                    );
+                  })
+                )}
+                <Button onClick={() => { setMappingConfirmed(true); handleGenerateSchedule(); }} disabled={!selectedDocId || isLoadingSchedule || isLoadingFields}>
+                  Confirm & Generate
+                </Button>
+                {/* Add Column option */}
+                <div className="mt-2">
+                  <Button size="sm" variant="outline" onClick={() => setAddingField(prev => !prev)}>
+                    + Add Column
+                  </Button>
+                </div>
+                {addingField && (
+                  <div className="mt-2 flex items-center space-x-2">
+                    <input
+                      type="text"
+                      placeholder="Field Key"
+                      value={newFieldName}
+                      onChange={e => setNewFieldName(e.target.value)}
+                      className="border rounded p-1"
+                    />
+                    <select
+                      value={newFieldHeader}
+                      onChange={e => setNewFieldHeader(e.target.value)}
+                      className="border rounded p-1"
+                    >
+                      <option value="">Select Header</option>
+                      {fieldHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                    <Button size="sm" onClick={() => {
+                      if (newFieldName && newFieldHeader) {
+                        setMapping(prev => ({ ...prev, [newFieldName]: newFieldHeader }));
+                        setDisplayOrder(prev => [...prev, newFieldName]);
+                        setNewFieldName('');
+                        setNewFieldHeader('');
+                        setAddingField(false);
+                      }
+                    }}>
+                      Add
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Schedule preview after mapping */}
+            {mappingConfirmed && !scheduleData && (
+              <Button onClick={handleGenerateSchedule} disabled={isLoadingSchedule} className="mb-4">
                 {isLoadingSchedule ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                {isLoadingSchedule ? "Generating..." : "Generate Schedule"}
+                {isLoadingSchedule ? 'Generating...' : 'Generate Schedule'}
               </Button>
             )}
             {isLoadingSchedule && !scheduleData && (
@@ -531,25 +686,23 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                   <TableCaption>Detailed Prepaid Expense Amortization Schedule</TableCaption>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Posting Date</TableHead>
-                      <TableHead>Invoice #</TableHead>
-                      <TableHead>Vendor</TableHead>
-                      <TableHead className="text-right">Amount Posted</TableHead>
-                      <TableHead>Start Date</TableHead>
-                      <TableHead>End Date</TableHead>
+                      {displayOrder.map(key => (
+                        <TableHead key={key} className={key==='amount'?'text-right':''}>
+                          {mapping[key] || key}
+                        </TableHead>
+                      ))}
                       <TableHead className="text-right">Monthly Amount</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {scheduleData.map((item, index) => (
                       <TableRow key={index}>
-                        <TableCell>{item.postingDate}</TableCell>
-                        <TableCell>{item.invoiceNumber || ''}</TableCell>
-                        <TableCell>{item.vendor}</TableCell>
-                        <TableCell className="text-right">${item.amountPosted.toFixed(2)}</TableCell>
-                        <TableCell>{item.startDate}</TableCell>
-                        <TableCell>{item.endDate}</TableCell>
-                        <TableCell className="text-right">${item.monthlyAmount.toFixed(2)}</TableCell>
+                        {displayOrder.map(key => (
+                          <TableCell key={key} className={key==='amount'?'text-right':''}>
+                            {renderCell(item, key)}
+                          </TableCell>
+                        ))}
+                        <TableCell className="text-right">{formatMoney(item.monthlyAmount)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -573,20 +726,20 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
               <Button variant="outline" onClick={handleSaveExcel} disabled={isLoadingSave}>
                 {isLoadingSave && <Loader2 className="animate-spin mr-2 h-4 w-4" />}Save to Documents
               </Button>
+              <Button variant="secondary" onClick={()=>setIsEditingBreakdown(prev=>!prev)}>
+                {isEditingBreakdown ? 'Done Editing' : 'Edit'}
+              </Button>
             </div>
             <h3 className="text-lg font-semibold mb-2">Monthly Depreciation Breakdown</h3>
             <Table>
               <TableCaption>Depreciation by Month</TableCaption>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Vendor</TableHead>
-                  <TableHead>Posting Date</TableHead>
-                  <TableHead>Invoice #</TableHead>
-                  <TableHead className="text-right">Original Cost</TableHead>
-                  <TableHead className="text-right">Remaining Balance</TableHead>
-                  <TableHead>Start Date</TableHead>
-                  <TableHead>End Date</TableHead>
-                  <TableHead className="text-right">Monthly Dep Amount</TableHead>
+                  {displayOrder.map(key => (
+                    <TableHead key={key} className={key==='amount'?'text-right':''}>
+                      {mapping[key] || key}
+                    </TableHead>
+                  ))}
                   {monthLabels.map((label, i) => (
                     <TableHead key={i}>{label}</TableHead>
                   ))}
@@ -596,39 +749,52 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
               <TableBody>
                 {breakdownData.map((item, idx) => (
                   <TableRow key={idx}>
-                    <TableCell>{item.vendor}</TableCell>
-                    <TableCell>{item.postingDate}</TableCell>
-                    <TableCell>{item.invoiceNumber || ''}</TableCell>
-                    <TableCell className="text-right">${item.amountPosted.toFixed(2)}</TableCell>
-                    <TableCell className="text-right">${(item.amountPosted - item.monthlyBreakdown.reduce((sum, val) => sum + val, 0)).toFixed(2)}</TableCell>
-                    <TableCell>{item.startDate}</TableCell>
-                    <TableCell>{item.endDate}</TableCell>
-                    <TableCell className="text-right">${item.monthlyAmount?.toFixed(2) ?? ((item.monthlyBreakdown.reduce((s,v)=>s+v,0)/(item.monthlyBreakdown.filter(v=>v>0).length||1)).toFixed(2))}</TableCell>
-                    {item.monthlyBreakdown.map((val, j) => (
-                      <TableCell key={j} className="text-right">${val.toFixed(2)}</TableCell>
+                    {displayOrder.map(key => (
+                      <TableCell key={key} className={key==='amount'?'text-right':''}>
+                        {isEditingBreakdown && key!=='amount' ? (
+                          <input
+                            type="text"
+                            className="border rounded p-1 w-full"
+                            value={item[key] ?? ''}
+                            onChange={e=>handleFieldCellChange(idx,key,e.target.value)}
+                          />
+                        ) : renderCell(item,key)}
+                      </TableCell>
+                    ))}
+                    {item.monthlyBreakdown.map((val:number, j:number) => (
+                      <TableCell key={j} className="text-right">
+                        {isEditingBreakdown ? (
+                          <input
+                            type="number"
+                            className="border rounded p-1 w-24 text-right"
+                            value={val}
+                            onChange={e=>handleBreakdownCellChange(idx,j,e.target.value)}
+                          />
+                        ) : formatMoney(val)}
+                      </TableCell>
                     ))}
                     <TableCell className="text-right">
-                      ${item.monthlyBreakdown.reduce((sum, val) => sum + val, 0).toFixed(2)}
+                      {formatMoney(item.monthlyBreakdown.reduce((sum, val) => sum + val, 0))}
                     </TableCell>
                   </TableRow>
                 ))}
                 {/* Dynamic totals row */}
                 {(() => {
                   const totalOriginalCost = breakdownData.reduce((s, it) => s + it.amountPosted, 0);
-                  const totalPerMonth = monthLabels.map((_, idx) => breakdownData.reduce((sum, it) => sum + (it.monthlyBreakdown[idx] || 0), 0));
+                  const totalPerMonth = monthLabels.map((_, idx) => breakdownData.reduce((sum, it) => sum + (Number(it.monthlyBreakdown[idx] || 0)), 0));
                   const grandTotal = totalPerMonth.reduce((s, v) => s + v, 0);
                   const totalRemaining = totalOriginalCost - grandTotal;
                   return (
                     <TableRow>
-                      <TableCell className="font-semibold">Total</TableCell>
-                      <TableCell colSpan={2} />
-                      <TableCell className="text-right font-semibold">${totalOriginalCost.toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-semibold">${totalRemaining.toFixed(2)}</TableCell>
-                      <TableCell colSpan={3} />
-                      {totalPerMonth.map((val, i) => (
-                        <TableCell key={i} className="text-right font-semibold">${val.toFixed(2)}</TableCell>
+                      {displayOrder.map(key => (
+                        <TableCell key={key} className={key==='amount'?'text-right font-semibold':''}>
+                          {key==='amount' ? formatMoney(totalOriginalCost) : ''}
+                        </TableCell>
                       ))}
-                      <TableCell className="text-right font-semibold">${grandTotal.toFixed(2)}</TableCell>
+                      {totalPerMonth.map((val, i) => (
+                        <TableCell key={i} className="text-right font-semibold">{formatMoney(val)}</TableCell>
+                      ))}
+                      <TableCell className="text-right font-semibold">{formatMoney(grandTotal)}</TableCell>
                     </TableRow>
                   );
                 })()}

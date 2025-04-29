@@ -4,6 +4,7 @@ import { getFirestore as getFirebaseFirestore } from 'firebase-admin/firestore';
 import { getAuth as getFirebaseAuth } from 'firebase-admin/auth';
 import { getStorage as getFirebaseStorage } from 'firebase-admin/storage';
 import fs from 'fs';
+import path from 'path';
 
 let isInitialized = false;
 
@@ -71,8 +72,13 @@ export function initializeAdminApp() {
       if (!isInitialized) {
         console.warn('[firebaseAdmin] Using bundled JSON fallback credentials');
         try {
-          const serviceAccount = require(process.cwd() + '/web-chat-app-fa7f0-86be58d508da.json');
-          tryInit(serviceAccount);
+          const fallbackPath = path.join(process.cwd(), 'web-chat-app-fa7f0-86be58d508da.json');
+          if (fs.existsSync(fallbackPath)) {
+            const serviceAccount = JSON.parse(fs.readFileSync(fallbackPath, 'utf-8'));
+            tryInit(serviceAccount);
+          } else {
+            console.error('[firebaseAdmin] Fallback credential file not found at', fallbackPath);
+          }
         } catch (fallbackError) {
           console.error('[firebaseAdmin] JSON fallback failed:', fallbackError);
           throw new Error('Missing Firebase Admin credentials after all strategies.');

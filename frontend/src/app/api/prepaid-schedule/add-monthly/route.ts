@@ -148,9 +148,12 @@ Respond ONLY with the complete updated JSON array and nothing else.`;
     function generateBreakdown(item: any) {
       const start = new Date(item.startDate);
       const end = new Date(item.endDate);
-      if (isNaN(start.valueOf()) || isNaN(end.valueOf()) || start > end) return item;
+      // Create a copy of all original fields first to preserve custom properties
+      const result = { ...item };
+      
+      if (isNaN(start.valueOf()) || isNaN(end.valueOf()) || start > end) return result;
       const totalMonths = monthsBetweenInclusive(start, end);
-      if (totalMonths <= 0) return item;
+      if (totalMonths <= 0) return result;
       const monthlyAmt = Number((item.amountPosted / totalMonths).toFixed(2));
       const breakdown = Array(12).fill(0);
       for (let i = 0; i < totalMonths; i++) {
@@ -164,7 +167,10 @@ Respond ONLY with the complete updated JSON array and nothing else.`;
         // add diff to last month of service period
         breakdown[(new Date(end)).getMonth()] += diff;
       }
-      return { ...item, monthlyAmount: monthlyAmt, monthlyBreakdown: breakdown };
+      // Add monthly calculation fields to the result object
+      result.monthlyAmount = monthlyAmt;
+      result.monthlyBreakdown = breakdown;
+      return result;
     }
 
     updatedSchedule = updatedSchedule.map(generateBreakdown);
@@ -173,11 +179,13 @@ Respond ONLY with the complete updated JSON array and nothing else.`;
       // catch-up depreciation when prior months exist
       const cutOff = new Date(currentYear, currentMonth, 1);
       updatedSchedule = updatedSchedule.map((item: any) => {
+        // Make a full copy to preserve all custom properties
+        const result = { ...item };
         const mb = item.monthlyBreakdown;
-        if (!Array.isArray(mb) || mb.length !== 12) return item;
+        if (!Array.isArray(mb) || mb.length !== 12) return result;
         const start = new Date(item.startDate);
         const monthsDiffTotal = (cutOff.getFullYear() - start.getFullYear()) * 12 + (cutOff.getMonth() - start.getMonth());
-        if (monthsDiffTotal <= 0) return item; // no catch-up needed
+        if (monthsDiffTotal <= 0) return result; // no catch-up needed
 
         // limit to array length
         const monthsDiff = Math.min(monthsDiffTotal, mb.length);
@@ -193,7 +201,8 @@ Respond ONLY with the complete updated JSON array and nothing else.`;
         if (currentIdx >= 0 && currentIdx < adjusted.length) {
           adjusted[currentIdx] += catchUp;
         }
-        return { ...item, monthlyBreakdown: adjusted };
+        result.monthlyBreakdown = adjusted;
+        return result;
       });
     }
 
