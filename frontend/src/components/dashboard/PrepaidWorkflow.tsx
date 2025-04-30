@@ -48,6 +48,7 @@ interface ScheduleItem {
 // Breakdown type for monthly depreciation
 interface BreakdownItem extends ScheduleItem {
   monthlyBreakdown: number[];
+  [key: string]: any;
 }
 
 const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
@@ -69,8 +70,8 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
   const [scheduleDocId, setScheduleDocId] = useState<string>('');
   const [isLoadingSchedule, setIsLoadingSchedule] = useState(false);
 
-  // State for monthly breakdown
-  const [breakdownData, setBreakdownData] = useState<BreakdownItem[] | null>(null);
+  // State for monthly breakdown (always an array)
+  const [breakdownData, setBreakdownData] = useState<BreakdownItem[]>([]);
   const [monthLabels, setMonthLabels] = useState<string[] | null>(null);
   const [isLoadingBreakdown, setIsLoadingBreakdown] = useState(false);
   const [isLoadingSave, setIsLoadingSave] = useState(false);
@@ -121,16 +122,22 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
 
   const handleBreakdownCellChange = (rowIdx: number, monthIdx: number, value: string) => {
     const num = Number(value);
-    setBreakdownData(prev => prev.map((item, i) => {
-      if (i !== rowIdx) return item;
-      const mb = [...item.monthlyBreakdown];
-      mb[monthIdx] = isNaN(num) ? 0 : num;
-      return { ...item, monthlyBreakdown: mb };
-    }));
+    setBreakdownData(prev =>
+      prev.map((item, i) => {
+        if (i !== rowIdx) return item;
+        const mb = [...item.monthlyBreakdown];
+        mb[monthIdx] = isNaN(num) ? 0 : num;
+        return { ...item, monthlyBreakdown: mb };
+      })
+    );
   };
 
-  const handleFieldCellChange = (rowIdx:number, key:string, value:string) => {
-    setBreakdownData(prev => prev.map((item,i)=> i===rowIdx ? { ...item, [key]: value } : item));
+  const handleFieldCellChange = (rowIdx: number, key: string, value: string) => {
+    setBreakdownData(prev =>
+      prev.map((item, i) =>
+        i === rowIdx ? { ...item, [key]: value } : item
+      )
+    );
   };
 
   // Load previously used schedule ID from localStorage
