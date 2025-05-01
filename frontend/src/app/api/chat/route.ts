@@ -23,8 +23,47 @@ import { processExcelOperation, extractBaseFilename } from '@/lib/excelUtils';
 import { File as GoogleCloudFile } from '@google-cloud/storage'; 
 import * as XLSX from 'xlsx-js-style'; 
 import { extractText } from 'unpdf'; 
+import { findRelevantGLCodes, mightBeAboutGLCodes } from '@/lib/glUtils';
 
 console.log("--- MODULE LOAD: /api/chat/route.ts ---");
+
+// Function to check if a message is related to GL codes
+function checkIfGLCodeRelated(message: string): boolean {
+  const glCodeKeywords = [
+    'gl code', 
+    'gl-code', 
+    'general ledger', 
+    'ledger code', 
+    'accounting code', 
+    'chart of accounts',
+    'account code',
+    'expense code',
+    'revenue code',
+    'asset code',
+    'liability code',
+    'equity code',
+    'transaction code',
+    'how do i code',
+    'which code',
+    'what code'
+  ];
+  
+  const messageLower = message.toLowerCase();
+  
+  // Check for specific keywords
+  if (glCodeKeywords.some(keyword => messageLower.includes(keyword))) {
+    return true;
+  }
+  
+  // Check for code-related patterns
+  if ((messageLower.includes('code') || messageLower.includes('account')) && 
+      (messageLower.includes('use') || messageLower.includes('which') || 
+       messageLower.includes('what') || messageLower.includes('how'))) {
+    return true;
+  }
+  
+  return false;
+}
 
 // --- Initialize Firebase Admin SDK ---
 if (!admin.apps.length) {
@@ -221,6 +260,37 @@ export async function POST(req: NextRequest) {
   // Initialize array for additional document contents
   if (!body.additionalContents) {
     body.additionalContents = [];
+  }
+  
+  // Check if the latest message might be about GL codes
+  const latestMessage = messages[messages.length - 1];
+  const userMessage = typeof latestMessage.content === 'string' 
+    ? latestMessage.content 
+    : Array.isArray(latestMessage.content) 
+      ? latestMessage.content.filter((part: any) => part.type === 'text').map((part: any) => (part as TextPart).text).join(' ')
+      : '';
+  
+  let glCodeContext = '';
+  if (latestMessage.role === 'user' && mightBeAboutGLCodes(userMessage)) {
+    console.log('[Chat API] Detected potential GL code query, retrieving GL codes');
+    try {
+      // Use semantic search to find relevant GL codes
+      const relevantCodes = await findRelevantGLCodes(userMessage, 7);
+      
+      if (relevantCodes.length > 0) {
+        glCodeContext = `
+Here is information about General Ledger (GL) codes that might help answer the query:
+${relevantCodes.map(code => `- ${code.content}`).join('\n')}
+
+Please use this GL code information to help answer the user's question if relevant.
+`;
+        console.log(`[Chat API] Retrieved ${relevantCodes.length} relevant GL codes`);
+      } else {
+        console.log('[Chat API] No GL codes found in database');
+      }
+    } catch (error) {
+      console.error('[Chat API] Error retrieving GL codes:', error);
+    }
   }
   
   // Process additional documents if provided
@@ -597,7 +667,9 @@ export async function POST(req: NextRequest) {
 
     const result = await streamText({
       model: vercelAnthropic(MODEL_NAME),
-      system: systemPrompt,
+      system: `${systemPrompt}
+
+${glCodeContext}`,
       messages: finalMessagesForApi, // Use the correctly typed and filtered array
       maxTokens: MAX_TOKENS,
       maxSteps: 5, // Allow the model to iterate after tool execution

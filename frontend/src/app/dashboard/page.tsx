@@ -44,52 +44,51 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import {
+  ArrowUpDown,
   ChevronDown,
   ChevronUp,
   ChevronRight,
-  Folder,
-  File,
-  MoreHorizontal,
-  Loader2,
-  Star,
-  SlidersHorizontal,
-  UploadCloud,
-  RefreshCw,
-  ListTree,
-  Columns,
-  LayoutGrid,
-  LayoutList,
-  Plus,
-  PlusCircle,
-  Trash,
-  Trash2,
-  Pencil,
-  X as XIcon,
-  Maximize2,
-  Minimize2,
-  MoveRight,
-  Move,
-  FileText,
-  FileSpreadsheet,
-  FileImage,
-  FileVideo,
-  FileAudio,
-  FileCode,
-  FileArchive,
-  FileQuestion,
-  Layers as LayersIcon,
+  Database,
   Eye,
   EyeOff,
-  List,
-  Upload,
+  FileArchive,
+  FileAudio,
+  FileCode,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  FileVideo,
+  Folder,
   FolderPlus,
-  ArrowUpDown,
+  File,
+  LayersIcon,
+  LayoutGrid,
+  List,
+  ListTree,
+  Loader2,
+  Maximize2,
   Menu,
+  MessageSquarePlus,
+  Minimize2,
+  MoreHorizontal,
+  Move,
+  Pencil,
+  Plus,
+  PlusCircle,
+  Receipt,
+  RefreshCw,
+  Send,
+  Share,
   Share2,
-  Moon,
-  Sun,
-  MessageSquarePlus, // Import the new icon
-  Receipt, // Import Receipt icon
+  Slash,
+  SlidersHorizontal,
+  Star,
+  Tag,
+  Text,
+  Trash2,
+  Upload,
+  User,
+  X as XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 // Badge component removed
@@ -2499,6 +2498,17 @@ function DashboardPage() {
             {user.displayName?.split(" ")[0] || user.email?.split("@")[0]}
           </span>
 
+          {/* GL Codes Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 text-xs py-0 mr-2 hidden sm:flex items-center"
+            onClick={() => router.push("/dashboard/gl-codes")}
+          >
+            <Database className="h-3 w-3 mr-1" />
+            GL Codes
+          </Button>
+          
           {/* Desktop logout button */}
           <Button
             variant="outline"
@@ -2767,6 +2777,16 @@ function DashboardPage() {
                         >
                           <MessageSquarePlus className="h-4 w-4 mr-2" />
                           New Chat
+                        </DropdownMenuItem>
+                        {/* GL Codes Management */}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => {
+                            router.push("/dashboard/gl-codes");
+                          }}
+                        >
+                          <Database className="h-4 w-4 mr-2" />
+                          GL Codes Manager
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

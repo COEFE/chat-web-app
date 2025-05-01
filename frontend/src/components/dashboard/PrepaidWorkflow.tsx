@@ -599,6 +599,8 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                   <Loader2 className="animate-spin" />
                 ) : (
                   displayOrder.map((key, idx) => {
+                    // Hide certain fields from the mapping UI
+                    if (['start', 'end', 'period'].includes(key)) return null;
                     const header = mapping[key];
                     const labelMap: Record<string,string> = {
                       vendor: 'Vendor', posting: 'Posting Date', invoice: 'Invoice #',

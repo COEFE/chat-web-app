@@ -1,81 +1,78 @@
-import * as admin from 'firebase-admin';
+import { initializeApp, cert, getApps, getApp, ServiceAccount, AppOptions } from 'firebase-admin/app';
+import { getAuth, Auth } from 'firebase-admin/auth';
+import { getFirestore, Firestore } from 'firebase-admin/firestore';
+import { getStorage, Storage } from 'firebase-admin/storage';
 
-// For singleton pattern
-let firebaseApp: admin.app.App | undefined;
+// Singleton Firebase Admin App
+let firebaseApp;
 
 /**
- * Initializes the Firebase Admin SDK for server-side operations.
- * Uses environment variables for configuration.
+ * Parse service account credentials from environment variables.
  */
-export function initializeFirebaseAdmin(): admin.app.App {
-  console.log('[FirebaseAdmin] ENV VARs]', { hasServiceAccount: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT), hasEnvCreds: Boolean(process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PROJECT_ID) });
-  // Check if already initialized
-  if (admin.apps.length > 0) {
-    return admin.apps[0]!;
-  }
-
-  try {
-    // Check if the service account JSON is available
-    let credential;
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      try {
-        // Parse the service account JSON
-        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-        console.log('[FirebaseAdmin] Using service account from FIREBASE_SERVICE_ACCOUNT');
-        credential = admin.credential.cert(serviceAccount);
-      } catch (parseError) {
-        console.error('[FirebaseAdmin] Error parsing FIREBASE_SERVICE_ACCOUNT:', parseError);
-        // Continue without credential - will fall back to Application Default Credentials
-      }
-    } else {
-      console.log('[FirebaseAdmin] No service account JSON found, using Application Default Credentials');
+function getServiceAccount(): ServiceAccount | undefined {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    try {
+      return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    } catch (e) {
+      console.error('[FirebaseAdmin] Error parsing FIREBASE_SERVICE_ACCOUNT:', e);
     }
-
-    // Build options without credential if undefined
-    const appOptions: admin.AppOptions = {
-      projectId: process.env.FIREBASE_PROJECT_ID || 'web-chat-app-fa7f0',
-      storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com',
-    };
-    if (credential) {
-      appOptions.credential = credential;
-    }
-    firebaseApp = admin.initializeApp(appOptions);
-    
-    console.log('[FirebaseAdmin] Firebase Admin SDK initialized successfully');
-    return firebaseApp;
-  } catch (error) {
-    console.error('[FirebaseAdmin] Error initializing Firebase Admin SDK:', error);
-    throw error; // Re-throw to propagate the error
   }
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+    try {
+      const decoded = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, 'base64').toString();
+      return JSON.parse(decoded);
+    } catch (e) {
+      console.error('[FirebaseAdmin] Error parsing FIREBASE_SERVICE_ACCOUNT_BASE64:', e);
+    }
+  }
+  if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PROJECT_ID) {
+    const rawKey = process.env.FIREBASE_PRIVATE_KEY.replace(/^"|"$/g, '');
+    const privateKey = rawKey.replace(/\\n/g, '\n');
+    return {
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      privateKey,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    } as ServiceAccount;
+  }
+  return undefined;
 }
 
 /**
- * Gets the initialized Firebase Admin App instance.
+ * Initialize or return existing Firebase Admin App.
  */
-export function getFirebaseAdmin(): admin.app.App {
-  return initializeFirebaseAdmin();
+export function initializeFirebaseAdmin(): ReturnType<typeof initializeApp> {
+  if (getApps().length > 0) {
+    return getApp();
+  }
+  const serviceAccount = getServiceAccount();
+  const options: AppOptions = {};
+  if (serviceAccount) {
+    options.credential = cert(serviceAccount);
+  }
+  if (process.env.FIREBASE_PROJECT_ID) options.projectId = process.env.FIREBASE_PROJECT_ID;
+  if (process.env.FIREBASE_STORAGE_BUCKET) options.storageBucket = process.env.FIREBASE_STORAGE_BUCKET;
+  firebaseApp = initializeApp(options);
+  console.log('[FirebaseAdmin] Initialized with options:', Object.keys(options));
+  return firebaseApp;
 }
 
 /**
- * Gets the Firestore database instance.
+ * Get Auth client.
  */
-export function getAdminDb(): admin.firestore.Firestore {
-  const app = getFirebaseAdmin();
-  return app.firestore();
+export function getAdminAuth(): Auth {
+  return getAuth(initializeFirebaseAdmin());
 }
 
 /**
- * Gets the Firebase Storage instance.
+ * Get Firestore client.
  */
-export function getAdminStorage(): admin.storage.Storage {
-  const app = getFirebaseAdmin();
-  return app.storage();
+export function getAdminDb(): Firestore {
+  return getFirestore(initializeFirebaseAdmin());
 }
 
 /**
- * Gets the Firebase Auth instance.
+ * Get Storage client.
  */
-export function getAdminAuth(): admin.auth.Auth {
-  const app = getFirebaseAdmin();
-  return app.auth();
+export function getAdminStorage(): Storage {
+  return getStorage(initializeFirebaseAdmin());
 }
