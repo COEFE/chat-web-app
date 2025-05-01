@@ -83,6 +83,23 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
 export async function findRelevantGLCodes(query: string, limit: number = 5, threshold: number = 0.7): Promise<any[]> {
   try {
     console.log(`[GLUtils] Finding GL codes relevant to: "${query}"`);
+    // Explicit lookup for mentioned GL code numbers
+    const codeMatches = query.match(/\b\d{3,6}\b/g);
+    if (codeMatches && codeMatches.length > 0) {
+      console.log(`[GLUtils] Query contains explicit GL code references: ${codeMatches.join(', ')}`);
+      // Exact match lookup
+      const codesArray = codeMatches.map(code => code.trim());
+      const { rows: explicitRows } = await sql`
+        SELECT id, gl_code, description, content
+        FROM gl_embeddings
+        WHERE gl_code = ANY(${codesArray as unknown as any}::varchar[])
+        LIMIT ${limit}
+      `;
+      if (explicitRows.length > 0) {
+        console.log(`[GLUtils] Found ${explicitRows.length} explicit GL codes`);
+        return explicitRows;
+      }
+    }
     
     // Check if the message might be about GL codes before proceeding
     if (!mightBeAboutGLCodes(query)) {
@@ -102,7 +119,7 @@ export async function findRelevantGLCodes(query: string, limit: number = 5, thre
     // Search for similar embeddings in the database
     const { rows } = await sql`
       SELECT id, gl_code, description, content, 
-             embedding <=> ${queryEmbedding}::vector AS distance
+             embedding <=> ${queryEmbedding as unknown as any}::vector AS distance
       FROM gl_embeddings
       WHERE embedding IS NOT NULL
       ORDER BY distance ASC
@@ -149,7 +166,7 @@ async function findGLCodesByTextSearch(query: string, limit: number = 5): Promis
       const { rows } = await sql`
         SELECT id, gl_code, description, content
         FROM gl_embeddings
-        WHERE gl_code IN ${sql(codes)}
+        WHERE gl_code = ANY(${codes as unknown as any}::varchar[])
         LIMIT ${limit}
       `;
       

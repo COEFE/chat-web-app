@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     const worksheet = workbook.Sheets[firstSheetName];
     
     // Convert to JSON
-    const data = XLSX.utils.sheet_to_json(worksheet);
+    const data: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet);
     
     if (!data || data.length === 0) {
       return NextResponse.json({ error: 'Empty file or invalid data format' }, { status: 400 });
