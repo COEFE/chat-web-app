@@ -101,11 +101,10 @@ export async function findRelevantGLCodes(query: string, limit: number = 5, thre
       }
     }
     
-    // Check if the message might be about GL codes before proceeding
-    if (!mightBeAboutGLCodes(query)) {
-      console.log('[GLUtils] Query does not appear to be about GL codes, skipping search');
-      return [];
-    }
+    // Always proceed to semantic search, even if mightBeAboutGLCodes returns false
+    // if (!mightBeAboutGLCodes(query)) {
+    //   console.log('[GLUtils] Query does not appear to be about GL codes, continuing fallback');
+    // }
     
     // Generate embedding for the query
     const queryEmbedding = await generateEmbedding(query);
@@ -116,10 +115,12 @@ export async function findRelevantGLCodes(query: string, limit: number = 5, thre
       return findGLCodesByTextSearch(query, limit);
     }
     
+    // Convert JS array to vector literal string for Postgres vector type
+    const vectorLiteral = '[' + queryEmbedding.join(',') + ']';
     // Search for similar embeddings in the database
     const { rows } = await sql`
-      SELECT id, gl_code, description, content, 
-             embedding <=> ${queryEmbedding as unknown as any}::vector AS distance
+      SELECT id, gl_code, description, content,
+             embedding <=> ${vectorLiteral}::vector AS distance
       FROM gl_embeddings
       WHERE embedding IS NOT NULL
       ORDER BY distance ASC

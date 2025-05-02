@@ -22,8 +22,8 @@ module.exports = {
     '^.+\.(js|jsx|ts|tsx)$': ['babel-jest', { presets: ['next/babel'] }],
   },
   transformIgnorePatterns: [
-    '/node_modules/',
-    '^.+\.module\.(css|sass|scss)$', // Already handled by moduleNameMapper
+    '/node_modules/(?!(jose|jwks-rsa)/)',
+    '^.+\\.module\\.(css|sass|scss)$', // Already handled by moduleNameMapper
   ],
   testPathIgnorePatterns: ['<rootDir>/node_modules/', '<rootDir>/.next/'],
 };

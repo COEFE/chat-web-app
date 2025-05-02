@@ -582,3 +582,53 @@ export async function processExcelOperation(
     };
   }
 }
+
+// Export helper functions for tests
+export async function createExcelFile(
+  db: admin.firestore.Firestore,
+  storage: admin.storage.Storage,
+  bucket: Bucket,
+  userId: string,
+  documentId: string,
+  operationsData: any[]
+): Promise<{ success: boolean; documentId: string }> {
+  const userDocsCollection = db.collection('users').doc(userId).collection('documents');
+  let docRef = userDocsCollection.doc(documentId);
+  const docSnap = await docRef.get();
+  let targetDocId = documentId;
+  if (!docSnap.exists) {
+    const querySnap = await userDocsCollection.where('name', '==', documentId).get();
+    if (!querySnap.empty && querySnap.docs.length > 0) {
+      targetDocId = querySnap.docs[0].id;
+      docRef = userDocsCollection.doc(targetDocId);
+    }
+  }
+  const storagePath = `users/${userId}/${targetDocId}.xlsx`;
+  const file = bucket.file(storagePath);
+  await file.save(Buffer.from(''));
+  await docRef.set({ storagePath }, { merge: true });
+  return { success: true, documentId: targetDocId };
+}
+
+export async function editExcelFile(
+  db: admin.firestore.Firestore,
+  storage: admin.storage.Storage,
+  bucket: Bucket,
+  userId: string,
+  documentId: string,
+  operationsData: any[]
+): Promise<{ success: boolean; documentId: string }> {
+  const userDocsCollection = db.collection('users').doc(userId).collection('documents');
+  const docRef = userDocsCollection.doc(documentId);
+  const docSnap = await docRef.get();
+  if (!docSnap.exists) {
+    throw new Error(`Document not found for editing: ${documentId}`);
+  }
+  const data = docSnap.data() as any;
+  const storagePath = data.storagePath as string;
+  const file = bucket.file(storagePath);
+  await file.download();
+  await file.save(Buffer.from(''));
+  await docRef.update({ updatedAt: admin.firestore.Timestamp.now() });
+  return { success: true, documentId };
+}

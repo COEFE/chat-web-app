@@ -85,8 +85,8 @@ const initializeFirebase = async () => {
   }
 };
 
-// Initialize Firebase immediately
-if (typeof window !== 'undefined') {
+// Initialize Firebase immediately (skip during Jest tests)
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'test') {
   initializeFirebase();
 }
 

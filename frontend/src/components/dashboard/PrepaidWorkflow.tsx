@@ -48,6 +48,7 @@ interface ScheduleItem {
 // Breakdown type for monthly depreciation
 interface BreakdownItem extends ScheduleItem {
   monthlyBreakdown: number[];
+  glCode?: string;
   [key: string]: any;
 }
 
@@ -300,7 +301,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
         const rotated = rawSchedule.map((item: any) => {
           const mb = item.monthlyBreakdown || Array(12).fill(0);
           const rotatedMB = [...mb.slice(fiscalStart), ...mb.slice(0, fiscalStart)];
-          return { ...item, monthlyBreakdown: rotatedMB };
+          return { ...item, monthlyBreakdown: rotatedMB, glCode: '' };
         });
         setBreakdownData(rotated);
         // Generate month labels starting from fiscalStart
@@ -344,7 +345,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
       const rotated = rawSchedule.map((item: any) => {
         const mb = item.monthlyBreakdown || Array(12).fill(0);
         const rotatedMB = [...mb.slice(fiscalStart), ...mb.slice(0, fiscalStart)];
-        return { ...item, monthlyBreakdown: rotatedMB };
+        return { ...item, monthlyBreakdown: rotatedMB, glCode: '' };
       });
       setBreakdownData(rotated);
       // Generate month labels starting from fiscalStart
@@ -364,11 +365,11 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
 
   const handleDownloadExcel = () => {
     if (!breakdownData || !monthLabels) return;
-    const headers = ['Vendor','Posting Date','Invoice #','Original Cost','Start Date','End Date', 'Monthly Amount', ...monthLabels, 'Remaining Balance','Total'];
+    const headers = ['Vendor','Posting Date','Invoice #','Original Cost','Start Date','End Date', 'GL Code', 'Monthly Amount', ...monthLabels, 'Remaining Balance','Total'];
     const rows = breakdownData.map(item => {
       const total = item.monthlyBreakdown.reduce((sum,val) => sum+val, 0);
       const remaining = item.amountPosted - total;
-      return [item.vendor, item.postingDate, item.invoiceNumber || '', item.amountPosted, item.startDate, item.endDate, item.monthlyAmount ?? (total/(item.monthlyBreakdown.filter(v=>v>0).length||1)), ...item.monthlyBreakdown, remaining, total];
+      return [item.vendor, item.postingDate, item.invoiceNumber || '', item.amountPosted, item.startDate, item.endDate, item.glCode || '', item.monthlyAmount ?? (total/(item.monthlyBreakdown.filter(v=>v>0).length||1)), ...item.monthlyBreakdown, remaining, total];
     });
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     const wb = XLSX.utils.book_new();
@@ -388,14 +389,14 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
     setError(null);
     try {
       // generate blob as above
-      const headers = ['Vendor','Posting Date','Invoice #','Original Cost','Start Date','End Date', 'Monthly Amount', ...monthLabels, 'Remaining Balance','Total'];
-      const rows = breakdownData.map(item => {
-        const total = item.monthlyBreakdown.reduce((sum,val) => sum+val, 0);
-        const remaining = item.amountPosted - total;
-        return [item.vendor, item.postingDate, item.invoiceNumber || '', item.amountPosted, item.startDate, item.endDate, item.monthlyAmount ?? (total/(item.monthlyBreakdown.filter(v=>v>0).length||1)), ...item.monthlyBreakdown, remaining, total];
-      });
-
-      // Calculate totals
+      const excelData = {
+        headers: ['Vendor','Posting Date','Invoice #','Original Cost','Start Date','End Date', 'GL Code', 'Monthly Amount', ...monthLabels, 'Remaining Balance','Total'],
+        rows: breakdownData.map(item => {
+          const total = item.monthlyBreakdown.reduce((sum,val) => sum+val, 0);
+          const remaining = item.amountPosted - total;
+          return [item.vendor, item.postingDate, item.invoiceNumber || '', item.amountPosted, item.startDate, item.endDate, item.glCode || '', item.monthlyAmount ?? (total/(item.monthlyBreakdown.filter(v=>v>0).length||1)), ...item.monthlyBreakdown, remaining, total];
+        })
+      }; // Calculate totals
       const numMonths = monthLabels.length;
       const monthlyTotals = Array(numMonths).fill(0);
       let totalOriginalCost = 0;
@@ -426,10 +427,10 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
         grandTotal
       ];
 
-      // Add the total row to the rows array
-      rows.push(totalRow);
+      // Add the total row to the excelData.rows array
+      excelData.rows.push(totalRow);
 
-      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      const ws = XLSX.utils.aoa_to_sheet([excelData.headers, ...excelData.rows]);
       const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Monthly Breakdown');
       const wbout = XLSX.write(wb, { bookType:'xlsx', type:'array' });
       const excelMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -494,6 +495,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
   };
 
   const [isEditingBreakdown, setIsEditingBreakdown] = useState(false);
+  const [isAssigningGL, setIsAssigningGL] = useState(false);
 
   const monthOptions = Array.from({length:12},(_,i)=>({value:i,label:new Date(0,i,1).toLocaleString('default',{month:'long'})}));
   const yearOptions = Array.from({length:6},(_,i)=>today.getFullYear()-2+i); // range currentYear-2 to +3
@@ -517,6 +519,50 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
       }
     })();
   }, [selectedDocId, user]);
+
+  const autoFillGLCodes = async () => {
+    if (!breakdownData) return;
+    setIsAssigningGL(true);
+    try {
+      // Get token for authentication
+      if (!user) {
+        throw new Error("Authentication required");
+      }
+      const token = await user.getIdToken();
+
+      const updated = await Promise.all(breakdownData.map(async (item) => {
+        if (item.glCode) return item; // Skip items that already have GL codes
+
+        // Build query from vendor and invoice info
+        const query = `${item.vendor} ${item.invoiceNumber || ''}`;
+        
+        // Call the server API endpoint instead of direct DB access
+        const res = await fetch('/api/gl-codes/assign', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ query, limit: 1 })
+        });
+
+        if (!res.ok) {
+          console.error(`Error assigning GL code: ${res.status}`);
+          return item; // Return unchanged if error
+        }
+
+        const { codes } = await res.json();
+        return { ...item, glCode: codes[0]?.gl_code || '' };
+      }));
+      setBreakdownData(updated);
+      toast({ title: 'GL Codes Assigned', description: 'Automatically filled missing GL codes.' });
+    } catch (err) {
+      console.error('Error auto-filling GL codes', err);
+      toast({ title: 'Error', description: 'Failed to auto-fill GL codes.' });
+    } finally {
+      setIsAssigningGL(false);
+    }
+  };
 
   return (
     <Card>
@@ -738,6 +784,10 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
               <Button variant="secondary" onClick={()=>setIsEditingBreakdown(prev=>!prev)}>
                 {isEditingBreakdown ? 'Done Editing' : 'Edit'}
               </Button>
+              <Button variant="outline" onClick={autoFillGLCodes} disabled={isAssigningGL}>
+                {isAssigningGL && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isAssigningGL ? 'Assigning GL Codes...' : 'Auto-fill GL Codes'}
+              </Button>
             </div>
             <h3 className="text-lg font-semibold mb-2">Monthly Depreciation Breakdown</h3>
             <Table>
@@ -749,6 +799,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                       {mapping[key] || key}
                     </TableHead>
                   ))}
+                  <TableHead>GL Code</TableHead>
                   {monthLabels.map((label, i) => (
                     <TableHead key={i}>{label}</TableHead>
                   ))}
@@ -770,6 +821,16 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                         ) : renderCell(item,key)}
                       </TableCell>
                     ))}
+                    <TableCell>
+                      {isEditingBreakdown ? (
+                        <input
+                          type="text"
+                          className="border rounded p-1 w-full"
+                          value={item.glCode ?? ''}
+                          onChange={e=>handleFieldCellChange(idx,'glCode',e.target.value)}
+                        />
+                      ) : item.glCode}
+                    </TableCell>
                     {item.monthlyBreakdown.map((val:number, j:number) => (
                       <TableCell key={j} className="text-right">
                         {isEditingBreakdown ? (
@@ -800,6 +861,7 @@ const PrepaidWorkflow: React.FC<PrepaidWorkflowProps> = ({
                           {key==='amount' ? formatMoney(totalOriginalCost) : ''}
                         </TableCell>
                       ))}
+                      <TableCell key="glCode" />
                       {totalPerMonth.map((val, i) => (
                         <TableCell key={i} className="text-right font-semibold">{formatMoney(val)}</TableCell>
                       ))}

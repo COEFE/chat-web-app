@@ -9,7 +9,7 @@ import { Timestamp } from 'firebase/firestore';
 import { MyDocumentData } from '@/types'; 
 import { useChat, type Message } from '@ai-sdk/react';
 import { Loader2, Send } from 'lucide-react'; // Import Loader2 and Send icons
-import { getFirestore, collection, query, orderBy, getDocs, } from 'firebase/firestore';
+import { getFirestore, collection, query, orderBy, getDocs, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown'; // Import ReactMarkdown
 import remarkGfm from 'remark-gfm'; // Import remark-gfm for GitHub Flavored Markdown
 import { format } from 'date-fns'; // Import date-fns for formatting
@@ -134,6 +134,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   });
 
+  // Firestore instance and flag to track initial load
+  const firestoreDb = getFirestore();
+  const initialLoad = useRef(true);
+
   // Effect to load chat history when chatId or user changes
   useEffect(() => {
     const loadChatHistory = async () => {
@@ -172,6 +176,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
         console.log(`[ChatInterface] Loaded ${fetchedMessages.length} messages from Firestore.`);
         setMessages(fetchedMessages); // Update the chat state
+        initialLoad.current = false;
 
       } catch (err) {
         console.error('[ChatInterface] Error loading chat history:', err);
@@ -182,6 +187,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     loadChatHistory();
   }, [chatId, userId, setMessages]); // Use userId prop in dependency array
+
+  // Persist new messages after initial load
+  useEffect(() => {
+    if (initialLoad.current) return;
+    if (!chatId || !userId) return;
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg) return;
+    const msgRef = doc(firestoreDb, 'users', userId, 'chats', chatId, 'messages', lastMsg.id);
+    setDoc(msgRef, {
+      role: lastMsg.role,
+      content: lastMsg.content,
+      createdAt: serverTimestamp(),
+    });
+  }, [messages, chatId, userId]);
 
   useEffect(() => {
     // Update active sheet logic based on primaryDocument

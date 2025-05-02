@@ -51,10 +51,12 @@ export async function GET(req: NextRequest) {
     const messages = querySnapshot.docs.map(doc => {
       const data = doc.data();
       const createdAtTimestamp = data.createdAt as firestore.Timestamp;
+      const chatId = doc.ref.parent.parent.id; // extract chat session ID
       return {
         id: doc.id,
+        chatId,
         ...data,
-        // Convert Timestamp to ISO string for JSON serialization
+        // Convert Timestamp to ISO string
         createdAt: createdAtTimestamp?.toDate().toISOString() || null,
       };
     });
