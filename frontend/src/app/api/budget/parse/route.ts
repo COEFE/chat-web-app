@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const model = process.env.OPENAI_MODEL || "gpt-4-1-mini"; // default to GPT-4.1 Mini
+    const model = process.env.OPENAI_MODEL || "gpt-4.1-mini"; // correct GPT-4.1 Mini model ID
     console.log(`[api/budget/parse] using model: ${model}`);
     const completion = await openai.chat.completions.create({
       model,
