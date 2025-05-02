@@ -51,7 +51,9 @@ export async function GET(req: NextRequest) {
     const messages = querySnapshot.docs.map(doc => {
       const data = doc.data();
       const createdAtTimestamp = data.createdAt as firestore.Timestamp;
-      const chatId = doc.ref.parent.parent.id; // extract chat session ID
+      // Safely extract chat session ID (parent of 'messages' collection may be null)
+      const sessionDocRef = doc.ref.parent.parent;
+      const chatId = sessionDocRef?.id ?? ''; // extract chat session ID or empty if missing
       return {
         id: doc.id,
         chatId,
