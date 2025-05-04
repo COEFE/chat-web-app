@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
-import { Plus, RefreshCcw, AlertCircle, CalendarClock } from "lucide-react";
+import { Plus, RefreshCcw, AlertCircle, CalendarClock, Table } from "lucide-react";
 import { getAuth } from "firebase/auth";
 
 import { Button } from "@/components/ui/button";
@@ -405,6 +405,13 @@ export default function JournalsPage() {
           >
             <CalendarClock className="h-4 w-4 mr-2" />
             Recurring Journals
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => router.push("/dashboard/journals/quick-entry")}
+          >
+            <Table className="h-4 w-4 mr-2" />
+            Quick Entry
           </Button>
           <Button
             size="sm"
