@@ -561,7 +561,7 @@ export default function JournalsPage() {
 
       {/* Create Journal Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="w-[75vw] max-w-[1200px]">
           <DialogHeader>
             <DialogTitle>Create Journal Entry</DialogTitle>
             <DialogDescription>
@@ -579,7 +579,7 @@ export default function JournalsPage() {
 
       {/* View Journal Dialog */}
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="w-[75vw] max-w-[1200px]">
           <DialogHeader>
             <DialogTitle>Journal Entry Details</DialogTitle>
           </DialogHeader>
@@ -602,7 +602,7 @@ export default function JournalsPage() {
 
       {/* Edit Journal Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="w-[75vw] max-w-[1200px]">
           <DialogHeader>
             <DialogTitle>Edit Journal Entry</DialogTitle>
             <DialogDescription>
