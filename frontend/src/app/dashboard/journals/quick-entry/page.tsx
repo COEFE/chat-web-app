@@ -46,7 +46,13 @@ export default function QuickEntryPage() {
         }
         
         const data = await response.json();
-        setAccounts(data);
+        
+        // The API returns { accounts: [...], flatAccounts: [...] }
+        // We need the accounts array which contains the hierarchical structure
+        setAccounts(data.accounts || []);
+        
+        // Log the accounts data for debugging
+        console.log("Accounts data:", data);
       } catch (error) {
         console.error("Error fetching accounts:", error);
         toast({

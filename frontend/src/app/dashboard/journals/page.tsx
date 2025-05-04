@@ -171,7 +171,12 @@ export default function JournalsPage() {
         throw new Error(data.error || "Failed to fetch accounts");
       }
       
-      setAccounts(data.hierarchy || []);
+      // The API returns { accounts: [...], flatAccounts: [...] }
+      // We need the accounts array which contains the hierarchical structure
+      setAccounts(data.accounts || []);
+      
+      // Log the accounts data for debugging
+      console.log("Accounts data in main journals page:", data);
     } catch (err: any) {
       console.error("Error fetching accounts:", err);
     }
