@@ -1,0 +1,13 @@
+/* Custom styles for journal dialogs */
+.journal-dialog-content {
+  width: 75vw !important;
+  max-width: 1200px !important;
+  min-width: 800px !important;
+}
+
+@media (max-width: 1024px) {
+  .journal-dialog-content {
+    width: 90vw !important;
+    min-width: auto !important;
+  }
+}

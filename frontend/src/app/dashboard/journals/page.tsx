@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { Plus, RefreshCcw, AlertCircle, CalendarClock, Table } from "lucide-react";
+import "./journal-dialogs.css";
 import { getAuth } from "firebase/auth";
 
 import { Button } from "@/components/ui/button";
@@ -561,7 +562,7 @@ export default function JournalsPage() {
 
       {/* Create Journal Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="w-[75vw] max-w-[1200px]">
+        <DialogContent className="journal-dialog-content">
           <DialogHeader>
             <DialogTitle>Create Journal Entry</DialogTitle>
             <DialogDescription>
@@ -579,7 +580,7 @@ export default function JournalsPage() {
 
       {/* View Journal Dialog */}
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-        <DialogContent className="w-[75vw] max-w-[1200px]">
+        <DialogContent className="journal-dialog-content">
           <DialogHeader>
             <DialogTitle>Journal Entry Details</DialogTitle>
           </DialogHeader>
@@ -602,7 +603,7 @@ export default function JournalsPage() {
 
       {/* Edit Journal Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="w-[75vw] max-w-[1200px]">
+        <DialogContent className="journal-dialog-content">
           <DialogHeader>
             <DialogTitle>Edit Journal Entry</DialogTitle>
             <DialogDescription>

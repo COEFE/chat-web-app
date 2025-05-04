@@ -171,6 +171,33 @@ export function JournalEntryForm({
 
   // Handle form submission
   const handleSubmit = (values: JournalFormValues) => {
+    // Double-check balance before submission
+    let debitTotal = 0;
+    let creditTotal = 0;
+    
+    values.lines.forEach((line) => {
+      const debitValue = parseFloat(line.debit || "0");
+      const creditValue = parseFloat(line.credit || "0");
+      
+      if (!isNaN(debitValue)) {
+        debitTotal += debitValue;
+      }
+      
+      if (!isNaN(creditValue)) {
+        creditTotal += creditValue;
+      }
+    });
+    
+    // Ensure the journal entry is balanced
+    if (Math.abs(debitTotal - creditTotal) >= 0.01) {
+      // Display error message
+      form.setError("lines", { 
+        type: "manual", 
+        message: `Journal entry must balance: debits (${debitTotal.toFixed(2)}) must equal credits (${creditTotal.toFixed(2)})` 
+      });
+      return;
+    }
+    
     // Pass the values directly to onSubmit, keeping the types consistent
     // with the JournalFormValues type (strings for debit/credit)
     onSubmit(values);
@@ -498,11 +525,22 @@ export function JournalEntryForm({
 
         {/* Balance Warning */}
         {!isBalanced && formValues.lines.some(line => line.debit || line.credit) && (
-          <Alert variant={showImbalanceTooltip ? "destructive" : "default"} className="relative">
+          <Alert variant="destructive" className="relative">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Journal Entry Imbalance</AlertTitle>
             <AlertDescription className="flex flex-col gap-1">
-              <p>Journal entry is out of balance. Total debits must equal total credits.</p>
+              <p className="font-bold">Journal entry must balance before submission. Total debits must equal total credits.</p>
+              <div className="text-sm mt-1">
+                <span className="font-medium">Current totals:</span>{" "}
+                Debits: {new Intl.NumberFormat("en-US", {
+                  style: "currency",
+                  currency: "USD",
+                }).format(totalDebit)}, 
+                Credits: {new Intl.NumberFormat("en-US", {
+                  style: "currency",
+                  currency: "USD",
+                }).format(totalCredit)}
+              </div>
               <div className="text-sm mt-1">
                 <span className="font-medium">Difference:</span>{" "}
                 {new Intl.NumberFormat("en-US", {
@@ -517,6 +555,17 @@ export function JournalEntryForm({
                   ? `Add a credit of ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Math.abs(difference))}` 
                   : `Add a debit of ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Math.abs(difference))}`}
               </div>
+            </AlertDescription>
+          </Alert>
+        )}
+        
+        {/* Form Error Messages */}
+        {form.formState.errors.lines?.message && (
+          <Alert variant="destructive" className="mt-2">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Validation Error</AlertTitle>
+            <AlertDescription>
+              {form.formState.errors.lines.message}
             </AlertDescription>
           </Alert>
         )}
