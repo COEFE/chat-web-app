@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
-import { Plus, RefreshCcw, AlertCircle } from "lucide-react";
+import { Plus, RefreshCcw, AlertCircle, CalendarClock } from "lucide-react";
+import { getAuth } from "firebase/auth";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +30,10 @@ import { JournalTable, JournalEntry } from "@/components/journals/JournalTable";
 import { JournalEntryForm } from "@/components/journals/JournalEntryForm";
 import { JournalView } from "@/components/journals/JournalView";
 import { JournalSetupButton } from "@/components/journals/JournalSetupButton";
+import { JournalSearch, JournalSearchParams } from "@/components/journals/JournalSearch";
+import { JournalPagination } from "@/components/journals/JournalPagination";
+import { JournalExport } from "@/components/journals/JournalExport";
+import { JournalSummary } from "@/components/journals/JournalSummary";
 import { AccountNode } from "@/components/accounts/AccountTree";
 
 export default function JournalsPage() {
@@ -40,6 +45,13 @@ export default function JournalsPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);
+  const [searchParams, setSearchParams] = useState<JournalSearchParams>({ searchTerm: "", searchField: "memo" });
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const itemsPerPage = 10;
   
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -58,7 +70,7 @@ export default function JournalsPage() {
   useEffect(() => {
     fetchJournals();
     fetchAccounts();
-  }, [dateRange]);
+  }, [dateRange, searchParams, currentPage]);
 
   // Fetch journal entries
   const fetchJournals = async () => {
@@ -66,6 +78,17 @@ export default function JournalsPage() {
     setError(null);
     
     try {
+      // Get current Firebase auth token
+      const auth = getAuth();
+      const user = auth.currentUser;
+      
+      if (!user) {
+        throw new Error("You must be logged in to view journal entries");
+      }
+      
+      // Get the user's ID token for authorization
+      const token = await user.getIdToken();
+      
       let url = "/api/journals";
       const params = new URLSearchParams();
       
@@ -77,11 +100,26 @@ export default function JournalsPage() {
         params.append("endDate", format(dateRange.to, "yyyy-MM-dd"));
       }
       
+      // Add search parameters if provided
+      if (searchParams.searchTerm) {
+        params.append("searchTerm", searchParams.searchTerm);
+        params.append("searchField", searchParams.searchField);
+      }
+      
+      const limit = itemsPerPage;
+      const offset = (currentPage - 1) * itemsPerPage;
+      params.append("limit", limit.toString());
+      params.append("offset", offset.toString());
+      
       if (params.toString()) {
         url += `?${params.toString()}`;
       }
       
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       const data = await response.json();
       
       if (!response.ok) {
@@ -94,6 +132,11 @@ export default function JournalsPage() {
       } else {
         setSetupRequired(false);
         setJournals(data.journals || []);
+        
+        // Update pagination information
+        const total = data.total || 0;
+        setTotalRecords(total);
+        setTotalPages(Math.ceil(total / itemsPerPage));
       }
     } catch (err: any) {
       setError(err.message || "An error occurred while fetching journal entries");
@@ -106,7 +149,22 @@ export default function JournalsPage() {
   // Fetch accounts for form
   const fetchAccounts = async () => {
     try {
-      const response = await fetch("/api/accounts/hierarchy");
+      // Get authorization token
+      const auth = getAuth();
+      const user = auth.currentUser;
+      
+      if (!user) {
+        console.error("User not authenticated for fetchAccounts");
+        return;
+      }
+      
+      const token = await user.getIdToken();
+      
+      const response = await fetch("/api/accounts/hierarchy", {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       const data = await response.json();
       
       if (!response.ok) {
@@ -125,10 +183,21 @@ export default function JournalsPage() {
     setError(null);
     
     try {
+      // Get authorization token
+      const auth = getAuth();
+      const user = auth.currentUser;
+      
+      if (!user) {
+        throw new Error("You must be logged in to create a journal entry");
+      }
+      
+      const token = await user.getIdToken();
+      
       const response = await fetch("/api/journals", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify(values),
       });
@@ -157,10 +226,21 @@ export default function JournalsPage() {
     setError(null);
     
     try {
+      // Get authorization token
+      const auth = getAuth();
+      const user = auth.currentUser;
+      
+      if (!user) {
+        throw new Error("You must be logged in to update a journal entry");
+      }
+      
+      const token = await user.getIdToken();
+      
       const response = await fetch(`/api/journals/${selectedJournal.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify(values),
       });
@@ -189,8 +269,21 @@ export default function JournalsPage() {
     setError(null);
     
     try {
+      // Get authorization token
+      const auth = getAuth();
+      const user = auth.currentUser;
+      
+      if (!user) {
+        throw new Error("You must be logged in to delete a journal entry");
+      }
+      
+      const token = await user.getIdToken();
+      
       const response = await fetch(`/api/journals/${selectedJournal.id}`, {
         method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
       });
       
       const data = await response.json();
@@ -215,7 +308,21 @@ export default function JournalsPage() {
     setError(null);
     
     try {
-      const response = await fetch(`/api/journals/${journal.id}`);
+      // Get authorization token
+      const auth = getAuth();
+      const user = auth.currentUser;
+      
+      if (!user) {
+        throw new Error("You must be logged in to view journal details");
+      }
+      
+      const token = await user.getIdToken();
+      
+      const response = await fetch(`/api/journals/${journal.id}`, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
       const data = await response.json();
       
       if (!response.ok) {
@@ -238,7 +345,21 @@ export default function JournalsPage() {
     setError(null);
     
     try {
-      const response = await fetch(`/api/journals/${journal.id}`);
+      // Get authorization token
+      const auth = getAuth();
+      const user = auth.currentUser;
+      
+      if (!user) {
+        throw new Error("You must be logged in to edit a journal entry");
+      }
+      
+      const token = await user.getIdToken();
+      
+      const response = await fetch(`/api/journals/${journal.id}`, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
       const data = await response.json();
       
       if (!response.ok) {
@@ -276,6 +397,23 @@ export default function JournalsPage() {
     <div className="container mx-auto py-6 space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">Journal Entries</h1>
+        <div className="flex space-x-2">
+          <JournalSetupButton />
+          <Button
+            variant="outline"
+            onClick={() => router.push("/dashboard/journals/recurring")}
+          >
+            <CalendarClock className="h-4 w-4 mr-2" />
+            Recurring Journals
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setCreateDialogOpen(true)}
+          >
+            <Plus className="h-4 w-4 mr-1" />
+            New Journal
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -306,6 +444,21 @@ export default function JournalsPage() {
         </TabsList>
 
         <TabsContent value="manage" className="space-y-4">
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle>Journal Summary</CardTitle>
+              <CardDescription>
+                Financial overview for the selected period
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <JournalSummary 
+                startDate={dateRange?.from}
+                endDate={dateRange?.to}
+              />
+            </CardContent>
+          </Card>
+          
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <div>
@@ -324,6 +477,12 @@ export default function JournalsPage() {
                   <RefreshCcw className="h-4 w-4 mr-1" />
                   Refresh
                 </Button>
+                <JournalExport
+                  startDate={dateRange?.from}
+                  endDate={dateRange?.to}
+                  searchTerm={searchParams.searchTerm}
+                  searchField={searchParams.searchField}
+                />
                 <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
                   <Plus className="h-4 w-4 mr-1" />
                   New Journal
@@ -332,11 +491,14 @@ export default function JournalsPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <DatePickerWithRange
-                    date={dateRange}
-                    setDate={(range: DateRange | undefined) => setDateRange(range)}
-                  />
+                <div className="flex flex-col space-y-4">
+                  <div className="flex justify-between items-center">
+                    <DatePickerWithRange
+                      date={dateRange}
+                      setDate={(range: DateRange | undefined) => setDateRange(range)}
+                    />
+                  </div>
+                  <JournalSearch onSearch={setSearchParams} />
                 </div>
                 <JournalTable
                   journals={journals}
@@ -348,6 +510,21 @@ export default function JournalsPage() {
                   }}
                   isLoading={isLoading}
                 />
+                
+                {totalPages > 1 && (
+                  <div className="mt-4">
+                    <JournalPagination
+                      currentPage={currentPage}
+                      totalPages={totalPages}
+                      onPageChange={(page) => {
+                        setCurrentPage(page);
+                      }}
+                    />
+                    <div className="text-center text-sm text-muted-foreground mt-2">
+                      Showing {Math.min((currentPage - 1) * itemsPerPage + 1, totalRecords)} to {Math.min(currentPage * itemsPerPage, totalRecords)} of {totalRecords} entries
+                    </div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -401,6 +578,10 @@ export default function JournalsPage() {
               onEdit={() => {
                 setViewDialogOpen(false);
                 setEditDialogOpen(true);
+              }}
+              onPost={() => {
+                setViewDialogOpen(false);
+                fetchJournals();
               }}
             />
           )}

@@ -1,7 +1,9 @@
 "use client";
 
 import { format } from "date-fns";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { getAuth } from "firebase/auth";
 import {
   Card,
   CardContent,
@@ -10,6 +12,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { JournalPostButton } from "./JournalPostButton";
+import { JournalAttachments, JournalAttachment } from "./JournalAttachments";
+import { RecurringJournalForm } from "./RecurringJournalForm";
+import { useToast } from "@/components/ui/use-toast";
 import {
   Table,
   TableBody,
@@ -25,9 +33,57 @@ interface JournalViewProps {
   journal: JournalEntry;
   onClose: () => void;
   onEdit?: () => void;
+  onPost?: () => void;
 }
 
-export function JournalView({ journal, onClose, onEdit }: JournalViewProps) {
+export function JournalView({ journal, onClose, onEdit, onPost }: JournalViewProps) {
+  const [attachments, setAttachments] = useState<JournalAttachment[]>([]);
+  const [isLoadingAttachments, setIsLoadingAttachments] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [recurringDialogOpen, setRecurringDialogOpen] = useState(false);
+  const [isSubmittingRecurring, setIsSubmittingRecurring] = useState(false);
+  const { toast } = useToast();
+
+  // Fetch attachments when the component mounts or when an attachment is added/removed
+  useEffect(() => {
+    fetchAttachments();
+  }, [journal.id]);
+
+  // Fetch attachments for the journal entry
+  const fetchAttachments = async () => {
+    setIsLoadingAttachments(true);
+    setAttachmentError(null);
+    
+    try {
+      // Get authorization token
+      const auth = getAuth();
+      const user = auth.currentUser;
+      
+      if (!user) {
+        throw new Error("You must be logged in to view attachments");
+      }
+      
+      const token = await user.getIdToken();
+      
+      const response = await fetch(`/api/journals/${journal.id}/attachments`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch attachments");
+      }
+      
+      setAttachments(data.attachments || []);
+    } catch (err: any) {
+      console.error("Error fetching attachments:", err);
+      setAttachmentError(err.message || "An error occurred while fetching attachments");
+    } finally {
+      setIsLoadingAttachments(false);
+    }
+  };
   // Format date for display
   const formatDate = (date: string | Date) => {
     if (!date) return "N/A";
@@ -100,9 +156,10 @@ export function JournalView({ journal, onClose, onEdit }: JournalViewProps) {
           </div>
         </div>
 
-        <div>
-          <h4 className="text-sm font-medium mb-2">Journal Lines</h4>
-          <Table>
+        <div className="space-y-6">
+          <div>
+            <h4 className="text-sm font-medium mb-2">Journal Lines</h4>
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Account</TableHead>
@@ -140,16 +197,101 @@ export function JournalView({ journal, onClose, onEdit }: JournalViewProps) {
               </TableRow>
             </TableBody>
           </Table>
+          </div>
+          
+          <Separator />
+          
+          <JournalAttachments
+            journalId={journal.id}
+            attachments={attachments}
+            readOnly={journal.is_posted || journal.is_deleted}
+            onAttachmentAdded={fetchAttachments}
+            onAttachmentRemoved={fetchAttachments}
+          />
         </div>
       </CardContent>
       <CardFooter className="flex justify-end space-x-2">
         <Button variant="outline" onClick={onClose}>
           Close
         </Button>
-        {onEdit && !journal.is_posted && !journal.is_deleted && (
-          <Button onClick={onEdit}>Edit</Button>
+        {!journal.is_posted && !journal.is_deleted && (
+          <>
+            {onEdit && <Button onClick={onEdit}>Edit</Button>}
+            <JournalPostButton 
+              journalId={journal.id} 
+              onPostComplete={() => {
+                if (onPost) onPost();
+              }} 
+            />
+          </>
         )}
+        <Button 
+          variant="outline" 
+          onClick={() => setRecurringDialogOpen(true)}
+        >
+          Set Up Recurring
+        </Button>
       </CardFooter>
+
+      {/* Recurring Journal Dialog */}
+      <Dialog open={recurringDialogOpen} onOpenChange={setRecurringDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Set Up Recurring Journal Entry</DialogTitle>
+          </DialogHeader>
+          <RecurringJournalForm
+            journal={journal}
+            onSubmit={async (values) => {
+              setIsSubmittingRecurring(true);
+              try {
+                // Get authorization token
+                const auth = getAuth();
+                const user = auth.currentUser;
+                
+                if (!user) {
+                  throw new Error("You must be logged in to set up recurring journals");
+                }
+                
+                const token = await user.getIdToken();
+                
+                const response = await fetch('/api/journals/recurring', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                  },
+                  body: JSON.stringify(values),
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                  throw new Error(data.error || 'Failed to set up recurring journal');
+                }
+                
+                toast({
+                  title: 'Success',
+                  description: 'Recurring journal entry set up successfully',
+                  variant: 'default',
+                });
+                
+                setRecurringDialogOpen(false);
+              } catch (err: any) {
+                console.error('Error setting up recurring journal:', err);
+                toast({
+                  title: 'Error',
+                  description: err.message || 'An error occurred while setting up the recurring journal',
+                  variant: 'destructive',
+                });
+              } finally {
+                setIsSubmittingRecurring(false);
+              }
+            }}
+            onCancel={() => setRecurringDialogOpen(false)}
+            isSubmitting={isSubmittingRecurring}
+          />
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

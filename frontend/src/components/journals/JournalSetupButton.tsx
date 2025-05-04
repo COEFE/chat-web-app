@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import { getAuth } from "firebase/auth";
 
 interface JournalSetupButtonProps {
   onSetupComplete?: () => void;
@@ -16,10 +17,21 @@ export function JournalSetupButton({ onSetupComplete }: JournalSetupButtonProps)
   const handleSetup = async () => {
     setIsLoading(true);
     try {
+      // Get authorization token
+      const auth = getAuth();
+      const user = auth.currentUser;
+      
+      if (!user) {
+        throw new Error("You must be logged in to initialize journal tables");
+      }
+      
+      const token = await user.getIdToken();
+
       const response = await fetch("/api/journals/db-setup", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
         },
       });
 

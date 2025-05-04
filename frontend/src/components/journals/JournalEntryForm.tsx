@@ -156,17 +156,9 @@ export function JournalEntryForm({
 
   // Handle form submission
   const handleSubmit = (values: JournalFormValues) => {
-    // Process the values before submitting
-    const processedValues = {
-      ...values,
-      lines: values.lines.map((line) => ({
-        ...line,
-        debit: line.debit ? parseFloat(line.debit) : 0,
-        credit: line.credit ? parseFloat(line.credit) : 0,
-      })),
-    };
-    
-    onSubmit(processedValues);
+    // Pass the values directly to onSubmit, keeping the types consistent
+    // with the JournalFormValues type (strings for debit/credit)
+    onSubmit(values);
   };
 
   // Handle adding a new line
