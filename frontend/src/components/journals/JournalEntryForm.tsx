@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useFieldArray } from "react-hook-form";
 import * as z from "zod";
 import { format } from "date-fns";
-import { CalendarIcon, Plus, Trash2, AlertCircle } from "lucide-react";
+import { CalendarIcon, Plus, Trash2, AlertCircle, DollarSign } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -32,8 +32,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { 
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { AccountNode } from "@/components/accounts/AccountTree";
 
 // Define form schema with zod
@@ -107,6 +114,8 @@ export function JournalEntryForm({
   const [totalDebit, setTotalDebit] = useState(0);
   const [totalCredit, setTotalCredit] = useState(0);
   const [isBalanced, setIsBalanced] = useState(false);
+  const [difference, setDifference] = useState(0);
+  const [showImbalanceTooltip, setShowImbalanceTooltip] = useState(false);
 
   // Initialize form with default values
   const form = useForm<JournalFormValues>({
@@ -149,9 +158,15 @@ export function JournalEntryForm({
       }
     });
 
+    const diff = debitTotal - creditTotal;
+    
     setTotalDebit(debitTotal);
     setTotalCredit(creditTotal);
-    setIsBalanced(Math.abs(debitTotal - creditTotal) < 0.01);
+    setDifference(diff);
+    setIsBalanced(Math.abs(diff) < 0.01);
+    
+    // Only show tooltip when there's an actual imbalance and user has started entering data
+    setShowImbalanceTooltip(Math.abs(diff) >= 0.01 && (debitTotal > 0 || creditTotal > 0));
   }, [formValues]);
 
   // Handle form submission
@@ -429,14 +444,50 @@ export function JournalEntryForm({
                     }).format(totalCredit)}
                   </td>
                   <td colSpan={2} className="py-2 px-4">
-                    {!isBalanced && (
-                      <span className="text-destructive text-sm">
-                        Out of balance:{" "}
-                        {new Intl.NumberFormat("en-US", {
-                          style: "currency",
-                          currency: "USD",
-                        }).format(Math.abs(totalDebit - totalCredit))}
-                      </span>
+                    {showImbalanceTooltip ? (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="flex items-center">
+                              <Badge variant={isBalanced ? "outline" : "destructive"} className="flex items-center gap-1">
+                                <DollarSign className="h-3 w-3" />
+                                {isBalanced ? "Balanced" : "Imbalanced"}
+                              </Badge>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs">
+                            {isBalanced ? (
+                              <p className="text-sm text-green-600">Journal entry is balanced.</p>
+                            ) : (
+                              <div className="space-y-1">
+                                <p className="text-sm font-medium text-destructive">Journal entry is out of balance:</p>
+                                <p className="text-xs">
+                                  {difference > 0 ? "Debit exceeds credit by " : "Credit exceeds debit by "}
+                                  {new Intl.NumberFormat("en-US", {
+                                    style: "currency",
+                                    currency: "USD",
+                                  }).format(Math.abs(difference))}
+                                </p>
+                                <p className="text-xs mt-1">
+                                  {difference > 0 
+                                    ? "Add more credit entries or reduce debit amounts." 
+                                    : "Add more debit entries or reduce credit amounts."}
+                                </p>
+                              </div>
+                            )}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : (
+                      !isBalanced && (
+                        <span className="text-destructive text-sm">
+                          Out of balance:{" "}
+                          {new Intl.NumberFormat("en-US", {
+                            style: "currency",
+                            currency: "USD",
+                          }).format(Math.abs(totalDebit - totalCredit))}
+                        </span>
+                      )
                     )}
                   </td>
                 </tr>
@@ -446,12 +497,26 @@ export function JournalEntryForm({
         </div>
 
         {/* Balance Warning */}
-        {!isBalanced && (
-          <Alert variant="destructive">
+        {!isBalanced && formValues.lines.some(line => line.debit || line.credit) && (
+          <Alert variant={showImbalanceTooltip ? "destructive" : "default"} className="relative">
             <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>
-              Journal entry is out of balance. Total debits must equal total credits.
+            <AlertTitle>Journal Entry Imbalance</AlertTitle>
+            <AlertDescription className="flex flex-col gap-1">
+              <p>Journal entry is out of balance. Total debits must equal total credits.</p>
+              <div className="text-sm mt-1">
+                <span className="font-medium">Difference:</span>{" "}
+                {new Intl.NumberFormat("en-US", {
+                  style: "currency",
+                  currency: "USD",
+                }).format(Math.abs(difference))}
+                {difference > 0 ? " (more debits)" : " (more credits)"}
+              </div>
+              <div className="text-sm mt-1">
+                <span className="font-medium">Suggestion:</span>{" "}
+                {difference > 0 
+                  ? `Add a credit of ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Math.abs(difference))}` 
+                  : `Add a debit of ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Math.abs(difference))}`}
+              </div>
             </AlertDescription>
           </Alert>
         )}
