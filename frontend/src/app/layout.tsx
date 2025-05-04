@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 import { AuthProvider } from "@/context/AuthContext";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
@@ -40,6 +42,25 @@ export default function RootLayout({
           >
             {/* Initialize email templates when app loads */}
             <EmailTemplateProvider />
+            <header className="border-b bg-background">
+              <div className="container mx-auto flex items-center space-x-4 py-4">
+                <Button asChild variant="ghost">
+                  <Link href="/">Home</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/budget">Budget</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard">Dashboard</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/gl-codes">GL Codes</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/gl-transactions">GL Transactions</Link>
+                </Button>
+              </div>
+            </header>
             {children}
             <Toaster />
           </ThemeProvider>

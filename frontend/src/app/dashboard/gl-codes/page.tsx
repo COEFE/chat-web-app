@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import GLCodeUpload from "@/components/GLCodeUpload";
+import GLCodeForm from "@/components/GLCodeForm"; // Import GLCodeForm
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -10,70 +11,77 @@ import { Loader2, Upload, Database } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/context/AuthContext";
 
-interface GLCode {
+interface Account {
   id: number;
-  gl_code: string;
-  description: string;
-  content: string;
+  code: string;
+  name: string;
+  parent_id: number | null;
+  parent_code: string | null;
+  notes: string | null;
+  is_custom: boolean;
 }
 
 export default function GLCodesPage() {
   const [activeTab, setActiveTab] = useState("upload");
-  const [codes, setCodes] = useState<GLCode[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingClearGLCodes, setLoadingClearGLCodes] = useState<boolean>(false);
   const { toast } = useToast();
   const { user } = useAuth();
   const router = useRouter();
 
-  const fetchGLCodes = async () => {
+  // Auto-run DB setup on mount
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const token = await user?.getIdToken();
+      if (!token) return;
+      try {
+        await fetch('/api/accounts/db-setup', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+        });
+      } catch (e) {
+        console.error('[accounts] auto-setup error', e);
+      }
+    })();
+  }, [user]);
+
+  const fetchAccounts = async () => {
     setIsLoading(true);
     try {
       // Get Firebase token
       const token = await user?.getIdToken();
       if (!token) {
-        throw new Error('You must be logged in to access GL codes');
+        throw new Error('You must be logged in to access chart of accounts');
       }
-      
-      // Fetch GL codes (and setup DB if missing)
-      const res = await fetch('/api/gl-codes', {
+      // Fetch accounts
+      const res = await fetch('/api/accounts', {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (!res.ok) {
         if (data.setupRequired) {
           toast({
-            title: "Setting up database...",
-            description: "Initializing GL codes database",
+            title: "Setting up accounts...",
+            description: "Initializing chart of accounts database",
             variant: "default",
           });
-          const setupRes = await fetch('/api/gl-codes/db-setup', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          });
-          const setupData = await setupRes.json();
-          if (!setupRes.ok) {
-            throw new Error(setupData.error || 'Database setup failed');
-          }
-          toast({
-            title: "Database setup successful",
-            description: setupData.message,
-            variant: "default",
-          });
-          // Retry fetching GL codes after setup
-          return fetchGLCodes();
+          // Already ran db-setup above, retry fetch
+          return fetchAccounts();
         }
-        throw new Error(data.error || 'Failed to fetch GL codes');
+        throw new Error(data.error || 'Failed to fetch accounts');
       }
-      setCodes(data.glCodes || []);
+      setAccounts(data.accounts || []);
     } catch (error) {
       // If token invalid or unauthorized, redirect to login
       if (error instanceof Error && error.message.includes('Unauthorized')) {
         router.push('/login');
         return;
       }
-      console.error('Error fetching GL codes:', error);
+      console.error('Error fetching accounts:', error);
       toast({
-        title: "Error fetching GL codes",
+        title: "Error fetching accounts",
         description: error instanceof Error ? error.message : "Unknown error occurred",
         variant: "destructive",
       });
@@ -82,11 +90,28 @@ export default function GLCodesPage() {
     }
   };
 
-  // Fetch GL codes when viewing the manage tab
+  async function clearGLCodes() {
+    setLoadingClearGLCodes(true);
+    try {
+      const token = await user?.getIdToken();
+      if (!token) throw new Error('Authentication required');
+      const res = await fetch('/api/clear-gl-codes', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Clear failed');
+      toast({ title: 'GL Codes Cleared', description: data.message });
+      fetchAccounts();
+    } catch (err: any) {
+      toast({ title: 'Clear error', description: err.message, variant: 'destructive' });
+    } finally {
+      setLoadingClearGLCodes(false);
+    }
+  }
+
+  // Fetch accounts when viewing the manage tab
   const handleTabChange = (value: string) => {
     setActiveTab(value);
     if (value === "manage") {
-      fetchGLCodes();
+      fetchAccounts();
     }
   };
 
@@ -104,20 +129,24 @@ export default function GLCodesPage() {
             </TabsTrigger>
             <TabsTrigger value="manage" className="flex items-center">
               <Database className="w-4 h-4 mr-2" />
-              Manage GL Codes
+              Manage Accounts
             </TabsTrigger>
           </TabsList>
           
           <TabsContent value="upload" className="space-y-4">
             <Card className="mb-4">
               <CardHeader>
-                <CardTitle>Upload GL Codes</CardTitle>
+                <CardTitle>Upload or Create GL Codes</CardTitle>
                 <CardDescription>
-                  Upload your chart of accounts to enable AI assistance with your accounting code inquiries.
+                  Upload your chart of accounts or create individual GL codes.
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-6">
                 <GLCodeUpload />
+                <div className="border-t pt-6">
+                  <h3 className="text-lg font-medium">Add Custom GL Code</h3>
+                  <GLCodeForm />
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -126,40 +155,45 @@ export default function GLCodesPage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle>Manage GL Codes</CardTitle>
+                  <CardTitle>Manage Chart of Accounts</CardTitle>
                   <CardDescription>
-                    View and manage your GL codes in the knowledge base.
+                    View and manage your chart of accounts.
                   </CardDescription>
                 </div>
-                <Button 
-                  variant="outline" 
-                  onClick={fetchGLCodes}
-                  disabled={isLoading}
-                >
-                  {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}
-                </Button>
+                <div className="space-x-2">
+                  <Button variant="outline" onClick={fetchAccounts} disabled={isLoading || loadingClearGLCodes}>
+                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}
+                  </Button>
+                  <Button variant="destructive" onClick={clearGLCodes} disabled={loadingClearGLCodes || isLoading}>
+                    {loadingClearGLCodes ? <Loader2 className="h-4 w-4 animate-spin" /> : "Clear"}
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 {isLoading ? (
                   <div className="flex justify-center items-center py-8">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
                   </div>
-                ) : codes.length > 0 ? (
+                ) : accounts.length > 0 ? (
                   <div className="border rounded-md overflow-auto max-h-[500px]">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-200 sticky top-0">
                         <tr>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">GL Code</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Description</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Content</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Code</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Name</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Parent</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Notes</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Custom</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 text-black">
-                        {codes.map((code) => (
-                          <tr key={code.id} className="odd:bg-white even:bg-gray-100">
-                            <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">{code.gl_code}</td>
-                            <td className="px-4 py-2 text-sm">{code.description}</td>
-                            <td className="px-4 py-2 text-sm max-w-md truncate">{code.content}</td>
+                        {accounts.map((acc) => (
+                          <tr key={acc.id} className="odd:bg-white even:bg-gray-100">
+                            <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">{acc.code}</td>
+                            <td className="px-4 py-2 text-sm">{acc.name}</td>
+                            <td className="px-4 py-2 text-sm">{acc.parent_code || '-'}</td>
+                            <td className="px-4 py-2 text-sm">{acc.notes || '-'}</td>
+                            <td className="px-4 py-2 text-sm">{acc.is_custom ? 'Yes' : 'No'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -167,7 +201,7 @@ export default function GLCodesPage() {
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
-                    <p>No GL codes found. Upload some codes using the upload tab.</p>
+                    <p>No accounts found. Populate the chart using the upload tab.</p>
                   </div>
                 )}
               </CardContent>
