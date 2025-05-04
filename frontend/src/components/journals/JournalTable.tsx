@@ -1,0 +1,258 @@
+"use client";
+
+import { useState } from "react";
+import { format } from "date-fns";
+import { Eye, Pencil, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+
+export interface JournalEntry {
+  id: number;
+  date: string | Date;
+  memo: string;
+  source?: string;
+  created_by: string;
+  created_at: string | Date;
+  is_posted: boolean;
+  is_deleted: boolean;
+  total_amount?: number;
+  lines?: JournalLine[];
+}
+
+export interface JournalLine {
+  id: number;
+  journal_id: number;
+  account_id: number;
+  account_code?: string;
+  account_name?: string;
+  debit: number;
+  credit: number;
+  description?: string;
+}
+
+interface JournalTableProps {
+  journals: JournalEntry[];
+  onView: (journal: JournalEntry) => void;
+  onEdit: (journal: JournalEntry) => void;
+  onDelete: (journal: JournalEntry) => void;
+  isLoading?: boolean;
+}
+
+export function JournalTable({
+  journals,
+  onView,
+  onEdit,
+  onDelete,
+  isLoading = false,
+}: JournalTableProps) {
+  const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
+
+  // Toggle row expansion
+  const toggleRowExpansion = (journalId: number) => {
+    setExpandedRows((prev) => ({
+      ...prev,
+      [journalId]: !prev[journalId],
+    }));
+  };
+
+  // Format date for display
+  const formatDate = (date: string | Date) => {
+    if (!date) return "N/A";
+    try {
+      return format(new Date(date), "MMM d, yyyy");
+    } catch (e) {
+      return "Invalid Date";
+    }
+  };
+
+  // Format amount for display
+  const formatAmount = (amount: number) => {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+    }).format(amount || 0);
+  };
+
+  return (
+    <div className="border rounded-md">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-10"></TableHead>
+            <TableHead>Date</TableHead>
+            <TableHead>Memo</TableHead>
+            <TableHead>Source</TableHead>
+            <TableHead>Amount</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {isLoading ? (
+            <TableRow>
+              <TableCell colSpan={7} className="text-center py-8">
+                <div className="flex justify-center">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                </div>
+              </TableCell>
+            </TableRow>
+          ) : journals.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={7} className="text-center py-8">
+                No journal entries found
+              </TableCell>
+            </TableRow>
+          ) : (
+            journals.map((journal) => (
+              <>
+                <TableRow key={journal.id} className="hover:bg-muted/50">
+                  <TableCell>
+                    {journal.lines && journal.lines.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        onClick={() => toggleRowExpansion(journal.id)}
+                      >
+                        {expandedRows[journal.id] ? (
+                          <ChevronUp className="h-4 w-4" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4" />
+                        )}
+                      </Button>
+                    )}
+                  </TableCell>
+                  <TableCell>{formatDate(journal.date)}</TableCell>
+                  <TableCell>{journal.memo}</TableCell>
+                  <TableCell>{journal.source || "—"}</TableCell>
+                  <TableCell>
+                    {formatAmount(journal.total_amount || 0)}
+                  </TableCell>
+                  <TableCell>
+                    {journal.is_deleted ? (
+                      <Badge variant="destructive">Deleted</Badge>
+                    ) : journal.is_posted ? (
+                      <Badge variant="default">Posted</Badge>
+                    ) : (
+                      <Badge variant="outline">Draft</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm">
+                          Actions
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          className="flex items-center"
+                          onClick={() => onView(journal)}
+                        >
+                          <Eye className="mr-2 h-4 w-4" />
+                          View
+                        </DropdownMenuItem>
+                        {!journal.is_posted && !journal.is_deleted && (
+                          <DropdownMenuItem
+                            className="flex items-center"
+                            onClick={() => onEdit(journal)}
+                          >
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit
+                          </DropdownMenuItem>
+                        )}
+                        {!journal.is_deleted && (
+                          <DropdownMenuItem
+                            className="flex items-center text-destructive"
+                            onClick={() => onDelete(journal)}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+                {expandedRows[journal.id] && journal.lines && (
+                  <TableRow className="bg-muted/30">
+                    <TableCell colSpan={7} className="p-0">
+                      <div className="px-4 py-2">
+                        <h4 className="text-sm font-medium mb-2">
+                          Journal Lines
+                        </h4>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Account</TableHead>
+                              <TableHead className="text-right">Debit</TableHead>
+                              <TableHead className="text-right">Credit</TableHead>
+                              <TableHead>Description</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {journal.lines.map((line) => (
+                              <TableRow key={line.id}>
+                                <TableCell>
+                                  {line.account_code && line.account_name
+                                    ? `${line.account_code} - ${line.account_name}`
+                                    : `Account #${line.account_id}`}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {line.debit > 0 ? formatAmount(line.debit) : ""}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {line.credit > 0 ? formatAmount(line.credit) : ""}
+                                </TableCell>
+                                <TableCell>{line.description || "—"}</TableCell>
+                              </TableRow>
+                            ))}
+                            <TableRow className="bg-muted/50 font-medium">
+                              <TableCell>Totals</TableCell>
+                              <TableCell className="text-right">
+                                {formatAmount(
+                                  journal.lines.reduce(
+                                    (sum, line) => sum + (line.debit || 0),
+                                    0
+                                  )
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {formatAmount(
+                                  journal.lines.reduce(
+                                    (sum, line) => sum + (line.credit || 0),
+                                    0
+                                  )
+                                )}
+                              </TableCell>
+                              <TableCell></TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}

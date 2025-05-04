@@ -59,6 +59,12 @@ export default function RootLayout({
                 <Button asChild variant="ghost">
                   <Link href="/dashboard/gl-transactions">GL Transactions</Link>
                 </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/journals">Journals</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/accounts">Accounts</Link>
+                </Button>
               </div>
             </header>
             {children}
