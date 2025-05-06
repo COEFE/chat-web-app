@@ -9,7 +9,11 @@ import { useToast } from "@/components/ui/use-toast";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
-export default function GLCodeForm() {
+interface GLCodeFormProps {
+  onSuccess?: () => void;
+}
+
+export default function GLCodeForm({ onSuccess }: GLCodeFormProps) {
   const [code, setCode] = useState("");
   const [description, setDescription] = useState("");
   const [notes, setNotes] = useState("");
@@ -26,14 +30,15 @@ export default function GLCodeForm() {
     try {
       const token = await user?.getIdToken();
       if (!token) throw new Error('Authentication required');
-      const res = await fetch('/api/gl-codes', {
+      const res = await fetch('/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ glCodes: [{ code, description, notes }] }),
+        body: JSON.stringify({ code, name: description, notes }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create GL code');
+      if (!res.ok) throw new Error(data.error || 'Failed to create account');
       toast({ title: 'Created', description: `${code} added successfully` });
+      if (onSuccess) onSuccess();
       setCode('');
       setDescription('');
       setNotes('');
@@ -74,7 +79,7 @@ export default function GLCodeForm() {
         />
       </div>
       <Button onClick={handleCreate} disabled={isLoading} className="w-full">
-        {isLoading ? <Loader2 className="animate-spin h-4 w-4" /> : 'Save'}
+        {isLoading ? <Loader2 className="animate-spin h-4 w-4" /> : 'Create Account'}
       </Button>
     </div>
   );

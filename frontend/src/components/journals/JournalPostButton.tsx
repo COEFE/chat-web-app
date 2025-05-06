@@ -29,6 +29,22 @@ export function JournalPostButton({ journalId, onPostComplete }: JournalPostButt
   const handlePost = async () => {
     setIsLoading(true);
     try {
+      // Log the journal ID for debugging
+      console.log("Journal ID being sent:", journalId, "Type:", typeof journalId);
+      
+      // Validate the journal ID
+      if (journalId === undefined || journalId === null) {
+        throw new Error("Journal ID is missing");
+      }
+      
+      // Convert to number and validate
+      const validJournalId = Number(journalId);
+      console.log("Converted journal ID:", validJournalId, "isNaN:", isNaN(validJournalId));
+      
+      if (isNaN(validJournalId)) {
+        throw new Error(`Invalid journal ID: '${journalId}' is not a valid number`);
+      }
+      
       // Get authorization token
       const auth = getAuth();
       const user = auth.currentUser;
@@ -39,7 +55,11 @@ export function JournalPostButton({ journalId, onPostComplete }: JournalPostButt
       
       const token = await user.getIdToken();
       
-      const response = await fetch(`/api/journals/${journalId}/post`, {
+      // Use string interpolation carefully
+      const apiUrl = `/api/journals/${validJournalId}/post`;
+      console.log("API URL being called:", apiUrl);
+      
+      const response = await fetch(apiUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

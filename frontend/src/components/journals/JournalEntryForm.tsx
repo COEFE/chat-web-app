@@ -61,61 +61,81 @@ const journalFormSchema = z.object({
     message: "Memo must be at least 2 characters.",
   }),
   source: z.string().optional(),
-  lines: z.array(journalLineSchema)
-    .min(2, {
-      message: "Journal must have at least 2 lines",
-    })
-    .refine(
-      (lines) => {
-        // Calculate total debits and credits
-        const totalDebit = lines.reduce((sum, line) => {
-          const debitValue = parseFloat(line.debit || "0");
-          return sum + (isNaN(debitValue) ? 0 : debitValue);
-        }, 0);
-        
-        const totalCredit = lines.reduce((sum, line) => {
-          const creditValue = parseFloat(line.credit || "0");
-          return sum + (isNaN(creditValue) ? 0 : creditValue);
-        }, 0);
-        
-        // Check if they balance (with small rounding tolerance)
-        return Math.abs(totalDebit - totalCredit) < 0.01;
-      },
-      {
-        message: "Journal entry must balance (total debits must equal total credits)",
-        path: ["lines"],
-      }
-    ),
+  lines: z.array(journalLineSchema).min(1, {
+    message: "At least one journal line is required",
+  }),
 });
 
-type JournalFormValues = z.infer<typeof journalFormSchema>;
+// Define form values type
+export type JournalFormValues = z.infer<typeof journalFormSchema>;
 
-interface JournalEntryFormProps {
+export interface JournalEntryFormProps {
   journalId?: number;
   defaultValues?: JournalFormValues;
-  accounts: AccountNode[];
+  accounts: AccountNode[] | { accounts: AccountNode[], flatAccounts: any[] };
   onSubmit: (values: JournalFormValues) => void;
   onCancel: () => void;
   isSubmitting: boolean;
 }
 
-export function JournalEntryForm({
-  journalId,
-  defaultValues,
-  accounts,
-  onSubmit,
-  onCancel,
-  isSubmitting,
+// Helper function to flatten account hierarchy
+const flattenAccounts = (accounts: AccountNode[]): AccountNode[] => {
+  const result: AccountNode[] = [];
+  
+  const traverse = (account: AccountNode) => {
+    result.push(account);
+    if (account.children && account.children.length > 0) {
+      account.children.forEach(traverse);
+    }
+  };
+  
+  accounts.forEach(traverse);
+  return result;
+};
+
+export function JournalEntryForm({ 
+  accounts = [], 
+  onSubmit, 
+  onCancel, 
+  defaultValues, 
+  isSubmitting = false 
 }: JournalEntryFormProps) {
-  // Flatten accounts for select dropdown
-  const flatAccounts = flattenAccounts(accounts);
+  // Add explicit error message when accounts are missing
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+  
+  // Check if accounts data is valid
+  useEffect(() => {
+    const accountsArray = Array.isArray(accounts) ? accounts : accounts.accounts;
+    const flatAccountsArray = Array.isArray(accounts) ? [] : (accounts.flatAccounts || []);
+    
+    if (!accountsArray || accountsArray.length === 0) {
+      if (flatAccountsArray.length === 0) {
+        setAccountsError("No accounts available. Please ensure accounts are set up before creating journal entries.");
+      } else {
+        // We have flat accounts but no hierarchical accounts
+        setAccountsError(null);
+      }
+    } else {
+      setAccountsError(null);
+    }
+  }, [accounts]);
+  
+  // Get flattened accounts for select dropdown
+  const flatAccounts = Array.isArray(accounts) 
+    ? flattenAccounts(accounts)
+    : (accounts.flatAccounts || []); 
+  
+  // Debug the accounts data structure
+  useEffect(() => {
+    console.log("Accounts received in JournalEntryForm:", accounts);
+    console.log("Using flat accounts length:", flatAccounts.length);
+  }, [accounts]);
   
   // Calculate totals for the form
   const [totalDebit, setTotalDebit] = useState(0);
   const [totalCredit, setTotalCredit] = useState(0);
   const [isBalanced, setIsBalanced] = useState(false);
   const [difference, setDifference] = useState(0);
-  const [showImbalanceTooltip, setShowImbalanceTooltip] = useState(false);
 
   // Initialize form with default values
   const form = useForm<JournalFormValues>({
@@ -125,221 +145,253 @@ export function JournalEntryForm({
       memo: "",
       source: "",
       lines: [
-        { account_id: "", debit: "", credit: "", description: "" },
-        { account_id: "", debit: "", credit: "", description: "" },
+        {
+          account_id: "",
+          debit: "",
+          credit: "",
+          description: "",
+        },
+        {
+          account_id: "",
+          debit: "",
+          credit: "",
+          description: "", 
+        },
       ],
     },
   });
 
-  // Use field array for dynamic journal lines
+  // Set up field array for journal lines
   const { fields, append, remove } = useFieldArray({
     control: form.control,
     name: "lines",
   });
 
-  // Watch form values to calculate totals
+  // Watch form values for validation
   const formValues = form.watch();
 
-  // Calculate totals when form values change
+  // Calculate totals and update balance status when form values change
   useEffect(() => {
-    let debitTotal = 0;
-    let creditTotal = 0;
+    let debitSum = 0;
+    let creditSum = 0;
 
     formValues.lines.forEach((line) => {
-      const debitValue = parseFloat(line.debit || "0");
-      const creditValue = parseFloat(line.credit || "0");
+      const debitValue = line.debit ? parseFloat(line.debit) : 0;
+      const creditValue = line.credit ? parseFloat(line.credit) : 0;
 
       if (!isNaN(debitValue)) {
-        debitTotal += debitValue;
+        debitSum += debitValue;
       }
-
+      
       if (!isNaN(creditValue)) {
-        creditTotal += creditValue;
+        creditSum += creditValue;
       }
     });
 
-    const diff = debitTotal - creditTotal;
+    setTotalDebit(debitSum);
+    setTotalCredit(creditSum);
     
-    setTotalDebit(debitTotal);
-    setTotalCredit(creditTotal);
+    const diff = Math.abs(debitSum - creditSum);
     setDifference(diff);
-    setIsBalanced(Math.abs(diff) < 0.01);
-    
-    // Only show tooltip when there's an actual imbalance and user has started entering data
-    setShowImbalanceTooltip(Math.abs(diff) >= 0.01 && (debitTotal > 0 || creditTotal > 0));
+    setIsBalanced(diff < 0.01); // Allow for small rounding errors
   }, [formValues]);
 
   // Handle form submission
   const handleSubmit = (values: JournalFormValues) => {
-    // Double-check balance before submission
-    let debitTotal = 0;
-    let creditTotal = 0;
-    
-    values.lines.forEach((line) => {
-      const debitValue = parseFloat(line.debit || "0");
-      const creditValue = parseFloat(line.credit || "0");
-      
-      if (!isNaN(debitValue)) {
-        debitTotal += debitValue;
-      }
-      
-      if (!isNaN(creditValue)) {
-        creditTotal += creditValue;
-      }
-    });
-    
-    // Ensure the journal entry is balanced
-    if (Math.abs(debitTotal - creditTotal) >= 0.01) {
-      // Display error message
-      form.setError("lines", { 
-        type: "manual", 
-        message: `Journal entry must balance: debits (${debitTotal.toFixed(2)}) must equal credits (${creditTotal.toFixed(2)})` 
+    // Validate that debits = credits
+    if (!isBalanced) {
+      form.setError("root", {
+        type: "manual",
+        message: "Journal entry must be balanced (debits must equal credits)",
       });
       return;
     }
     
-    // Pass the values directly to onSubmit, keeping the types consistent
-    // with the JournalFormValues type (strings for debit/credit)
+    // Call onSubmit callback with validated values
     onSubmit(values);
   };
 
   // Handle adding a new line
   const addLine = () => {
-    append({ account_id: "", debit: "", credit: "", description: "" });
+    append({
+      account_id: "",
+      debit: "",
+      credit: "",
+      description: "",
+    });
   };
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Date Field */}
-          <FormField
-            control={form.control}
-            name="date"
-            render={({ field }) => (
-              <FormItem className="flex flex-col">
-                <FormLabel>Date</FormLabel>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <FormControl>
-                      <Button
-                        variant={"outline"}
-                        className={cn(
-                          "pl-3 text-left font-normal",
-                          !field.value && "text-muted-foreground"
-                        )}
-                      >
-                        {field.value ? (
-                          format(field.value, "PPP")
-                        ) : (
-                          <span>Pick a date</span>
-                        )}
-                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                      </Button>
-                    </FormControl>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={field.value}
-                      onSelect={field.onChange}
-                      disabled={(date) =>
-                        date > new Date() || date < new Date("1900-01-01")
-                      }
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
-                <FormDescription>
-                  Date of the journal entry
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+    <div>
+      {accountsError && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{accountsError}</AlertDescription>
+        </Alert>
+      )}
+      
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Date Field */}
+            <FormField
+              control={form.control}
+              name="date"
+              render={({ field }) => (
+                <FormItem className="flex flex-col">
+                  <FormLabel>Date</FormLabel>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant={"outline"}
+                          className={cn(
+                            "pl-3 text-left font-normal",
+                            !field.value && "text-muted-foreground"
+                          )}
+                        >
+                          {field.value ? (
+                            format(field.value, "PPP")
+                          ) : (
+                            <span>Pick a date</span>
+                          )}
+                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={field.value}
+                        onSelect={field.onChange}
+                        disabled={(date) =>
+                          date > new Date() || date < new Date("1900-01-01")
+                        }
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <FormDescription>
+                    Date of the journal entry
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Source Field */}
+            <FormField
+              control={form.control}
+              name="source"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Source (optional)</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Source document or reference..." {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    Source document reference
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
 
           {/* Memo Field */}
           <FormField
             control={form.control}
             name="memo"
             render={({ field }) => (
-              <FormItem className="col-span-2">
+              <FormItem>
                 <FormLabel>Memo</FormLabel>
                 <FormControl>
-                  <Input placeholder="Description of the journal entry" {...field} />
+                  <Textarea
+                    placeholder="Description of this journal entry..."
+                    {...field}
+                  />
                 </FormControl>
                 <FormDescription>
-                  Brief description of the journal entry
+                  A clear description of the purpose of this entry
                 </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
           />
-        </div>
-
-        {/* Source Field */}
-        <FormField
-          control={form.control}
-          name="source"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Source</FormLabel>
-              <FormControl>
-                <Input placeholder="Source document or reference (optional)" {...field} />
-              </FormControl>
-              <FormDescription>
-                Optional reference to source document (e.g., invoice number)
-              </FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        {/* Journal Lines */}
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-medium">Journal Lines</h3>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={addLine}
-              className="flex items-center"
-            >
-              <Plus className="h-4 w-4 mr-1" /> Add Line
-            </Button>
-          </div>
 
           {/* Journal Lines Table */}
-          <div className="border rounded-md">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left py-2 px-4 font-medium">Account</th>
-                  <th className="text-right py-2 px-4 font-medium">Debit</th>
-                  <th className="text-right py-2 px-4 font-medium">Credit</th>
-                  <th className="text-left py-2 px-4 font-medium">Description</th>
-                  <th className="py-2 px-4 w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {fields.map((field, index) => (
-                  <tr key={field.id} className="border-b last:border-b-0">
-                    {/* Account Select */}
-                    <td className="py-2 px-4">
-                      <FormField
-                        control={form.control}
-                        name={`lines.${index}.account_id`}
-                        render={({ field }) => (
-                          <FormItem className="space-y-0">
-                            <FormControl>
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <FormLabel>Journal Lines</FormLabel>
+              <div className="flex items-center space-x-2">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div>
+                        <Badge
+                          variant={isBalanced ? "outline" : "destructive"}
+                          className={`${
+                            isBalanced ? "bg-green-50" : "bg-destructive/10"
+                          } cursor-default`}
+                        >
+                          {isBalanced
+                            ? "Entry is balanced"
+                            : `Out of balance by $${difference.toFixed(2)}`}
+                        </Badge>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>
+                        Journal entries must be balanced, meaning total debits
+                        must equal total credits.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            </div>
+
+            <div className="border rounded-md">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b">
+                    <th className="px-3 py-2 text-left font-medium text-sm">
+                      Account
+                    </th>
+                    <th className="px-3 py-2 text-left font-medium text-sm">
+                      Description
+                    </th>
+                    <th className="px-3 py-2 text-right font-medium text-sm">
+                      Debit
+                    </th>
+                    <th className="px-3 py-2 text-right font-medium text-sm">
+                      Credit
+                    </th>
+                    <th className="px-3 py-2 text-center font-medium text-sm w-10">
+                      {/* Actions */}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fields.map((field, index) => (
+                    <tr key={field.id} className="border-b">
+                      <td className="p-2">
+                        <FormField
+                          control={form.control}
+                          name={`lines.${index}.account_id`}
+                          render={({ field }) => (
+                            <FormItem>
                               <Select
+                                value={field.value}
                                 onValueChange={field.onChange}
-                                defaultValue={field.value}
+                                disabled={flatAccounts.length === 0}
                               >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue placeholder="Select account" />
-                                </SelectTrigger>
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select account" />
+                                  </SelectTrigger>
+                                </FormControl>
                                 <SelectContent>
                                   {flatAccounts.map((account) => (
                                     <SelectItem
@@ -351,254 +403,167 @@ export function JournalEntryForm({
                                   ))}
                                 </SelectContent>
                               </Select>
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <FormField
+                          control={form.control}
+                          name={`lines.${index}.description`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormControl>
+                                <Input
+                                  placeholder="Description..."
+                                  {...field}
+                                  value={field.value || ""}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <FormField
+                          control={form.control}
+                          name={`lines.${index}.debit`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormControl>
+                                <div className="relative">
+                                  <DollarSign className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    placeholder="0.00"
+                                    className="pl-8 text-right"
+                                    {...field}
+                                    value={field.value || ""}
+                                    onChange={(e) => {
+                                      field.onChange(e);
+                                      // Clear credit if debit has a value
+                                      if (e.target.value) {
+                                        form.setValue(
+                                          `lines.${index}.credit`,
+                                          ""
+                                        );
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <FormField
+                          control={form.control}
+                          name={`lines.${index}.credit`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormControl>
+                                <div className="relative">
+                                  <DollarSign className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    placeholder="0.00"
+                                    className="pl-8 text-right"
+                                    {...field}
+                                    value={field.value || ""}
+                                    onChange={(e) => {
+                                      field.onChange(e);
+                                      // Clear debit if credit has a value
+                                      if (e.target.value) {
+                                        form.setValue(
+                                          `lines.${index}.debit`,
+                                          ""
+                                        );
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </td>
+                      <td className="p-2 text-center">
+                        {fields.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => remove(index)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         )}
-                      />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t">
+                    <td colSpan={2} className="px-3 py-2 text-right font-medium">
+                      Totals:
                     </td>
-
-                    {/* Debit Input */}
-                    <td className="py-2 px-4">
-                      <FormField
-                        control={form.control}
-                        name={`lines.${index}.debit`}
-                        render={({ field }) => (
-                          <FormItem className="space-y-0">
-                            <FormControl>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                placeholder="0.00"
-                                className="text-right"
-                                {...field}
-                                onChange={(e) => {
-                                  field.onChange(e);
-                                  // Clear credit if debit has a value
-                                  if (e.target.value) {
-                                    form.setValue(`lines.${index}.credit`, "");
-                                  }
-                                }}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
+                    <td className="px-3 py-2 text-right font-medium">
+                      ${totalDebit.toFixed(2)}
                     </td>
-
-                    {/* Credit Input */}
-                    <td className="py-2 px-4">
-                      <FormField
-                        control={form.control}
-                        name={`lines.${index}.credit`}
-                        render={({ field }) => (
-                          <FormItem className="space-y-0">
-                            <FormControl>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                placeholder="0.00"
-                                className="text-right"
-                                {...field}
-                                onChange={(e) => {
-                                  field.onChange(e);
-                                  // Clear debit if credit has a value
-                                  if (e.target.value) {
-                                    form.setValue(`lines.${index}.debit`, "");
-                                  }
-                                }}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
+                    <td className="px-3 py-2 text-right font-medium">
+                      ${totalCredit.toFixed(2)}
                     </td>
-
-                    {/* Description Input */}
-                    <td className="py-2 px-4">
-                      <FormField
-                        control={form.control}
-                        name={`lines.${index}.description`}
-                        render={({ field }) => (
-                          <FormItem className="space-y-0">
-                            <FormControl>
-                              <Input
-                                placeholder="Line description (optional)"
-                                {...field}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </td>
-
-                    {/* Remove Button */}
-                    <td className="py-2 px-4">
-                      {fields.length > 2 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-destructive"
-                          onClick={() => remove(index)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          <span className="sr-only">Remove</span>
-                        </Button>
-                      )}
-                    </td>
+                    <td></td>
                   </tr>
-                ))}
+                </tfoot>
+              </table>
+            </div>
 
-                {/* Totals Row */}
-                <tr className="bg-muted/50 font-medium">
-                  <td className="py-2 px-4 text-right">Totals:</td>
-                  <td className="py-2 px-4 text-right">
-                    {new Intl.NumberFormat("en-US", {
-                      style: "currency",
-                      currency: "USD",
-                    }).format(totalDebit)}
-                  </td>
-                  <td className="py-2 px-4 text-right">
-                    {new Intl.NumberFormat("en-US", {
-                      style: "currency",
-                      currency: "USD",
-                    }).format(totalCredit)}
-                  </td>
-                  <td colSpan={2} className="py-2 px-4">
-                    {showImbalanceTooltip ? (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className="flex items-center">
-                              <Badge variant={isBalanced ? "outline" : "destructive"} className="flex items-center gap-1">
-                                <DollarSign className="h-3 w-3" />
-                                {isBalanced ? "Balanced" : "Imbalanced"}
-                              </Badge>
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-xs">
-                            {isBalanced ? (
-                              <p className="text-sm text-green-600">Journal entry is balanced.</p>
-                            ) : (
-                              <div className="space-y-1">
-                                <p className="text-sm font-medium text-destructive">Journal entry is out of balance:</p>
-                                <p className="text-xs">
-                                  {difference > 0 ? "Debit exceeds credit by " : "Credit exceeds debit by "}
-                                  {new Intl.NumberFormat("en-US", {
-                                    style: "currency",
-                                    currency: "USD",
-                                  }).format(Math.abs(difference))}
-                                </p>
-                                <p className="text-xs mt-1">
-                                  {difference > 0 
-                                    ? "Add more credit entries or reduce debit amounts." 
-                                    : "Add more debit entries or reduce credit amounts."}
-                                </p>
-                              </div>
-                            )}
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    ) : (
-                      !isBalanced && (
-                        <span className="text-destructive text-sm">
-                          Out of balance:{" "}
-                          {new Intl.NumberFormat("en-US", {
-                            style: "currency",
-                            currency: "USD",
-                          }).format(Math.abs(totalDebit - totalCredit))}
-                        </span>
-                      )
-                    )}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addLine}
+              className="mt-2"
+            >
+              <Plus className="h-4 w-4 mr-1" /> Add Line
+            </Button>
           </div>
-        </div>
 
-        {/* Balance Warning */}
-        {!isBalanced && formValues.lines.some(line => line.debit || line.credit) && (
-          <Alert variant="destructive" className="relative">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Journal Entry Imbalance</AlertTitle>
-            <AlertDescription className="flex flex-col gap-1">
-              <p className="font-bold">Journal entry must balance before submission. Total debits must equal total credits.</p>
-              <div className="text-sm mt-1">
-                <span className="font-medium">Current totals:</span>{" "}
-                Debits: {new Intl.NumberFormat("en-US", {
-                  style: "currency",
-                  currency: "USD",
-                }).format(totalDebit)}, 
-                Credits: {new Intl.NumberFormat("en-US", {
-                  style: "currency",
-                  currency: "USD",
-                }).format(totalCredit)}
-              </div>
-              <div className="text-sm mt-1">
-                <span className="font-medium">Difference:</span>{" "}
-                {new Intl.NumberFormat("en-US", {
-                  style: "currency",
-                  currency: "USD",
-                }).format(Math.abs(difference))}
-                {difference > 0 ? " (more debits)" : " (more credits)"}
-              </div>
-              <div className="text-sm mt-1">
-                <span className="font-medium">Suggestion:</span>{" "}
-                {difference > 0 
-                  ? `Add a credit of ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Math.abs(difference))}` 
-                  : `Add a debit of ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Math.abs(difference))}`}
-              </div>
-            </AlertDescription>
-          </Alert>
-        )}
-        
-        {/* Form Error Messages */}
-        {form.formState.errors.lines?.message && (
-          <Alert variant="destructive" className="mt-2">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Validation Error</AlertTitle>
-            <AlertDescription>
-              {form.formState.errors.lines.message}
-            </AlertDescription>
-          </Alert>
-        )}
+          {form.formState.errors.root && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>
+                {form.formState.errors.root.message}
+              </AlertDescription>
+            </Alert>
+          )}
 
-        {/* Form Actions */}
-        <div className="flex justify-end space-x-2">
-          <Button variant="outline" onClick={onCancel} type="button">
-            Cancel
-          </Button>
-          <Button type="submit" disabled={isSubmitting || !isBalanced}>
-            {isSubmitting
-              ? "Saving..."
-              : journalId
-              ? "Update Journal"
-              : "Create Journal"}
-          </Button>
-        </div>
-      </form>
-    </Form>
+          <div className="flex justify-end space-x-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onCancel}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting || accountsError !== null}>
+              {isSubmitting ? "Saving..." : "Save Journal Entry"}
+            </Button>
+          </div>
+        </form>
+      </Form>
+    </div>
   );
-}
-
-// Helper function to flatten the account hierarchy for the select dropdown
-function flattenAccounts(accounts: AccountNode[]): AccountNode[] {
-  const result: AccountNode[] = [];
-  
-  function traverse(account: AccountNode) {
-    result.push(account);
-    if (account.children && account.children.length > 0) {
-      account.children.forEach(traverse);
-    }
-  }
-  
-  accounts.forEach(traverse);
-  return result;
 }

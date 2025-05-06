@@ -102,9 +102,22 @@ export function JournalView({ journal, onClose, onEdit, onPost }: JournalViewPro
     }).format(amount || 0);
   };
 
-  // Calculate totals
-  const totalDebit = journal.lines?.reduce((sum, line) => sum + (line.debit || 0), 0) || 0;
-  const totalCredit = journal.lines?.reduce((sum, line) => sum + (line.credit || 0), 0) || 0;
+  // Calculate totals with proper number parsing to prevent NaN
+  const totalDebit = journal.lines?.reduce((sum, line) => {
+    // Ensure we have a valid number by parsing and defaulting to 0 if NaN
+    const debitValue = typeof line.debit === 'string' 
+      ? parseFloat(line.debit) || 0 
+      : Number(line.debit || 0);
+    return sum + (isNaN(debitValue) ? 0 : debitValue);
+  }, 0) || 0;
+  
+  const totalCredit = journal.lines?.reduce((sum, line) => {
+    // Ensure we have a valid number by parsing and defaulting to 0 if NaN
+    const creditValue = typeof line.credit === 'string' 
+      ? parseFloat(line.credit) || 0 
+      : Number(line.credit || 0);
+    return sum + (isNaN(creditValue) ? 0 : creditValue);
+  }, 0) || 0;
 
   return (
     <Card className="w-full">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { format } from "date-fns";
 import { Eye, Pencil, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,7 @@ interface JournalTableProps {
   onView: (journal: JournalEntry) => void;
   onEdit: (journal: JournalEntry) => void;
   onDelete: (journal: JournalEntry) => void;
+  onReverseEntry?: (journal: JournalEntry) => void;
   isLoading?: boolean;
 }
 
@@ -58,6 +59,7 @@ export function JournalTable({
   onView,
   onEdit,
   onDelete,
+  onReverseEntry,
   isLoading = false,
 }: JournalTableProps) {
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
@@ -119,8 +121,8 @@ export function JournalTable({
             </TableRow>
           ) : (
             journals.map((journal) => (
-              <>
-                <TableRow key={journal.id} className="hover:bg-muted/50">
+              <React.Fragment key={journal.id}>
+                <TableRow className="hover:bg-muted/50">
                   <TableCell>
                     {journal.lines && journal.lines.length > 0 && (
                       <Button
@@ -176,7 +178,37 @@ export function JournalTable({
                             Edit
                           </DropdownMenuItem>
                         )}
-                        {!journal.is_deleted && (
+                        {/* Show Reverse Entry option for posted journals */}
+                        {journal.is_posted && !journal.is_deleted && onReverseEntry && (
+                          <DropdownMenuItem
+                            className="flex items-center"
+                            onClick={() => onReverseEntry(journal)}
+                          >
+                            <svg
+                              className="mr-2 h-4 w-4"
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="24"
+                              height="24"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="m3 8 4-4 4 4" />
+                              <path d="M7 4v9" />
+                              <path d="m21 16-4 4-4-4" />
+                              <path d="M17 20v-9" />
+                              <path d="M15 7H8" />
+                              <path d="M16 17H9" />
+                            </svg>
+                            Reverse Entry
+                          </DropdownMenuItem>
+                        )}
+                        
+                        {/* Only show Delete for non-posted journals */}
+                        {!journal.is_posted && !journal.is_deleted && (
                           <DropdownMenuItem
                             className="flex items-center text-destructive"
                             onClick={() => onDelete(journal)}
@@ -248,7 +280,7 @@ export function JournalTable({
                     </TableCell>
                   </TableRow>
                 )}
-              </>
+              </React.Fragment>
             ))
           )}
         </TableBody>

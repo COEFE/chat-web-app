@@ -43,7 +43,7 @@ export default function RootLayout({
             {/* Initialize email templates when app loads */}
             <EmailTemplateProvider />
             <header className="border-b bg-background">
-              <div className="container mx-auto flex items-center space-x-4 py-4">
+              <div className="container mx-auto flex items-center space-x-4 py-4 overflow-x-auto">
                 <Button asChild variant="ghost">
                   <Link href="/">Home</Link>
                 </Button>
@@ -60,10 +60,16 @@ export default function RootLayout({
                   <Link href="/dashboard/gl-transactions">GL Transactions</Link>
                 </Button>
                 <Button asChild variant="ghost">
-                  <Link href="/dashboard/journals">Journals</Link>
+                  <Link href="/dashboard/transactions">Transactions</Link>
                 </Button>
                 <Button asChild variant="ghost">
                   <Link href="/dashboard/accounts">Accounts</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/reports">Financial Reports</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/financial-dashboard">Financial Dashboard</Link>
                 </Button>
               </div>
             </header>
