@@ -69,6 +69,9 @@ export default function RootLayout({
                   <Link href="/dashboard/reports">Financial Reports</Link>
                 </Button>
                 <Button asChild variant="ghost">
+                  <Link href="/dashboard/accounting-assistant">Accounting Assistant</Link>
+                </Button>
+                <Button asChild variant="ghost">
                   <Link href="/dashboard/financial-dashboard">Financial Dashboard</Link>
                 </Button>
                 <Button asChild variant="ghost">
