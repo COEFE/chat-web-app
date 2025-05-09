@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { getAuditLogs } from "@/lib/auditLogger";
+import React, { useState, useEffect } from "react";
+import { useAuth } from "@/context/AuthContext";
 import { 
   Card, 
   CardContent, 
@@ -30,6 +30,7 @@ import {
 import { format } from "date-fns";
 import { Search, Eye } from "lucide-react";
 
+// Data is now fetched via server API route to avoid client-side DB access
 
 export default function AuditLogsPage() {
   const [logs, setLogs] = useState<any[]>([]);
@@ -82,25 +83,37 @@ export default function AuditLogsPage() {
     "ATTEMPT"
   ];
 
+  // Auth context
+  const { user } = useAuth();
+
   const fetchLogs = async () => {
+    if (!user) return; // Wait for auth
     setLoading(true);
     try {
-      const { logs: fetchedLogs, total: totalLogs } = await getAuditLogs({
-        userId: userId || undefined,
-        actionType: actionType === 'all' ? undefined : actionType,
-        entityType: entityType === 'all' ? undefined : entityType,
-        entityId: entityId || undefined,
-        startDate: startDate || undefined,
-        endDate: endDate || undefined,
-        status: status === 'all' ? undefined : status,
-        page,
-        limit
+      const token = await user.getIdToken();
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(limit),
       });
+      if (userId) params.append('userId', userId);
+      if (actionType !== 'all') params.append('actionType', actionType);
+      if (entityType !== 'all') params.append('entityType', entityType);
+      if (entityId) params.append('entityId', entityId);
+      if (startDate) params.append('startDate', startDate);
+      if (endDate) params.append('endDate', endDate);
+      if (status !== 'all') params.append('status', status);
 
+      const res = await fetch(`/api/audit-logs?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { logs: fetchedLogs, total: totalLogs } = await res.json();
       setLogs(fetchedLogs);
       setTotal(totalLogs);
     } catch (error) {
-      console.error("Error fetching audit logs:", error);
+      console.error('Error fetching audit logs:', error);
     } finally {
       setLoading(false);
     }
@@ -108,7 +121,7 @@ export default function AuditLogsPage() {
 
   useEffect(() => {
     fetchLogs();
-  }, [page, limit]);
+  }, [page, limit, user]);
 
   const handleSearch = () => {
     setPage(1); // Reset to first page when applying new filters
@@ -262,8 +275,8 @@ export default function AuditLogsPage() {
                 </TableHeader>
                 <TableBody>
                   {logs.map((log) => (
-                    <>
-                      <TableRow key={log.id}>
+                    <React.Fragment key={log.id}>
+                      <TableRow>
                         <TableCell>{formatTimestamp(log.timestamp)}</TableCell>
                         <TableCell className="max-w-[120px] truncate">
                           {log.user_id || "System"}
@@ -288,12 +301,12 @@ export default function AuditLogsPage() {
                       </TableRow>
                       {expandedLogId === log.id && (
                         <TableRow>
-                          <TableCell colSpan={6} className="p-4 bg-slate-50">
+                          <TableCell colSpan={6} className="p-4 bg-slate-800 text-white dark:bg-slate-900">
                             <div className="space-y-4">
                               {log.changes_made && log.changes_made.length > 0 && (
                                 <div className="space-y-2">
                                   <h4 className="font-semibold">Changes:</h4>
-                                  <Table>
+                                  <Table className="border-collapse">
                                     <TableHeader>
                                       <TableRow>
                                         <TableHead>Field</TableHead>
@@ -302,15 +315,20 @@ export default function AuditLogsPage() {
                                       </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                      {log.changes_made.map((change: any, index: number) => (
+                                      {log.changes_made
+                                        .filter((change: any) => {
+                                          // Only show fields that actually changed
+                                          return String(change.old_value) !== String(change.new_value);
+                                        })
+                                        .map((change: any, index: number) => (
                                         <TableRow key={`change-${index}`}>
-                                          <TableCell>{change.field}</TableCell>
-                                          <TableCell>
+                                          <TableCell className="border border-slate-700">{change.field}</TableCell>
+                                          <TableCell className="border border-slate-700">
                                             {change.old_value !== null && change.old_value !== undefined 
                                               ? String(change.old_value) 
                                               : "(empty)"}
                                           </TableCell>
-                                          <TableCell>
+                                          <TableCell className="border border-slate-700">
                                             {change.new_value !== null && change.new_value !== undefined 
                                               ? String(change.new_value) 
                                               : "(empty)"}
@@ -325,7 +343,7 @@ export default function AuditLogsPage() {
                               {log.context && Object.keys(log.context).length > 0 && (
                                 <div className="space-y-2">
                                   <h4 className="font-semibold">Context:</h4>
-                                  <div className="bg-slate-100 p-3 rounded-md">
+                                  <div className="p-3 rounded-md bg-red-900 text-red-100">
                                     <pre className="text-sm whitespace-pre-wrap">
                                       {JSON.stringify(log.context, null, 2)}
                                     </pre>
@@ -336,7 +354,7 @@ export default function AuditLogsPage() {
                               {log.error_details && (
                                 <div className="space-y-2">
                                   <h4 className="font-semibold">Error:</h4>
-                                  <div className="text-red-500 p-3 bg-red-50 rounded-md">
+                                  <div className="text-red-100 p-3 bg-red-900 rounded-md">
                                     {log.error_details}
                                   </div>
                                 </div>
@@ -345,7 +363,7 @@ export default function AuditLogsPage() {
                           </TableCell>
                         </TableRow>
                       )}
-                    </>
+                    </React.Fragment>
                   ))}
                 </TableBody>
               </Table>

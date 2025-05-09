@@ -260,11 +260,27 @@ export async function getAuditLogs({
     }
     
     // Parse JSON fields for each log
-    const logs = logsResult?.rows?.map(log => ({
-      ...log,
-      changes_made: log.changes_made ? JSON.parse(log.changes_made) : null,
-      context: log.context ? JSON.parse(log.context) : null,
-    })) || [];
+    const logs = logsResult?.rows?.map(log => {
+      const safeParse = (val: any) => {
+        if (val == null) return null;
+        if (typeof val === 'string') {
+          try {
+            return JSON.parse(val);
+          } catch (_) {
+            // If parsing fails, return raw string
+            return val;
+          }
+        }
+        // Already an object (JSON/JSONB from Postgres)
+        return val;
+      };
+
+      return {
+        ...log,
+        changes_made: safeParse(log.changes_made),
+        context: safeParse(log.context),
+      };
+    }) || [];
 
     return { logs, total };
   } catch (error) {
