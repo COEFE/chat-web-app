@@ -12,7 +12,8 @@ import {
   Receipt,
   Building,
   AreaChart,
-  Settings
+  Settings,
+  Bot
 } from "lucide-react";
 
 export function AccountingNav() {
@@ -58,6 +59,12 @@ export function AccountingNav() {
       name: "Financial Reports",
       href: "/dashboard/reports",
       icon: BarChart3,
+      subLinks: []
+    },
+    {
+      name: "Accounting Assistant",
+      href: "/dashboard/accounting-assistant",
+      icon: Bot,
       subLinks: []
     },
     {
