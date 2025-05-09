@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/authenticateRequest';
 import { sql } from '@vercel/postgres';
+import { afterUpdate, afterDelete, beforeDelete } from '@/lib/accounting/hooks';
 
 // GET /api/journals/:id - fetch a specific journal entry with its lines and attachments
 export async function GET(req: NextRequest) {
@@ -43,7 +44,11 @@ export async function GET(req: NextRequest) {
         a.name AS account_name,
         jl.debit,
         jl.credit,
-        jl.description
+        jl.description,
+        jl.category,
+        jl.location,
+        jl.vendor,
+        jl.funder
       FROM 
         journal_lines jl
       JOIN
@@ -186,17 +191,21 @@ export async function PATCH(req: NextRequest) {
         
         // Build the parameters and placeholders for all lines
         (body.lines as any[]).forEach((line, i) => {
-          const offset = i * 5; // 5 columns per row
+          const offset = i * 9; // 9 columns per row (including the 4 new fields)
           valueParams.push(
             id,
             line.account_id,
             parseFloat(line.debit) || 0,
             parseFloat(line.credit) || 0,
-            line.description || null
+            line.description || null,
+            line.category || null,
+            line.location || null,
+            line.vendor || null,
+            line.funder || null
           );
           
-          // Create placeholder like ($1, $2, $3, $4, $5)
-          placeholders.push(`($${offset+1}, $${offset+2}, $${offset+3}, $${offset+4}, $${offset+5})`);
+          // Create placeholder like ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          placeholders.push(`($${offset+1}, $${offset+2}, $${offset+3}, $${offset+4}, $${offset+5}, $${offset+6}, $${offset+7}, $${offset+8}, $${offset+9})`);
         });
         
         // Bulk insert all lines in a single query
@@ -209,7 +218,11 @@ export async function PATCH(req: NextRequest) {
               account_id,
               debit,
               credit,
-              description
+              description,
+              category,
+              location,
+              vendor,
+              funder
             ) VALUES ${valuesClause}
           `, valueParams);
         }
@@ -232,28 +245,19 @@ export async function PATCH(req: NextRequest) {
       
       const afterState = afterRows[0];
       
-      // Create audit record
-      await sql`
-        INSERT INTO journal_audit (
-          journal_id, 
-          changed_by, 
-          before, 
-          after
-        )
-        VALUES (
-          ${id},
-          ${userId},
-          ${JSON.stringify(beforeState)},
-          ${JSON.stringify(afterState)}
-        )
-      `;
+      // Regenerate embeddings if necessary and update balances
+      afterUpdate(id, beforeState, afterState, userId).catch(hookError => {
+        console.error(`Error in afterUpdate hook for journal ${id}:`, hookError);
+        // Non-critical, don't block response
+      });
       
       // Commit transaction
       await sql`COMMIT`;
       
       return NextResponse.json({ 
         success: true, 
-        message: 'Journal entry updated successfully' 
+        message: 'Journal entry updated successfully',
+        journal: afterState // Return the updated journal state
       });
     } catch (txError) {
       // Rollback on error
@@ -276,19 +280,11 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid journal ID' }, { status: 400 });
   }
   try {
-    // Check if journal exists and is not posted
-    const { rows: journalRows } = await sql`
-      SELECT is_posted FROM journals WHERE id = ${id} AND is_deleted = FALSE
-    `;
-    
-    if (journalRows.length === 0) {
-      return NextResponse.json({ error: 'Journal entry not found' }, { status: 404 });
-    }
-    
-    if (journalRows[0].is_posted) {
-      return NextResponse.json({ 
-        error: 'Cannot delete a posted journal entry' 
-      }, { status: 400 });
+    // Call beforeDelete hook for validation (e.g., check if posted or exists)
+    const { valid: canDelete, error: beforeDeleteError } = await beforeDelete(id, userId);
+    if (!canDelete) {
+      // The hook might return a 404 or 400 type error, so status could be dynamic if needed
+      return NextResponse.json({ error: beforeDeleteError || 'Pre-delete validation failed' }, { status: 400 });
     }
     
     // Begin transaction
@@ -296,6 +292,8 @@ export async function DELETE(req: NextRequest) {
     
     try {
       // Get the current state for audit
+      // This needs to be done AFTER validation confirms the journal exists and can be deleted,
+      // but BEFORE it's actually marked as deleted.
       const { rows: beforeRows } = await sql`
         SELECT 
           j.*,
@@ -310,32 +308,29 @@ export async function DELETE(req: NextRequest) {
           j.id = ${id}
       `;
       
+      // If beforeRows is empty here, it implies a race condition or an issue with beforeDelete not catching it.
+      // However, beforeDelete should have already confirmed existence.
+      if (beforeRows.length === 0) {
+        await sql`ROLLBACK`; // Rollback if something went wrong after validation
+        return NextResponse.json({ error: 'Journal not found unexpectedly after validation' }, { status: 404 });
+      }
       const beforeState = beforeRows[0];
       
       // Soft delete the journal
       await sql`
         UPDATE journals
-        SET is_deleted = TRUE
+        SET 
+          is_deleted = TRUE,
+          deleted_at = CURRENT_TIMESTAMP
         WHERE id = ${id}
       `;
       
-      // Create audit record
-      await sql`
-        INSERT INTO journal_audit (
-          journal_id, 
-          changed_by, 
-          before, 
-          after,
-          changed_at
-        )
-        VALUES (
-          ${id},
-          ${userId},
-          ${JSON.stringify(beforeState)},
-          ${JSON.stringify({ ...beforeState, is_deleted: true })},
-          CURRENT_TIMESTAMP
-        )
-      `;
+      // Call afterDelete hook for audit logging and other side effects
+      // The hook will handle inserting into journal_audit
+      afterDelete(id, beforeState, userId).catch(hookError => {
+        console.error(`Error in afterDelete hook for journal ${id}:`, hookError);
+        // Non-critical, don't block response, but log it
+      });
       
       // Commit transaction
       await sql`COMMIT`;

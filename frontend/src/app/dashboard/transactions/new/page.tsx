@@ -28,6 +28,10 @@ interface JournalLine {
   debit: string;
   credit: string;
   description: string;
+  category: string;    // Added
+  location: string;    // Added
+  vendor: string;      // Added
+  funder: string;      // Added
 }
 
 export default function NewTransactionPage() {
@@ -35,8 +39,8 @@ export default function NewTransactionPage() {
   const [memo, setMemo] = useState("");
   const [source, setSource] = useState("");
   const [lines, setLines] = useState<JournalLine[]>([
-    { id: crypto.randomUUID(), account_id: null, debit: "", credit: "", description: "" },
-    { id: crypto.randomUUID(), account_id: null, debit: "", credit: "", description: "" }
+    { id: crypto.randomUUID(), account_id: null, debit: "", credit: "", description: "", category: "", location: "", vendor: "", funder: "" },
+    { id: crypto.randomUUID(), account_id: null, debit: "", credit: "", description: "", category: "", location: "", vendor: "", funder: "" }
   ]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -84,7 +88,20 @@ export default function NewTransactionPage() {
 
   // Add a new line
   const addLine = () => {
-    setLines([...lines, { id: crypto.randomUUID(), account_id: null, debit: "", credit: "", description: "" }]);
+    setLines([
+      ...lines,
+      { 
+        id: crypto.randomUUID(), 
+        account_id: null, 
+        debit: "", 
+        credit: "", 
+        description: "",
+        category: "",
+        location: "",
+        vendor: "",
+        funder: ""
+      }
+    ]);
   };
 
   // Remove a line
@@ -172,12 +189,16 @@ export default function NewTransactionPage() {
         throw new Error('Authentication required');
       }
       
-      // Format lines for API
+      // Format lines for API submission
       const formattedLines = lines.map(line => ({
         account_id: line.account_id,
-        debit: line.debit === "" ? 0 : parseFloat(line.debit),
-        credit: line.credit === "" ? 0 : parseFloat(line.credit),
-        description: line.description
+        debit: line.debit ? parseFloat(line.debit) : 0,
+        credit: line.credit ? parseFloat(line.credit) : 0,
+        description: line.description,
+        category: line.category,
+        location: line.location,
+        vendor: line.vendor,
+        funder: line.funder
       }));
       
       const res = await fetch('/api/journals', {
@@ -229,8 +250,8 @@ export default function NewTransactionPage() {
       </div>
       
       <Card>
-        <CardHeader>
-          <CardTitle>Transaction Details</CardTitle>
+        <CardHeader className="bg-blue-100">
+          <CardTitle>Transaction Details (UPDATED)</CardTitle>
           <CardDescription>
             Create a new balanced journal entry with debits and credits.
           </CardDescription>
@@ -292,6 +313,10 @@ export default function NewTransactionPage() {
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Account</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Description</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Category</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Location</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Vendor</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Funder</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider w-32">Debit</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider w-32">Credit</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider w-16">Actions</th>
@@ -324,6 +349,38 @@ export default function NewTransactionPage() {
                           onChange={(e) => updateLine(line.id, 'description', e.target.value)}
                           disabled={isLoading || isSaving}
                           placeholder="Line description"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          value={line.category}
+                          onChange={(e) => updateLine(line.id, 'category', e.target.value)}
+                          disabled={isLoading || isSaving}
+                          placeholder="Category"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          value={line.location}
+                          onChange={(e) => updateLine(line.id, 'location', e.target.value)}
+                          disabled={isLoading || isSaving}
+                          placeholder="Location"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          value={line.vendor}
+                          onChange={(e) => updateLine(line.id, 'vendor', e.target.value)}
+                          disabled={isLoading || isSaving}
+                          placeholder="Vendor"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          value={line.funder}
+                          onChange={(e) => updateLine(line.id, 'funder', e.target.value)}
+                          disabled={isLoading || isSaving}
+                          placeholder="Funder"
                         />
                       </td>
                       <td className="px-4 py-2">
@@ -363,7 +420,7 @@ export default function NewTransactionPage() {
                 </tbody>
                 <tfoot className="bg-gray-100">
                   <tr>
-                    <td colSpan={2} className="px-4 py-2 text-right font-medium">Totals:</td>
+                    <td colSpan={6} className="px-4 py-2 text-right font-medium">Totals:</td>
                     <td className="px-4 py-2 font-medium">${totalDebit.toFixed(2)}</td>
                     <td className="px-4 py-2 font-medium">${totalCredit.toFixed(2)}</td>
                     <td className="px-4 py-2"></td>

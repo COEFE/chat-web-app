@@ -65,6 +65,148 @@ function checkIfGLCodeRelated(message: string): boolean {
   return false;
 }
 
+// Function to check if a message is related to transactions
+function isTransactionQuery(message: string): boolean {
+  console.log(`[Chat API] Checking if message is a transaction query: "${message}"`); 
+
+  const transactionKeywords = [
+    'transaction', 
+    'journal entry',
+    'journal entries',
+    'journal line',
+    'ledger entry',
+    'booking',
+    'recent entry',
+    'latest entry',
+    'recent transaction',
+    'latest transaction',
+    'last transaction',
+    'most recent',
+    'new transaction',
+    'debit and credit'
+  ];
+  
+  const messageLower = message.toLowerCase();
+  
+  // Check for specific transaction keywords
+  if (transactionKeywords.some(keyword => messageLower.includes(keyword))) {
+    console.log(`[Chat API] Transaction query detected: keyword match`);
+    return true;
+  }
+  
+  // Check for common transaction-related phrases
+  if (messageLower.includes('entry') && 
+      (messageLower.includes('recent') || messageLower.includes('latest') || 
+       messageLower.includes('new') || messageLower.includes('last'))) {
+    console.log(`[Chat API] Transaction query detected: entry + recency terms`);
+    return true;
+  }
+
+  // Check for phrases asking about journals
+  if ((messageLower.includes('journal') || messageLower.includes('entries')) && 
+      (messageLower.includes('my') || messageLower.includes('show') || 
+       messageLower.includes('what') || messageLower.includes('list') || 
+       messageLower.includes('recent') || messageLower.includes('last'))) {
+    console.log(`[Chat API] Transaction query detected: journal + action terms`);
+    return true;
+  }
+
+  // Check for specific number patterns that likely indicate a request for N transactions
+  const numberPattern = /\b(one|two|three|four|five|\d+)\s+(last|latest|recent|first|newest)\b|\b(last|latest|recent|first|newest)\s+(one|two|three|four|five|\d+)\b/i;
+  if (numberPattern.test(messageLower) && 
+      (messageLower.includes('journal') || messageLower.includes('transaction') || messageLower.includes('entries'))) {
+    console.log(`[Chat API] Transaction query detected: number pattern + journal terms`);
+    return true;
+  }
+  
+  console.log(`[Chat API] Not a transaction query`);
+  return false;
+}
+
+// Function to trigger embedding generation for transactions without embeddings
+async function generateMissingEmbeddings(limit: number = 100): Promise<{ generated: number, error?: string }> {
+  try {
+    // Import the required dependencies
+    const { sql } = await import('@vercel/postgres');
+    const { createEmbedding } = await import('@/lib/ai/embeddings');
+    
+    const { rows: missingEmbeddings } = await sql.query(`
+      SELECT COUNT(*) as count
+      FROM journal_lines
+      WHERE embedding IS NULL
+    `);
+    
+    if (missingEmbeddings[0].count === 0) {
+      console.log('[Chat API] No missing embeddings found');
+      return { generated: 0 };
+    }
+    
+    console.log(`[Chat API] Found ${missingEmbeddings[0].count} entries without embeddings, generating...`);
+    
+    // Get journal lines without embeddings
+    const { rows: journalLines } = await sql.query(`
+      SELECT 
+        jl.id,
+        jl.description,
+        a.name as account_name,
+        jl.debit,
+        jl.credit
+      FROM 
+        journal_lines jl
+      LEFT JOIN
+        accounts a ON jl.account_id = a.id
+      WHERE 
+        jl.embedding IS NULL
+      ORDER BY jl.id DESC
+      LIMIT $1
+    `, [limit]);
+    
+    // Generate and store embeddings
+    let successCount = 0;
+    
+    for (const line of journalLines) {
+      try {
+        // Create text for embedding
+        const textToEmbed = [
+          line.description || '',
+          line.account_name || '',
+          `Debit: ${line.debit || 0}`,
+          `Credit: ${line.credit || 0}`
+        ].filter(Boolean).join(' ');
+        
+        if (textToEmbed.trim().length === 0) {
+          continue; // Skip if no text to embed
+        }
+        
+        // Generate embedding
+        const embedding = await createEmbedding(textToEmbed);
+        
+        if (embedding) {
+          // Convert embedding array to string for PostgreSQL
+          const embeddingStr = `[${embedding.join(',')}]`;
+          
+          // Store embedding in database
+          await sql.query(`
+            UPDATE journal_lines
+            SET embedding = $1::vector
+            WHERE id = $2
+          `, [embeddingStr, line.id]);
+          
+          successCount++;
+        }
+      } catch (error) {
+        console.error(`Error generating embedding for line ${line.id}:`, error);
+      }
+    }
+    
+    console.log(`[Chat API] Generated embeddings for ${successCount} journal lines`);
+    return { generated: successCount };
+  } catch (error: any) {
+    console.error('[Chat API] Error generating embeddings:', error);
+    return { generated: 0, error: error.message };
+  }
+}
+
 // --- Initialize Firebase Admin SDK ---
 if (!admin.apps.length) {
   try {
@@ -249,6 +391,10 @@ export async function POST(req: NextRequest) {
     console.error("Error parsing request body:", error);
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
+  
+  // Import required libraries for embedding generation
+  const { sql } = await import('@vercel/postgres');
+  const { createEmbedding } = await import('@/lib/ai/embeddings');
 
   const { messages, documentContext } = body;
 
@@ -271,6 +417,9 @@ export async function POST(req: NextRequest) {
       : '';
   
   let glCodeContext = '';
+  let transactionContext = '';
+  
+  // Check for GL code related queries
   if (latestMessage.role === 'user' && mightBeAboutGLCodes(userMessage)) {
     console.log('[Chat API] Detected potential GL code query, retrieving GL codes');
     try {
@@ -290,6 +439,163 @@ Please use this GL code information to help answer the user's question if releva
       }
     } catch (error) {
       console.error('[Chat API] Error retrieving GL codes:', error);
+    }
+  }
+  
+  // Check for transaction related queries
+  if (latestMessage.role === 'user' && isTransactionQuery(userMessage)) {
+    console.log('[Chat API] Detected transaction query, checking for missing embeddings');
+    try {
+      // Generate embeddings for any journal entries without them
+      const embeddingResult = await generateMissingEmbeddings(100);
+      
+      if (embeddingResult.generated > 0) {
+        console.log(`[Chat API] Generated ${embeddingResult.generated} new embeddings for transaction search`);
+      } else if (embeddingResult.error) {
+        console.warn(`[Chat API] Error generating embeddings: ${embeddingResult.error}`);
+      } else {
+        console.log('[Chat API] No new embeddings needed for transactions');
+      }
+
+      // Retrieve recent journal entries to include in context
+      try {
+        const limit = 10; // Fetch 10 most recent entries
+        console.log('[Chat API] Fetching recent journal entries for context');
+        
+        // First, check the database schema to determine column names
+        const schemaCheck = await sql.query(`
+          SELECT 
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transaction_date') as has_transaction_date,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transactionDate') as has_transaction_date_camel,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'date') as has_date,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journal_type') as has_journal_type,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journalType') as has_journal_type_camel,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'is_posted') as has_is_posted,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'isPosted') as has_is_posted_camel,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'created_at') as has_created_at,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'createdAt') as has_created_at_camel,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'user_id') as has_user_id,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'userId') as has_user_id_camel
+        `);
+        
+        const schema = schemaCheck.rows[0];
+        console.log('[Chat API] DB schema check results:', schema);
+        
+        // Build column references based on actual schema
+        const dateColumn = schema.has_transaction_date ? 'j.transaction_date' : 
+                        schema.has_transaction_date_camel ? 'j."transactionDate"' : 
+                        schema.has_date ? 'j.date' : 'CURRENT_DATE';
+        
+        const journalTypeColumn = schema.has_journal_type ? 'j.journal_type' : 
+                            schema.has_journal_type_camel ? 'j."journalType"' : 
+                            '"GJ"';
+        
+        const isPostedColumn = schema.has_is_posted ? 'j.is_posted' : 
+                          schema.has_is_posted_camel ? 'j."isPosted"' : 
+                          'TRUE';
+        
+        const createdAtColumn = schema.has_created_at ? 'j.created_at' : 
+                            schema.has_created_at_camel ? 'j."createdAt"' : 
+                            'CURRENT_TIMESTAMP';
+        
+        const userIdColumn = schema.has_user_id ? 'j.user_id' : 
+                          schema.has_user_id_camel ? 'j."userId"' : 
+                          null;
+        
+        // Build base query string
+        let journalQuery = `
+          SELECT 
+            j.id,
+            ${dateColumn} as transaction_date,
+            j.memo,
+            ${journalTypeColumn} as journal_type,
+            j.source,
+            ${createdAtColumn} as created_at,
+            ${isPostedColumn} as is_posted,
+            (
+              SELECT json_agg(
+                json_build_object(
+                  'id', jl.id,
+                  'account_id', jl.account_id,
+                  'account_name', a.name,
+                  'account_code', a.code,
+                  'description', jl.description,
+                  'debit', jl.debit,
+                  'credit', jl.credit,
+                  'category', jl.category,
+                  'location', jl.location,
+                  'vendor', jl.vendor,
+                  'funder', jl.funder
+                )
+              )
+              FROM journal_lines jl
+              LEFT JOIN accounts a ON jl.account_id = a.id
+              WHERE jl.journal_id = j.id
+            ) as lines
+          FROM 
+            journals j
+        `;
+        
+        // Add filtering conditions
+        const queryParams: any[] = [];
+        if (userIdColumn) {
+          queryParams.push(userId);
+          journalQuery += ` WHERE ${userIdColumn} = $1 AND (j.is_deleted IS NULL OR j.is_deleted = false)`;
+        } else {
+          journalQuery += ` WHERE (j.is_deleted IS NULL OR j.is_deleted = false)`;
+        }
+        
+        journalQuery += ` ORDER BY j.id DESC LIMIT ${limit}`;
+        
+        // Get journal entries from the database using the constructed query
+        const { rows: journalEntries } = await sql.query(journalQuery, queryParams);
+        
+        if (journalEntries && journalEntries.length > 0) {
+          console.log(`[Chat API] Retrieved ${journalEntries.length} recent journal entries`);
+          
+          // Format journal entries for the context
+          const formattedEntries = journalEntries.map((entry: any) => {
+            const lines = entry.lines || [];
+            const totalDebit = lines.reduce((sum: number, line: any) => sum + (parseFloat(line.debit) || 0), 0);
+            const totalCredit = lines.reduce((sum: number, line: any) => sum + (parseFloat(line.credit) || 0), 0);
+
+            // Robust date formatting to handle Date objects or strings
+            const rawDate = entry.transaction_date;
+            let dateFormatted: string;
+            if (rawDate instanceof Date) {
+              dateFormatted = rawDate.toISOString().split('T')[0];
+            } else if (typeof rawDate === 'string') {
+              dateFormatted = rawDate.split('T')[0];
+            } else {
+              dateFormatted = String(rawDate);
+            }
+            
+            return `
+Journal #${entry.id} - Date: ${dateFormatted} - ${entry.is_posted ? 'Posted' : 'Draft'}
+Memo: ${entry.memo || 'No memo'}
+Type: ${entry.journal_type || 'Standard'} ${entry.source ? `Source: ${entry.source}` : ''}
+Lines:
+${lines.map((line: any) => `  - ${line.account_code} ${line.account_name}: ${line.description || ''} ${Number(line.debit) > 0 ? `Debit: $${Number(line.debit)}` : `Credit: $${Number(line.credit)}`}, Category: ${line.category || 'N/A'}, Location: ${line.location || 'N/A'}, Vendor: ${line.vendor || 'N/A'}, Funder: ${line.funder || 'N/A'}`).join('\n')}
+Totals: Debit $${totalDebit.toFixed(2)}, Credit $${totalCredit.toFixed(2)}
+`;
+          }).join('\n');
+          
+          transactionContext = `
+Here are your ${journalEntries.length} most recent journal entries:
+${formattedEntries}
+
+Please use this transaction data to answer the user's query about journal entries or transactions.
+`;
+        } else {
+          console.log('[Chat API] No journal entries found');
+          transactionContext = "\nI don't see any journal entries in your system yet. Would you like to create one?\n";
+        }
+      } catch (dbError) {
+        console.error('[Chat API] Error retrieving recent journal entries:', dbError);
+        transactionContext = "\nI tried to retrieve your recent transactions but encountered a database error. Please try again or contact support if the problem persists.\n";
+      }
+    } catch (error) {
+      console.error('[Chat API] Error in transaction embedding process:', error);
     }
   }
   
@@ -650,30 +956,35 @@ Please use this GL code information to help answer the user's question if releva
 
   }
 
+  // Construct the complete system prompt with all context
+  const completeSystemPrompt = `${systemPrompt}${glCodeContext}${transactionContext}`;
+  console.log(`[Chat API] System prompt length: ${completeSystemPrompt.length}`);
+  
   // 5. Call Anthropic API via Vercel AI SDK
   try {
     console.log('Calling Anthropic API with model:', MODEL_NAME);
     // Filter messages again just before sending to be absolutely sure
     // Ensure the messages conform to CoreMessage structure
     const finalMessagesForApi = processedMessages.filter(
-        (msg): msg is CoreMessage => typeof msg === 'object' && msg !== null && 'role' in msg && 'content' in msg
+      (msg): msg is CoreMessage => 
+        typeof msg === 'object' && 
+        msg !== null && 
+        'role' in msg && 
+        'content' in msg
     );
 
     // Log the final request payload for debugging
     console.log(`[route.ts] Final messages before API call:`, 
       JSON.stringify(finalMessagesForApi.map(m => ({ role: m.role, content_length: typeof m.content === 'string' ? m.content.length : 'array' })))
     );
-    console.log(`[route.ts] System prompt length: ${systemPrompt.length}`);
-
+    console.log(`[route.ts] System prompt length: ${completeSystemPrompt.length}`);
+    
     const result = await streamText({
       model: vercelAnthropic(MODEL_NAME),
-      system: `${systemPrompt}
-
-${glCodeContext}`,
+      system: completeSystemPrompt,
       messages: finalMessagesForApi, // Use the correctly typed and filtered array
       maxTokens: MAX_TOKENS,
       maxSteps: 5, // Allow the model to iterate after tool execution
-      // --- Define the Tool with execute ---
       tools: {
         excelOperation: {
           description: 'Performs operations on Excel files (create or edit).',

@@ -50,6 +50,21 @@ BEGIN
     ALTER TABLE journals ADD COLUMN reference_number VARCHAR(100);
   END IF;
 
+  -- Add is_posted column for posting status
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'is_posted') THEN
+    ALTER TABLE journals ADD COLUMN is_posted BOOLEAN DEFAULT FALSE;
+  END IF;
+
+  -- Add is_deleted column for soft deletes
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'is_deleted') THEN
+    ALTER TABLE journals ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE NOT NULL;
+  END IF;
+
+  -- Add deleted_at column for soft deletes
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'deleted_at') THEN
+    ALTER TABLE journals ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE NULL;
+  END IF;
+
   -- Rename date column to transaction_date if needed
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'date') AND 
      NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transaction_date') THEN

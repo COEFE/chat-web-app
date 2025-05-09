@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/authenticateRequest';
 import { sql } from '@vercel/postgres';
+import { createEmbedding } from '@/lib/ai/embeddings';
+import { createBankTransactionsFromJournal } from '@/lib/accounting/bankIntegration';
 
 // POST /api/journals/:id/post - post (finalize) a journal entry
 export async function POST(req: NextRequest) {
@@ -146,9 +148,89 @@ export async function POST(req: NextRequest) {
       // Commit transaction
       await sql`COMMIT`;
       
-      return NextResponse.json({ 
-        success: true, 
-        message: 'Journal entry posted successfully' 
+      // Create bank transactions for this journal if it affects bank accounts
+      let bankTransactionsCreated = 0;
+      let embeddingCount = 0; // Initialize embeddingCount in the outer scope
+
+      try {
+        const { transactionsCreated } = await createBankTransactionsFromJournal(id, userId);
+        bankTransactionsCreated = transactionsCreated;
+        console.log(`Created ${transactionsCreated} bank transactions from journal #${id}`);
+      } catch (bankErr) {
+        // Log but don't fail the process if bank transactions can't be created
+        console.error('Error creating bank transactions:', bankErr);
+      }
+      
+      // After successful posting, generate embeddings for the journal lines
+      try {
+        // Get journal lines that need embeddings
+        const { rows: journalLines } = await sql`
+          SELECT 
+            jl.id,
+            jl.description,
+            a.name as account_name,
+            jl.debit,
+            jl.credit
+          FROM 
+            journal_lines jl
+          LEFT JOIN
+            accounts a ON jl.account_id = a.id
+          WHERE 
+            jl.journal_id = ${id} AND
+            jl.embedding IS NULL
+        `;
+        
+        console.log(`[journals/post] Generating embeddings for ${journalLines.length} journal lines from newly posted journal #${id}`);
+        
+        // Generate and store embeddings for each line
+        for (const line of journalLines) {
+          try {
+            // Create text for embedding
+            const textToEmbed = [
+              line.description || '',
+              line.account_name || '',
+              `Debit: ${line.debit || 0}`,
+              `Credit: ${line.credit || 0}`
+            ].filter(Boolean).join(' ');
+            
+            if (textToEmbed.trim().length === 0) {
+              continue; // Skip if no text to embed
+            }
+            
+            // Generate embedding
+            const embedding = await createEmbedding(textToEmbed);
+            
+            if (embedding) {
+              // Convert embedding array to string for PostgreSQL
+              const embeddingStr = `[${embedding.join(',')}]`;
+              
+              // Store embedding in database
+              await sql`
+                UPDATE journal_lines
+                SET embedding = ${embeddingStr}::vector
+                WHERE id = ${line.id}
+              `;
+              
+              embeddingCount++;
+            }
+          } catch (lineError) {
+            console.error(`[journals/post] Error generating embedding for line ${line.id}:`, lineError);
+            // Continue with other lines even if one fails
+          }
+        }
+        
+        console.log(`[journals/post] Successfully generated ${embeddingCount} embeddings for journal #${id}`);
+      } catch (embeddingError) {
+        // Don't fail the transaction if embedding generation fails
+        console.error(`[journals/post] Error generating embeddings for journal #${id}:`, embeddingError);
+      }
+      
+      return NextResponse.json({
+        success: true,
+        message: 'Journal entry posted successfully',
+        journal_id: id,
+        embeddings_generated: embeddingCount,
+        bank_transactions_created: bankTransactionsCreated
       });
     } catch (txError) {
       // Rollback on error

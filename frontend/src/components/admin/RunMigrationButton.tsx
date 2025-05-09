@@ -20,13 +20,15 @@ interface RunMigrationButtonProps {
   buttonText?: string;
   onComplete?: () => void;
   variant?: "default" | "outline" | "secondary" | "ghost" | "link" | "destructive";
+  disabled?: boolean;
 }
 
 export function RunMigrationButton({ 
   migrationFile,
   buttonText = "Run Migration",
   onComplete,
-  variant = "default"
+  variant = "default",
+  disabled = false
 }: RunMigrationButtonProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
@@ -106,7 +108,7 @@ export function RunMigrationButton({
       <Button
         variant={variant}
         onClick={() => setShowDialog(true)}
-        disabled={isRunning}
+        disabled={isRunning || disabled}
       >
         {isRunning ? (
           <>

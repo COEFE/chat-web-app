@@ -1,0 +1,1359 @@
+import React, { useState, useEffect } from "react";
+import { getAuth } from "firebase/auth";
+import { format } from "date-fns";
+import { toast } from "@/components/ui/use-toast";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose,
+} from "@/components/ui/dialog";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Search,
+  Loader2,
+  DollarSign,
+  X,
+  AlertTriangle,
+  ArrowLeftRight,
+  FileSearch,
+  Info,
+  ArrowDown,
+  ArrowUp,
+  Settings,
+  FileEdit,
+} from "lucide-react";
+import { formatCurrency } from "@/lib/formatters";
+
+interface Transaction {
+  id: number;
+  transaction_date: string;
+  description: string;
+  amount: number;
+  transaction_type: "credit" | "debit";
+  status: string;
+  reference_number?: string;
+  is_cleared?: boolean;
+  // Fields for display
+  bank_account_id?: number;
+  bank_account?: string;
+  // For book entries
+  is_gl_entry?: boolean;
+  gl_account_id?: number;
+  // For handling journal entries
+  debit?: number;
+  credit?: number;
+  journal_id?: number;
+}
+
+interface ReconciliationSession {
+  id: number;
+  bank_account_id: number;
+  bank_account_name: string;
+  account_number: string;
+  start_date: string;
+  end_date: string;
+  bank_statement_balance: number;
+  starting_balance: number;
+  ending_balance: number;
+  // For backward compatibility
+  book_balance?: number;
+  created_at: string;
+  status: string;
+  gl_account_id: number;
+}
+
+interface SageStyleReconciliationProps {
+  sessionId: number;
+  bankAccountId: number;
+  onComplete: () => void;
+  onCancel: () => void;
+}
+
+// Function to update reconciliation settings
+async function updateReconciliationSession(
+  bankAccountId: number,
+  sessionId: number,
+  updates: {
+    bank_statement_balance?: number;
+    start_date?: string;
+    end_date?: string;
+  }
+) {
+  const auth = getAuth();
+  const user = auth.currentUser;
+  
+  if (!user) {
+    throw new Error("User not authenticated");
+  }
+  
+  const idToken = await user.getIdToken();
+  
+  const response = await fetch(`/api/bank-accounts/${bankAccountId}/reconciliation/${sessionId}/update`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify(updates),
+  });
+  
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to update reconciliation settings");
+  }
+  
+  return response.json();
+}
+
+export default function SageStyleReconciliation({
+  sessionId,
+  bankAccountId,
+  onComplete,
+  onCancel,
+}: SageStyleReconciliationProps) {
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [session, setSession] = useState<ReconciliationSession | null>(null);
+  
+  // Combined transaction list
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [clearedTransactions, setClearedTransactions] = useState<Transaction[]>([]);
+  const [searchTerm, setSearchTerm] = useState<string>("");
+  
+  // Running totals
+  const [beginningBalance, setBeginningBalance] = useState(0);
+  const [statementEndingBalance, setStatementEndingBalance] = useState(0);
+  const [clearedBalance, setClearedBalance] = useState(0);
+  const [difference, setDifference] = useState(0);
+  
+  // Sort & Filter
+  const [sortField, setSortField] = useState<string>("transaction_date");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [filterType, setFilterType] = useState<string>("all");
+  
+  // Edit reconciliation settings
+  const [isEditingSettings, setIsEditingSettings] = useState(false);
+  const [editedStatementBalance, setEditedStatementBalance] = useState<string>("");
+  const [editedStartDate, setEditedStartDate] = useState<string>("");
+  const [editedEndDate, setEditedEndDate] = useState<string>("");
+  const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
+  
+  // Update reconciliation settings
+  const updateReconciliationSettings = async () => {
+    if (!session) return;
+    
+    setIsUpdatingSettings(true);
+    
+    try {
+      // Prepare updates
+      const updates: any = {};
+      
+      if (editedStatementBalance && !isNaN(parseFloat(editedStatementBalance))) {
+        updates.bank_statement_balance = parseFloat(editedStatementBalance);
+      }
+      
+      if (editedStartDate) {
+        updates.start_date = editedStartDate;
+      }
+      
+      if (editedEndDate) {
+        updates.end_date = editedEndDate;
+      }
+      
+      // Only update if there are changes
+      if (Object.keys(updates).length === 0) {
+        setIsEditingSettings(false);
+        return;
+      }
+      
+      // Call the API to update settings
+      const result = await updateReconciliationSession(
+        bankAccountId,
+        sessionId,
+        updates
+      );
+      
+      // Update local state
+      if (updates.bank_statement_balance) {
+        setStatementEndingBalance(updates.bank_statement_balance);
+      }
+      
+      if (updates.start_date || updates.end_date) {
+        // We need to refresh the page to get new transactions based on date range
+        toast({
+          title: "Settings Updated",
+          description: "Reloading reconciliation data with new date range...",
+        });
+        
+        // Reload the page after a brief delay
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        // Just update the difference calculation
+        const currentTotals = calculateTotals();
+        setDifference(currentTotals.difference);
+        
+        toast({
+          title: "Settings Updated",
+          description: "Reconciliation settings have been updated successfully.",
+        });
+      }
+      
+      // Close the dialog
+      setIsEditingSettings(false);
+      
+    } catch (error) {
+      console.error("Error updating reconciliation settings:", error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update settings",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdatingSettings(false);
+    }
+  };
+  
+  // Fetch reconciliation session data
+  useEffect(() => {
+    const fetchReconciliationData = async () => {
+      setIsLoading(true);
+      try {
+        const auth = getAuth();
+        const user = auth.currentUser;
+        
+        if (!user) {
+          toast({
+            title: "Authentication error",
+            description: "You must be logged in to access this page",
+            variant: "destructive",
+          });
+          return;
+        }
+        
+        const idToken = await user.getIdToken();
+        
+        // Fetch reconciliation session
+        const sessionResponse = await fetch(
+          `/api/bank-accounts/${bankAccountId}/reconciliation?sessionId=${sessionId}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${idToken}`,
+            },
+          }
+        );
+        
+        if (!sessionResponse.ok) {
+          throw new Error("Failed to fetch reconciliation session");
+        }
+        
+        const sessionData = await sessionResponse.json();
+        
+        if (!sessionData.active_session) {
+          throw new Error("No active reconciliation session found");
+        }
+        
+        setSession(sessionData.session);
+        
+        // Set initial balances with precise decimal handling
+        const rawStartingBalance = sessionData.session.starting_balance || 0;
+        const rawStatementBalance = sessionData.session.bank_statement_balance || 0;
+        
+        // Ensure these are proper numbers before using toFixed
+        const startingBalance = typeof rawStartingBalance === 'number' ? 
+          parseFloat(rawStartingBalance.toFixed(2)) : 0;
+        const statementBalance = typeof rawStatementBalance === 'number' ? 
+          parseFloat(rawStatementBalance.toFixed(2)) : 0;
+        
+        setBeginningBalance(startingBalance);
+        setStatementEndingBalance(statementBalance);
+        
+        // Mark bank transactions and ensure amounts are properly formatted
+        console.log('Raw unreconciled transactions:', sessionData.unreconciled_transactions);
+        
+        const bankTransactions = (sessionData.unreconciled_transactions || []).map(
+          (transaction: Transaction) => {
+            // Debug log for each transaction
+            console.log('Processing transaction:', { 
+              id: transaction.id,
+              original_amount: transaction.amount,
+              type: transaction.transaction_type,
+              description: transaction.description
+            });
+            
+            // Ensure amount is a proper number
+            let amount = 0;
+            if (typeof transaction.amount === 'number' && !isNaN(transaction.amount)) {
+              amount = parseFloat(transaction.amount.toFixed(2));
+            } else if (typeof transaction.amount === 'string') {
+              // Try to parse string amount
+              const parsedAmount = parseFloat(transaction.amount);
+              if (!isNaN(parsedAmount)) {
+                amount = parseFloat(parsedAmount.toFixed(2));
+              }
+            }
+            
+            // If amount is still 0, check if it's stored in other fields
+            if (amount === 0 && transaction.debit) {
+              amount = typeof transaction.debit === 'number' ? 
+                parseFloat(transaction.debit.toFixed(2)) : 
+                parseFloat(parseFloat(transaction.debit).toFixed(2));
+            } else if (amount === 0 && transaction.credit) {
+              amount = typeof transaction.credit === 'number' ? 
+                parseFloat(transaction.credit.toFixed(2)) : 
+                parseFloat(parseFloat(transaction.credit).toFixed(2));
+            }
+            
+            return {
+              ...transaction,
+              amount,
+              is_cleared: false, 
+              is_gl_entry: false,
+              bank_account: sessionData.session.bank_account_name
+            };
+          }
+        );
+        
+        // Fetch GL entries for the account within the date range
+        const glResponse = await fetch(
+          `/api/gl-transactions?accountId=${sessionData.session.gl_account_id}&startDate=${sessionData.session.start_date}&endDate=${sessionData.session.end_date}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${idToken}`,
+            },
+          }
+        );
+        
+        let glEntries: Transaction[] = [];
+        if (glResponse.ok) {
+          const glData = await glResponse.json();
+          console.log('Raw GL entries data:', glData);
+          
+          glEntries = (glData.transactions || []).map((entry: any) => {
+            console.log('Processing GL entry:', entry);
+            
+            // Determine the amount based on debit/credit fields
+            let amount = 0;
+            let transaction_type: "credit" | "debit" = "credit";
+            
+            // Check if amount is directly available
+            if (typeof entry.amount === 'number' && !isNaN(entry.amount)) {
+              amount = parseFloat(entry.amount.toFixed(2));
+              transaction_type = entry.transaction_type || "credit";
+            } else if (typeof entry.amount === 'string') {
+              // Try to parse string amount
+              const parsedAmount = parseFloat(entry.amount);
+              if (!isNaN(parsedAmount)) {
+                amount = parseFloat(parsedAmount.toFixed(2));
+                transaction_type = entry.transaction_type || "credit";
+              }
+            }
+            
+            // If amount is still 0, check debit/credit fields
+            if (amount === 0) {
+              if (entry.debit && (typeof entry.debit === 'number' || typeof entry.debit === 'string')) {
+                const debitVal = typeof entry.debit === 'number' ? 
+                  entry.debit : parseFloat(entry.debit);
+                  
+                if (!isNaN(debitVal) && debitVal > 0) {
+                  amount = parseFloat(debitVal.toFixed(2));
+                  transaction_type = "debit";
+                }
+              }
+              
+              if (amount === 0 && entry.credit && (typeof entry.credit === 'number' || typeof entry.credit === 'string')) {
+                const creditVal = typeof entry.credit === 'number' ? 
+                  entry.credit : parseFloat(entry.credit);
+                  
+                if (!isNaN(creditVal) && creditVal > 0) {
+                  amount = parseFloat(creditVal.toFixed(2));
+                  transaction_type = "credit";
+                }
+              }
+            }
+              
+            return {
+              ...entry,
+              amount,
+              transaction_type,
+              is_cleared: false,
+              is_gl_entry: true,
+              gl_account_id: sessionData.session.gl_account_id,
+              transaction_date: entry.transaction_date || entry.date || new Date().toISOString().split('T')[0]
+            };
+          });
+        }
+        
+        // Add debug logging
+        console.log('Processed GL entries:', glEntries);
+        
+        // Combine both types of transactions
+        const allTransactions = [...bankTransactions, ...glEntries];
+        
+        // Initial sort
+        const sortedTransactions = sortTransactions(allTransactions, "transaction_date", "desc");
+        setTransactions(sortedTransactions);
+        
+        // Calculate initial difference with precise decimal handling
+        const initialDifference = parseFloat((statementBalance - startingBalance).toFixed(2));
+        setDifference(initialDifference);
+        console.log('Initial difference calculation:', { 
+          statementBalance, 
+          startingBalance, 
+          initialDifference 
+        });
+        
+        // Debugging summary of transaction amounts
+        const bankTransactionTotal = bankTransactions.reduce((sum: number, t: Transaction) => sum + (t.amount || 0), 0);
+        console.log(`Found ${bankTransactions.length} bank transactions with total amount: ${bankTransactionTotal}`);
+        
+        // Check specifically for zero-amount transactions
+        const zeroAmountTransactions = bankTransactions.filter((t: Transaction) => !t.amount || t.amount === 0);
+        if (zeroAmountTransactions.length > 0) {
+          console.warn(`Warning: ${zeroAmountTransactions.length} bank transactions have zero amounts`);
+          console.warn('First zero-amount transaction:', zeroAmountTransactions[0]);
+        }
+        
+      } catch (error) {
+        console.error("Error fetching reconciliation data:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load reconciliation data",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchReconciliationData();
+  }, [bankAccountId, sessionId]);
+  
+  // Helper function to sort transactions
+  const sortTransactions = (
+    items: Transaction[], 
+    field: string, 
+    direction: "asc" | "desc"
+  ): Transaction[] => {
+    return [...items].sort((a, b) => {
+      const valueA = a[field as keyof Transaction];
+      const valueB = b[field as keyof Transaction];
+      
+      // Handle date fields
+      if (field === "transaction_date") {
+        const dateA = new Date(valueA as string).getTime();
+        const dateB = new Date(valueB as string).getTime();
+        return direction === "asc" ? dateA - dateB : dateB - dateA;
+      }
+      
+      // Handle string comparisons
+      if (typeof valueA === 'string' && typeof valueB === 'string') {
+        const comparison = valueA.localeCompare(valueB);
+        return direction === "asc" ? comparison : -comparison;
+      }
+      
+      // Handle number comparisons
+      if (typeof valueA === 'number' && typeof valueB === 'number') {
+        return direction === "asc" ? valueA - valueB : valueB - valueA;
+      }
+      
+      // Fallback for other types or null/undefined values
+      // Place undefined/null values at the end
+      if (valueA === undefined || valueA === null) return 1;
+      if (valueB === undefined || valueB === null) return -1;
+      
+      // Default string comparison for other cases
+      const strA = String(valueA);
+      const strB = String(valueB);
+      return direction === "asc" 
+        ? strA.localeCompare(strB) 
+        : strB.localeCompare(strA);
+    });
+  };
+  
+  // Handle sort changes
+  const handleSort = (field: string) => {
+    const newDirection = field === sortField && sortDirection === "asc" ? "desc" : "asc";
+    setSortField(field);
+    setSortDirection(newDirection);
+    
+    setTransactions(sortTransactions(transactions, field, newDirection));
+    setClearedTransactions(sortTransactions(clearedTransactions, field, newDirection));
+  };
+  
+  // Filter transactions based on search term and filter type
+  const filteredTransactions = transactions.filter((transaction) => {
+    // Text search
+    const matchesSearch = 
+      transaction.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      transaction.amount.toString().includes(searchTerm) ||
+      (transaction.reference_number && 
+       transaction.reference_number.toLowerCase().includes(searchTerm.toLowerCase()));
+       
+    // Type filter
+    const matchesType = 
+      filterType === "all" || 
+      (filterType === "bank" && !transaction.is_gl_entry) ||
+      (filterType === "gl" && transaction.is_gl_entry);
+      
+    return matchesSearch && matchesType;
+  });
+  
+  // Toggle clearing of a transaction
+  const toggleCleared = (transaction: Transaction) => {
+    console.log('Toggling transaction:', transaction);
+    
+    // Ensure we have a valid amount with proper type checking
+    let amount = 0;
+    
+    // Try to get amount from amount field
+    if (typeof transaction.amount === 'number' && !isNaN(transaction.amount)) {
+      amount = transaction.amount;
+    }
+    
+    // If amount is 0, try to determine from debit/credit
+    if (amount === 0 && transaction.debit && !isNaN(Number(transaction.debit))) {
+      amount = Number(transaction.debit);
+    } else if (amount === 0 && transaction.credit && !isNaN(Number(transaction.credit))) {
+      amount = Number(transaction.credit);
+    }
+    
+    console.log(`Transaction amount determined: ${amount} (${transaction.transaction_type})`);
+    
+    // Create a copy of the transaction with toggled cleared status
+    const updatedTransaction = {
+      ...transaction,
+      is_cleared: !transaction.is_cleared
+    };
+    
+    if (updatedTransaction.is_cleared) {
+      // Add to cleared, remove from uncleared
+      setClearedTransactions(prev => [...prev, updatedTransaction]);
+      setTransactions(prev => prev.filter(t => 
+        !(t.id === transaction.id && t.is_gl_entry === transaction.is_gl_entry)
+      ));
+      
+      // Calculate the impact on balance correctly
+      if (transaction.transaction_type === "credit") {
+        // Credit increases the balance
+        setClearedBalance(prev => parseFloat((prev + amount).toFixed(2)));
+      } else {
+        // Debit decreases the balance
+        setClearedBalance(prev => parseFloat((prev - amount).toFixed(2)));
+      }
+    } else {
+      // Add to uncleared, remove from cleared
+      setTransactions(prev => [...prev, updatedTransaction]);
+      setClearedTransactions(prev => prev.filter(t => 
+        !(t.id === transaction.id && t.is_gl_entry === transaction.is_gl_entry)
+      ));
+      
+      // Reverse the impact on balance correctly
+      if (transaction.transaction_type === "credit") {
+        // Remove credit decreases the balance
+        setClearedBalance(prev => parseFloat((prev - amount).toFixed(2)));
+      } else {
+        // Remove debit increases the balance
+        setClearedBalance(prev => parseFloat((prev + amount).toFixed(2)));
+      }
+    }
+    
+    // Use setTimeout to ensure state updates have occurred
+    setTimeout(() => {
+      // Calculate and update the difference
+      const newTotals = calculateTotals();
+      setDifference(newTotals.difference);
+    }, 0);
+  };
+  
+  // Update the calculated difference - now uses calculateTotals directly
+  const updateDifference = () => {
+    const newTotals = calculateTotals();
+    setDifference(newTotals.difference);
+  };
+  
+  // Calculate totals
+  const calculateTotals = () => {
+    // Sum all credits in the cleared transactions
+    const clearedCredits = clearedTransactions
+      .filter(t => t.transaction_type === "credit")
+      .reduce((sum, t) => sum + (t.amount || 0), 0);
+      
+    // Sum all debits in the cleared transactions
+    const clearedDebits = clearedTransactions
+      .filter(t => t.transaction_type === "debit")
+      .reduce((sum, t) => sum + (t.amount || 0), 0);
+    
+    // Make sure we have valid numbers for all balance calculations
+    const safeBeginningBalance = typeof beginningBalance === 'number' && !isNaN(beginningBalance) ? 
+      parseFloat(beginningBalance.toFixed(2)) : 0;
+    const safeStatementEndingBalance = typeof statementEndingBalance === 'number' && !isNaN(statementEndingBalance) ? 
+      parseFloat(statementEndingBalance.toFixed(2)) : 0;
+    
+    // Apply precise calculations with fixed decimal places
+    const netCleared = parseFloat((clearedCredits - clearedDebits).toFixed(2));
+    const endingBalance = parseFloat((safeBeginningBalance + netCleared).toFixed(2));
+    const difference = parseFloat((safeStatementEndingBalance - endingBalance).toFixed(2));
+    
+    console.log('Calculation debug:', {
+      clearedCredits,
+      clearedDebits,
+      safeBeginningBalance,
+      safeStatementEndingBalance,
+      netCleared,
+      endingBalance,
+      difference
+    });
+      
+    return {
+      clearedCredits: parseFloat(clearedCredits.toFixed(2)),
+      clearedDebits: parseFloat(clearedDebits.toFixed(2)),
+      netCleared,
+      endingBalance,
+      difference
+    };
+  };
+  
+  // Reopen a completed reconciliation
+  const reopenReconciliation = async () => {
+    setIsSubmitting(true);
+    
+    try {
+      const auth = getAuth();
+      const user = auth.currentUser;
+      
+      if (!user) {
+        throw new Error("User not authenticated");
+      }
+      
+      // Force refresh the token to ensure it's valid
+      const idToken = await user.getIdToken(true);
+      
+      console.log('Reopening reconciliation session:', sessionId);
+      
+      // Call the reopen API endpoint
+      const response = await fetch(
+        `/api/bank-accounts/${bankAccountId}/reconciliation/${sessionId}/reopen`, 
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+        }
+      );
+      
+      console.log('API response status:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        let errorMessage = `API error: ${response.status} ${response.statusText}`;
+        try {
+          const responseText = await response.text();
+          console.log('Raw API error response:', responseText || '(empty response)');
+          
+          if (responseText && responseText.trim()) {
+            try {
+              const errorData = JSON.parse(responseText);
+              if (Object.keys(errorData).length > 0) {
+                console.error('API error response parsed:', errorData);
+                
+                if (errorData && errorData.error) {
+                  errorMessage = errorData.error;
+                } else if (errorData && errorData.details) {
+                  errorMessage = errorData.details;
+                }
+              }
+            } catch (jsonError) {
+              console.error('Failed to parse error response JSON:', jsonError);
+              if (responseText.trim()) {
+                errorMessage += `: ${responseText}`;
+              }
+            }
+          }
+        } catch (textError) {
+          console.error('Failed to read error response text:', textError);
+        }
+        
+        throw new Error(errorMessage);
+      }
+      
+      toast({
+        title: "Reconciliation reopened",
+        description: "You can continue reconciling the bank account",
+      });
+      
+      // Refresh the page to show the reopened session
+      window.location.reload();
+    } catch (error) {
+      console.error("Error reopening reconciliation:", error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to reopen reconciliation",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Submit the reconciliation
+  const submitReconciliation = async () => {
+    const totals = calculateTotals();
+    
+    // Check if reconciliation is balanced
+    if (Math.abs(totals.difference) > 0.01) {
+      // Confirm user wants to proceed with unbalanced reconciliation
+      if (!window.confirm(
+        `Your reconciliation has a difference of ${formatCurrency(totals.difference)}. Do you want to proceed anyway?`
+      )) {
+        return;
+      }
+    }
+    
+    setIsSubmitting(true);
+    
+    try {
+      const auth = getAuth();
+      const user = auth.currentUser;
+      
+      if (!user) {
+        throw new Error("User not authenticated");
+      }
+      
+      // Force refresh the token to ensure it's valid
+      const idToken = await user.getIdToken(true);
+      console.log("Token obtained successfully", { tokenLength: idToken.length });
+      
+      // Get unreconciled transactions (those not in clearedTransactions)
+      const unreconciledTransactions = transactions.filter(t => {
+        return !clearedTransactions.some(c => c.id === t.id && c.is_gl_entry === t.is_gl_entry);
+      });
+      
+      // Format the matches in the way the API expects
+      // Group transactions by whether they're bank or GL
+      const bankTransactionIds = clearedTransactions
+        .filter(t => !t.is_gl_entry)
+        .map(t => t.id);
+        
+      const glTransactionIds = clearedTransactions
+        .filter(t => t.is_gl_entry)
+        .map(t => t.id);
+      
+      // Create a single match containing all cleared transactions
+      const matches = bankTransactionIds.length > 0 || glTransactionIds.length > 0 ? [{
+        bankIds: bankTransactionIds,
+        glIds: glTransactionIds
+      }] : [];
+      
+      // Get unreconciled bank transactions and GL entries
+      const unreconciledBankTransactions = unreconciledTransactions
+        .filter(t => !t.is_gl_entry)
+        .map(t => t.id);
+        
+      const unreconciledGLEntries = unreconciledTransactions
+        .filter(t => t.is_gl_entry)
+        .map(t => t.id);
+      
+      const requestData = {
+        matches,
+        unreconciled_bank_transactions: unreconciledBankTransactions,
+        unreconciled_gl_entries: unreconciledGLEntries,
+      };
+      
+      console.log('Submitting reconciliation with:', {
+        matches,
+        bankAccountId,
+        sessionId,
+        unreconciledBankCount: unreconciledBankTransactions.length,
+        unreconciledGLCount: unreconciledGLEntries.length
+      });
+      
+      // Submit reconciliation data
+      const response = await fetch(
+        `/api/bank-accounts/${bankAccountId}/reconciliation/${sessionId}/complete`, 
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify(requestData),
+        }
+      );
+      
+      console.log('API response status:', response.status, response.statusText);
+      
+      // Handle non-OK responses better
+      if (!response.ok) {
+        let errorMessage = `API error: ${response.status} ${response.statusText}`;
+        let responseText = '';
+        
+        try {
+          responseText = await response.text();
+          console.log('Raw API error response:', responseText || '(empty response)');
+          
+          if (responseText && responseText.trim()) {
+            try {
+              const errorData = JSON.parse(responseText);
+              // Log error data only if it's not empty
+              if (Object.keys(errorData).length > 0) {
+                console.error('API error response parsed:', errorData);
+                
+                if (errorData && errorData.error) {
+                  errorMessage = errorData.error;
+                } else if (errorData && errorData.details) {
+                  errorMessage = errorData.details;
+                }
+              } else {
+                console.error('API returned empty JSON object');
+              }
+            } catch (jsonError) {
+              console.error('Failed to parse error response JSON:', jsonError);
+              // Use the raw text if JSON parsing fails
+              if (responseText.trim()) {
+                errorMessage += `: ${responseText}`;
+              }
+            }
+          } else {
+            console.error('API returned empty response');
+            errorMessage = `API error ${response.status}: No response content`;
+          }
+        } catch (textError) {
+          console.error('Failed to read error response text:', textError);
+        }
+        
+        throw new Error(errorMessage);
+      }
+      
+      // Handle successful response - don't try to parse the body again if it might be empty
+      try {
+        // Check if we can clone the response to read it again
+        if (response.bodyUsed) {
+          console.log('Response body already consumed, proceeding with reconciliation completion');
+        } else {
+          // Try to read the response body
+          const responseText = await response.text();
+          console.log('Raw success response:', responseText || '(empty response)');
+          
+          if (responseText && responseText.trim()) {
+            try {
+              const resultData = JSON.parse(responseText);
+              console.log('Reconciliation completed successfully:', resultData);
+            } catch (jsonError) {
+              console.warn('Could not parse successful response as JSON:', jsonError);
+            }
+          } else {
+            console.log('Empty but successful response received');
+          }
+        }
+      } catch (responseError) {
+        console.warn('Error reading response body, but ignoring as status was OK:', responseError);
+      }
+      
+      toast({
+        title: "Reconciliation completed",
+        description: "The bank account has been successfully reconciled",
+      });
+      
+      onComplete();
+    } catch (error) {
+      console.error("Error completing reconciliation:", error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to complete reconciliation",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
+          <p className="text-muted-foreground">Loading reconciliation data...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  // No session
+  if (!session) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center max-w-md">
+          <AlertCircle className="h-8 w-8 mx-auto mb-4 text-destructive" />
+          <h3 className="font-medium text-lg mb-2">No active reconciliation session</h3>
+          <p className="text-muted-foreground mb-4">
+            There is no active reconciliation session for this bank account.
+          </p>
+          <Button onClick={onCancel}>Go Back</Button>
+        </div>
+      </div>
+  }
+      
+  toast({
+    title: "Reconciliation completed",
+    description: "The bank account has been successfully reconciled",
+  });
+      
+  onComplete();
+} catch (error) {
+  console.error("Error completing reconciliation:", error);
+  toast({
+    title: "Error",
+    description: error instanceof Error ? error.message : "Failed to complete reconciliation",
+    variant: "destructive",
+  });
+} finally {
+  setIsSubmitting(false);
+}
+  
+// Loading state
+if (isLoading) {
+  return (
+    <div className="flex items-center justify-center min-h-[400px]">
+      <div className="text-center">
+        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
+        <p className="text-muted-foreground">Loading reconciliation data...</p>
+      </div>
+    </div>
+  );
+}
+  
+// No session
+if (!session) {
+  return (
+    <div className="flex items-center justify-center min-h-[400px]">
+      <div className="text-center max-w-md">
+        <AlertCircle className="h-8 w-8 mx-auto mb-4 text-destructive" />
+        <h3 className="font-medium text-lg mb-2">No active reconciliation session</h3>
+        <p className="text-muted-foreground mb-4">
+          There is no active reconciliation session for this bank account.
+        </p>
+        <Button onClick={onCancel}>Go Back</Button>
+      </div>
+    </div>
+        </div>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Reopening...
+              </>
+            ) : (
+              <>
+                <ArrowLeftRight className="mr-2 h-4 w-4" />
+                Reopen Reconciliation
+              </>
+            )}
+          </Button>
+          <Button onClick={onCancel}>
+            Return to Bank Account
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Account info
+<Card>
+  <CardContent className="pt-6">
+    <div className="flex flex-col gap-1">
+      <p className="text-lg font-semibold">{session.bank_account_name}</p>
+      <p className="text-sm text-muted-foreground">Account Number: {session.account_number}</p>
+      <p className="text-sm text-muted-foreground">
+        Reconciliation period: {format(new Date(session.start_date), "MMM d, yyyy")} - 
+        {format(new Date(session.end_date), "MMM d, yyyy")}
+      </p>
+    </div>
+  </CardContent>
+</Card>
+
+// Balance summary
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+  <Card>
+    <CardContent className="pt-6">
+      <div className="flex flex-col">
+        <span className="text-sm text-muted-foreground">Beginning balance</span>
+        <span className="text-lg font-semibold">{formatCurrency(beginningBalance)}</span>
+            <p className="text-sm text-muted-foreground">
+              Reconciliation period: {format(new Date(session.start_date), "MMM d, yyyy")} - 
+              {format(new Date(session.end_date), "MMM d, yyyy")}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+      
+      {/* Balance summary */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex flex-col">
+              <span className="text-sm text-muted-foreground">Beginning balance</span>
+              <span className="text-lg font-semibold">{formatCurrency(beginningBalance)}</span>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex flex-col">
+              <span className="text-sm text-muted-foreground">Statement ending balance</span>
+              <span className="text-lg font-semibold">{formatCurrency(statementEndingBalance)}</span>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex flex-col">
+              <span className="text-sm text-muted-foreground">Difference</span>
+              <span className={`text-lg font-semibold ${isBalanced ? "text-green-500" : "text-amber-500"}`}>
+                {!isNaN(totals.difference) ? formatCurrency(totals.difference) : "$0.00"}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      
+      {/* Balance details */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Uncleared items</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-lg font-semibold">
+              {transactions.length} items
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Cleared items</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex justify-between">
+              <div>
+                <div className="text-sm text-muted-foreground">Credits</div>
+                <div className="text-lg font-semibold">{formatCurrency(totals.clearedCredits)}</div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Debits</div>
+                <div className="text-lg font-semibold">{formatCurrency(totals.clearedDebits)}</div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Net</div>
+                <div className="text-lg font-semibold">{formatCurrency(totals.netCleared)}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      
+      {/* Edit Settings Dialog */}
+      <Dialog open={isEditingSettings} onOpenChange={setIsEditingSettings}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Reconciliation Settings</DialogTitle>
+            <DialogDescription>
+              Update the statement balance and reconciliation period.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="statementBalance" className="text-right">
+                Statement Balance
+              </Label>
+              <Input
+                id="statementBalance"
+                type="number"
+                step="0.01"
+                placeholder="Enter statement balance"
+                className="col-span-3"
+                value={editedStatementBalance || statementEndingBalance.toString()}
+                onChange={(e) => setEditedStatementBalance(e.target.value)}
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="startDate" className="text-right">
+                Start Date
+              </Label>
+              <Input
+                id="startDate"
+                type="date"
+                className="col-span-3"
+                value={editedStartDate || (session?.start_date ? session.start_date.split('T')[0] : '')}
+                onChange={(e) => setEditedStartDate(e.target.value)}
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="endDate" className="text-right">
+                End Date
+              </Label>
+              <Input
+                id="endDate"
+                type="date"
+                className="col-span-3"
+                value={editedEndDate || (session?.end_date ? session.end_date.split('T')[0] : '')}
+                onChange={(e) => setEditedEndDate(e.target.value)}
+              />
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditingSettings(false)} className="mr-auto">
+              Cancel
+            </Button>
+            <Button 
+              onClick={updateReconciliationSettings}
+              disabled={isUpdatingSettings}
+            >
+              {isUpdatingSettings ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                'Save Changes'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Search and filters */}
+      <div className="flex flex-col md:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            type="search"
+            placeholder="Search transactions by description, amount or reference..."
+            className="pl-8"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        
+        <Select
+          value={filterType}
+          onValueChange={(value) => setFilterType(value)}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Filter by type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All transactions</SelectItem>
+            <SelectItem value="bank">Bank transactions</SelectItem>
+            <SelectItem value="gl">GL entries</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      
+      {/* Main transaction table */}
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[50px]">Clear</TableHead>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("transaction_date")}>
+                  <div className="flex items-center">
+                    Date
+                    {sortField === "transaction_date" && (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-4 w-4" /> : <ArrowDown className="ml-1 h-4 w-4" />
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead>Reference</TableHead>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("description")}>
+                  <div className="flex items-center">
+                    Description
+                    {sortField === "description" && (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-4 w-4" /> : <ArrowDown className="ml-1 h-4 w-4" />
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="text-right cursor-pointer" onClick={() => handleSort("amount")}>
+                  <div className="flex items-center justify-end">
+                    Amount
+                    {sortField === "amount" && (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-4 w-4" /> : <ArrowDown className="ml-1 h-4 w-4" />
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead className="text-right">Balance</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredTransactions.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">
+                    {searchTerm 
+                      ? "No transactions match your search" 
+                      : "No unreconciled transactions found"}
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredTransactions.map((transaction) => (
+                  <TableRow key={`${transaction.id}-${transaction.is_gl_entry ? 'gl' : 'bank'}`}>
+                    <TableCell className="p-2">
+                      <Checkbox
+                        checked={transaction.is_cleared}
+                        onCheckedChange={() => toggleCleared(transaction)}
+                      />
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {format(new Date(transaction.transaction_date), "MM/dd/yyyy")}
+                    </TableCell>
+                    <TableCell>
+                      {transaction.reference_number || "-"}
+                    </TableCell>
+                    <TableCell className="max-w-[300px] truncate">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span>{transaction.description}</span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{transaction.description}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={transaction.is_gl_entry ? "secondary" : "outline"}>
+                        {transaction.is_gl_entry ? "GL Entry" : "Bank Transaction"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-medium">
+                      <span className={transaction.transaction_type === "credit" ? "text-green-600" : "text-red-600"}>
+                        {formatCurrency(transaction.amount)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right font-medium">
+                      {/* Balance would be calculated here in a real implementation */}
+                      {transaction.is_gl_entry ? "-" : formatCurrency(0)}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+      
+      {/* Cleared transactions list */}
+      {clearedTransactions.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center">
+              <CheckCircle2 className="h-5 w-5 mr-2 text-green-500" />
+              Cleared Items
+              <Badge className="ml-2">{clearedTransactions.length}</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[50px]">Action</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Reference</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {clearedTransactions.map((transaction) => (
+                  <TableRow key={`${transaction.id}-${transaction.is_gl_entry ? 'gl' : 'bank'}-cleared`}>
+                    <TableCell className="p-2">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        onClick={() => toggleCleared(transaction)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {format(new Date(transaction.transaction_date), "MM/dd/yyyy")}
+                    </TableCell>
+                    <TableCell>
+                      {transaction.reference_number || "-"}
+                    </TableCell>
+                    <TableCell className="max-w-[300px] truncate">
+                      {transaction.description}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={transaction.is_gl_entry ? "secondary" : "outline"}>
+                        {transaction.is_gl_entry ? "GL Entry" : "Bank Transaction"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-medium">
+                      <span className={transaction.transaction_type === "credit" ? "text-green-600" : "text-red-600"}>
+                        {formatCurrency(transaction.amount)}
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}

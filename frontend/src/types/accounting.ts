@@ -25,6 +25,10 @@ export interface JournalLine {
   description?: string;
   debit: number;
   credit: number;
+  category?: string;
+  location?: string;
+  vendor?: string;
+  funder?: string;
   embedding?: number[];
 }
 

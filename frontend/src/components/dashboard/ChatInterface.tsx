@@ -21,6 +21,7 @@ export interface ChatInterfaceProps {
   linkedDocuments?: MyDocumentData[]; // Accept all linked documents
   isReadOnly?: boolean; 
   className?: string; 
+  initialMessage?: string; // Add initialMessage for transaction queries
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
@@ -28,7 +29,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   userId, // Destructure userId
   linkedDocuments = [], // Use linkedDocuments, default to empty array
   isReadOnly = false, 
-  className 
+  className,
+  initialMessage
 }) => {
   // Use linkedDocuments directly
   const allDocumentIds = linkedDocuments.map(doc => doc.id); 
@@ -92,7 +94,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     : undefined;
 
   // Initialize useChat hook - provides messages, setMessages, etc.
-  const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages, setInput } = useChat({
     api: '/api/chat',
     id: chatId, // Use chatId as the unique ID for the chat session
     initialMessages: [], // Explicitly start with empty messages
@@ -227,7 +229,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [primaryDocument?.id]);
 
-  // Scroll to bottom when messages change
+  // Effect to scroll to bottom of chat when messages change
   useEffect(() => {
     const scrollToBottom = () => {
       if (messagesEndRef.current) {
@@ -237,8 +239,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     
     // Small delay to ensure DOM update is complete
     const timeoutId = setTimeout(scrollToBottom, 100);
+    
     return () => clearTimeout(timeoutId);
   }, [messages]);
+  
+  // Effect to set initialMessage if provided
+  useEffect(() => {
+    if (initialMessage && initialMessage.trim() !== '') {
+      // Set the input field with the initial message
+      setInput(initialMessage);
+    }
+  }, [initialMessage, setInput]);
 
   // Handle keydown events for Textarea (Enter to submit, Shift+Enter for newline)
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {

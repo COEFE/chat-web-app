@@ -1,4 +1,5 @@
 import { sql } from '@vercel/postgres';
+import { beforePost, afterPost, beforeUpdate, afterUpdate, beforeDelete, afterDelete, afterUnpost } from './hooks';
 
 // Types for the journal entry system
 export interface JournalLine {
@@ -10,6 +11,10 @@ export interface JournalLine {
   description: string;
   debit: number;
   credit: number;
+  category?: string;
+  location?: string;
+  vendor?: string;
+  funder?: string;
 }
 
 export interface Journal {
@@ -157,7 +162,7 @@ export async function getJournal(journalId: number): Promise<Journal | null> {
   // Get journal lines
   const linesQuery = `SELECT 
       jl.id, ${lineNumberField}, jl.account_id, jl.description,
-      jl.debit, jl.credit,
+      jl.debit, jl.credit, jl.category, jl.location, jl.vendor, jl.funder,
       a.code as account_code, a.name as account_name
     FROM journal_lines jl
     LEFT JOIN accounts a ON jl.account_id = a.id
@@ -405,9 +410,10 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
           // If line_number column exists, use it
           await client.query(`
             INSERT INTO journal_lines (
-              journal_id, line_number, account_id, description, debit, credit
+              journal_id, line_number, account_id, description, debit, credit,
+              category, location, vendor, funder
             ) VALUES (
-              $1, $2, $3, $4, $5, $6
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
             )
           `, [
             journalId,
@@ -415,22 +421,31 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
             line.account_id,
             line.description,
             line.debit || 0,
-            line.credit || 0
+            line.credit || 0,
+            line.category || null,
+            line.location || null,
+            line.vendor || null,
+            line.funder || null
           ]);
         } else {
           // If line_number column doesn't exist, omit it
           await client.query(`
             INSERT INTO journal_lines (
-              journal_id, account_id, description, debit, credit
+              journal_id, account_id, description, debit, credit,
+              category, location, vendor, funder
             ) VALUES (
-              $1, $2, $3, $4, $5
+              $1, $2, $3, $4, $5, $6, $7, $8, $9
             )
           `, [
             journalId,
             line.account_id,
             line.description,
             line.debit || 0,
-            line.credit || 0
+            line.credit || 0,
+            line.category || null,
+            line.location || null,
+            line.vendor || null,
+            line.funder || null
           ]);
         }
       }
@@ -481,21 +496,18 @@ export async function updateJournal(journal: Journal, userId: string): Promise<v
     throw new Error('Journal ID is required for update');
   }
   
-  // Check if journal is already posted
-  const journalResult = await sql`
-    SELECT is_posted FROM journals WHERE id = ${journal.id}
-  `;
-  
-  if (journalResult.rows.length === 0) {
-    throw new Error('Journal not found');
+  // Call beforeUpdate hook for validation (e.g., check if posted)
+  const { valid: canUpdate, error: beforeUpdateError } = await beforeUpdate(journal.id, journal, userId);
+  if (!canUpdate) {
+    throw new Error(beforeUpdateError || 'Pre-update validation failed.');
   }
   
-  if (journalResult.rows[0].is_posted) {
-    throw new Error('Cannot update a posted journal');
-  }
-  
-  // Get the current state for audit
+  // Get the current state for audit, before any changes are made
   const beforeState = await getJournal(journal.id);
+  if (!beforeState) {
+    // This case should ideally be caught by beforeUpdate if journal doesn't exist
+    throw new Error('Journal not found, cannot capture before state for audit.');
+  }
   
   // Start a transaction
   const client = await sql.connect();
@@ -578,30 +590,13 @@ export async function updateJournal(journal: Journal, userId: string): Promise<v
       ]);
     }
     
-    // Create audit log entry if audit table exists
-    const auditTableExists = await client.query(`
-      SELECT EXISTS (
-        SELECT 1 FROM information_schema.tables WHERE table_name = 'journal_audit'
-      ) as exists
-    `);
-    
-    if (auditTableExists.rows[0].exists) {
-      await client.query(`
-        INSERT INTO journal_audit (
-          journal_id, changed_by, before_state, after_state
-        ) VALUES (
-          $1, $2, $3, $4
-        )
-      `, [
-        journal.id,
-        userId,
-        JSON.stringify(beforeState),
-        JSON.stringify(journal)
-      ]);
-    }
-    
-    // Commit the transaction
+    // Commit the transaction before calling afterUpdate hook
     await client.query('COMMIT');
+
+    // Call afterUpdate hook for audit logging and other side effects
+    // The 'journal' object passed to this function serves as the 'afterState'
+    await afterUpdate(journal.id, beforeState, journal, userId);
+
   } catch (error) {
     // Rollback in case of error
     await client.query('ROLLBACK');
@@ -618,19 +613,31 @@ export async function updateJournal(journal: Journal, userId: string): Promise<v
 export async function postJournal(journalId: number, userId: string): Promise<void> {
   // Check if journal exists and is not already posted
   const journalResult = await sql`
-    SELECT is_posted FROM journals WHERE id = ${journalId}
+    SELECT is_posted, journal_type, transaction_date, memo, source, reference_number, created_by, created_at
+    FROM journals 
+    WHERE id = ${journalId} AND is_deleted = FALSE
   `;
   
   if (journalResult.rows.length === 0) {
-    throw new Error('Journal not found');
+    throw new Error('Journal not found or has been deleted');
   }
-  
   if (journalResult.rows[0].is_posted) {
     throw new Error('Journal is already posted');
   }
-  
-  // Get the current state for audit
+
+  // Fetch the full 'beforeState' including lines for the audit log
+  // This is done before any hooks that might alter the journal for posting validation
   const beforeState = await getJournal(journalId);
+  if (!beforeState) {
+    // Should not happen if the above check passed, but good for type safety
+    throw new Error('Failed to fetch journal details for audit before posting.');
+  }
+
+  // Call beforePost hook for validation before attempting to post
+  const { valid, error: beforePostError } = await beforePost(beforeState, userId);
+  if (!valid) {
+    throw new Error(beforePostError || 'Pre-posting validation failed.');
+  }
   
   // Start a transaction
   const client = await sql.connect();
@@ -645,37 +652,76 @@ export async function postJournal(journalId: number, userId: string): Promise<vo
       WHERE id = $1
     `, [journalId]);
     
-    // Get the updated state
-    const afterState = await getJournal(journalId);
+    // Construct afterState based on beforeState and the change made
+    const afterState = { ...beforeState, is_posted: true };
     
-    // Create audit log entry if audit table exists
-    const auditTableExists = await client.query(`
-      SELECT EXISTS (
-        SELECT 1 FROM information_schema.tables WHERE table_name = 'journal_audit'
-      ) as exists
-    `);
-    
-    if (auditTableExists.rows[0].exists) {
-      await client.query(`
-        INSERT INTO journal_audit (
-          journal_id, changed_by, before_state, after_state
-        ) VALUES (
-          $1, $2, $3, $4
-        )
-      `, [
-        journalId,
-        userId,
-        JSON.stringify(beforeState),
-        JSON.stringify(afterState)
-      ]);
-    }
-    
+    // Call afterPost hook for audit logging and other side effects
+    // The hook will handle inserting into journal_audit with action 'POST'
+    // Note: afterPost itself calls recordAuditEvent
+    await afterPost(journalId, userId, beforeState, afterState);
+        
     // Commit the transaction
     await client.query('COMMIT');
   } catch (error) {
     // Rollback in case of error
     await client.query('ROLLBACK');
     throw error;
+  } finally {
+    // Release the client back to the pool
+    client.release();
+  }
+}
+
+/**
+ * Unpost a journal
+ */
+export async function unpostJournal(journalId: number, userId: string): Promise<void> {
+  // Check if journal exists, is not deleted, and is actually posted
+  const journalCheck = await sql`
+    SELECT is_posted 
+    FROM journals 
+    WHERE id = ${journalId} AND is_deleted = FALSE
+  `;
+
+  if (journalCheck.rows.length === 0) {
+    throw new Error('Journal not found or has been deleted.');
+  }
+  if (!journalCheck.rows[0].is_posted) {
+    throw new Error('Journal is not currently posted.');
+  }
+
+  // Get the current full state for audit before unposting
+  const beforeState = await getJournal(journalId);
+  if (!beforeState) {
+    // Should not happen if the above check passed, but good for type safety
+    throw new Error('Failed to fetch journal details for audit before unposting.');
+  }
+
+  // Start a transaction
+  const client = await sql.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Update journal to unposted
+    await client.query(
+      `UPDATE journals SET is_posted = FALSE WHERE id = $1`,
+      [journalId]
+    );
+
+    // Construct afterState based on beforeState and the change made
+    const afterState = { ...beforeState, is_posted: false };
+
+    // Call afterUnpost hook for audit logging and other side effects
+    await afterUnpost(journalId, userId, beforeState, afterState);
+
+    // Commit the transaction
+    await client.query('COMMIT');
+
+  } catch (error) {
+    // Rollback in case of error
+    await client.query('ROLLBACK');
+    console.error(`Error in unpostJournal for journal ${journalId}:`, error);
+    throw error; // Re-throw the error after logging and rollback
   } finally {
     // Release the client back to the pool
     client.release();

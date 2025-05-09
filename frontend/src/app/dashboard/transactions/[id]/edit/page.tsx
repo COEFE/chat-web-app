@@ -31,6 +31,10 @@ interface JournalLine {
   debit: string;
   credit: string;
   description: string;
+  category: string;
+  location: string;
+  vendor: string;
+  funder: string;
 }
 
 interface Journal {
@@ -140,6 +144,10 @@ export default function EditJournalPage() {
         debit: '',
         credit: '',
         description: '',
+        category: '',
+        location: '',
+        vendor: '',
+        funder: ''
       },
     ]);
   };
@@ -261,6 +269,10 @@ export default function EditJournalPage() {
         debit: line.debit || '0',
         credit: line.credit || '0',
         description: line.description || '',
+        category: line.category || '',
+        location: line.location || '',
+        vendor: line.vendor || '',
+        funder: line.funder || ''
       }));
       
       // Update journal
@@ -392,6 +404,10 @@ export default function EditJournalPage() {
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Account</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Description</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Category</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Location</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Vendor</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider">Funder</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider w-32">Debit</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-black uppercase tracking-wider w-32">Credit</th>
                     <th className="px-4 py-2 text-center text-xs font-medium text-black uppercase tracking-wider w-20">Actions</th>
@@ -425,6 +441,34 @@ export default function EditJournalPage() {
                           value={line.description}
                           onChange={(e) => updateLine(index, 'description', e.target.value)}
                           placeholder="Description"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          value={line.category || ''}
+                          onChange={(e) => updateLine(index, 'category', e.target.value)}
+                          placeholder="Category"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          value={line.location || ''}
+                          onChange={(e) => updateLine(index, 'location', e.target.value)}
+                          placeholder="Location"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          value={line.vendor || ''}
+                          onChange={(e) => updateLine(index, 'vendor', e.target.value)}
+                          placeholder="Vendor"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          value={line.funder || ''}
+                          onChange={(e) => updateLine(index, 'funder', e.target.value)}
+                          placeholder="Funder"
                         />
                       </td>
                       <td className="px-4 py-2">
@@ -465,9 +509,9 @@ export default function EditJournalPage() {
                 </tbody>
                 <tfoot className="bg-gray-100">
                   <tr>
-                    <td colSpan={2} className="px-4 py-2 text-right font-medium">Totals:</td>
-                    <td className="px-4 py-2 text-right font-medium">${totals.debit.toFixed(2)}</td>
-                    <td className="px-4 py-2 text-right font-medium">${totals.credit.toFixed(2)}</td>
+                    <td colSpan={6} className="px-4 py-2 text-right font-medium">Totals:</td>
+                    <td className="px-4 py-2 text-right">${totals.debit.toFixed(2)}</td>
+                    <td className="px-4 py-2 text-right">${totals.credit.toFixed(2)}</td>
                     <td></td>
                   </tr>
                   <tr>

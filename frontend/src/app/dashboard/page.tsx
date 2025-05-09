@@ -1580,7 +1580,11 @@ function DocumentTable({
 function DashboardPage() {
   const { user, loading: authLoading, logout } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
+  
+  // Get the query parameter if passed from the AI search component
+  const transactionQuery = searchParams.get('query');
   const [documents, setDocuments] = useState<MyDocumentData[]>([]);
   const [folders, setFolders] = useState<FolderData[]>([]);
   const [filesystemItems, setFilesystemItems] = useState<FilesystemItem[]>([]);
@@ -2665,7 +2669,7 @@ function DashboardPage() {
                         chatId={selectedDocument.id} // Using doc ID as chat ID in this context
                         userId={user.uid} // Add required userId prop
                         linkedDocuments={[selectedDocument]} // Pass the selected doc as linkedDocuments
-                        // Consider how/if additionalDocuments should be handled here
+                        initialMessage={transactionQuery || undefined} // Handle null -> undefined conversion
                       />
                     </div>
                   </div>

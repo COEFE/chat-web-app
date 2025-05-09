@@ -43,42 +43,9 @@ ON CONFLICT (code) DO NOTHING;
 -- 3. Enable pgvector extension if not already enabled
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- 4. Add constraint to ensure debits = credits for each journal
--- First, create a function to check balance
-CREATE OR REPLACE FUNCTION check_journal_balance()
-RETURNS TRIGGER AS $$
-DECLARE
-  total_debits NUMERIC;
-  total_credits NUMERIC;
-BEGIN
-  -- Calculate totals for the journal entry
-  SELECT 
-    COALESCE(SUM(debit), 0), 
-    COALESCE(SUM(credit), 0) 
-  INTO 
-    total_debits, 
-    total_credits 
-  FROM 
-    journal_lines 
-  WHERE 
-    journal_id = NEW.journal_id;
-  
-  -- Check if totals match (with small rounding tolerance)
-  IF ABS(total_debits - total_credits) > 0.01 THEN
-    RAISE EXCEPTION 'Journal entry % is not balanced. Debits (%) do not equal credits (%)', 
-      NEW.journal_id, total_debits, total_credits;
-  END IF;
-  
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Create trigger for balance check
-DROP TRIGGER IF EXISTS check_balance_trigger ON journal_lines;
-CREATE TRIGGER check_balance_trigger
-AFTER INSERT OR UPDATE ON journal_lines
-FOR EACH ROW
-EXECUTE FUNCTION check_journal_balance();
+-- 4. Ensure journal balance check is handled by '001_journal_balance_constraints.sql'
+-- The row-level trigger previously here has been removed to avoid redundancy
+-- with the deferred constraint trigger, which is more appropriate for journal balancing.
 
 -- 5. Enhance journal_lines for better performance and AI 
 -- Create index for faster account-based reporting

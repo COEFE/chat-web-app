@@ -51,6 +51,10 @@ const journalLineSchema = z.object({
   debit: z.string().optional(),
   credit: z.string().optional(),
   description: z.string().optional(),
+  category: z.string().optional(),
+  location: z.string().optional(),
+  vendor: z.string().optional(),
+  funder: z.string().optional(),
 });
 
 const journalFormSchema = z.object({
@@ -150,12 +154,20 @@ export function JournalEntryForm({
           debit: "",
           credit: "",
           description: "",
+          category: "",
+          location: "",
+          vendor: "",
+          funder: "",
         },
         {
           account_id: "",
           debit: "",
           credit: "",
           description: "", 
+          category: "",
+          location: "",
+          vendor: "",
+          funder: "",
         },
       ],
     },
@@ -218,6 +230,10 @@ export function JournalEntryForm({
       debit: "",
       credit: "",
       description: "",
+      category: "",
+      location: "",
+      vendor: "",
+      funder: "",
     });
   };
 
@@ -362,6 +378,18 @@ export function JournalEntryForm({
                     <th className="px-3 py-2 text-left font-medium text-sm">
                       Description
                     </th>
+                    <th className="px-3 py-2 text-left font-medium text-sm">
+                      Category
+                    </th>
+                    <th className="px-3 py-2 text-left font-medium text-sm">
+                      Location
+                    </th>
+                    <th className="px-3 py-2 text-left font-medium text-sm">
+                      Vendor
+                    </th>
+                    <th className="px-3 py-2 text-left font-medium text-sm">
+                      Funder
+                    </th>
                     <th className="px-3 py-2 text-right font-medium text-sm">
                       Debit
                     </th>
@@ -417,6 +445,78 @@ export function JournalEntryForm({
                               <FormControl>
                                 <Input
                                   placeholder="Description..."
+                                  {...field}
+                                  value={field.value || ""}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <FormField
+                          control={form.control}
+                          name={`lines.${index}.category`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormControl>
+                                <Input
+                                  placeholder="Category..."
+                                  {...field}
+                                  value={field.value || ""}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <FormField
+                          control={form.control}
+                          name={`lines.${index}.location`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormControl>
+                                <Input
+                                  placeholder="Location..."
+                                  {...field}
+                                  value={field.value || ""}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <FormField
+                          control={form.control}
+                          name={`lines.${index}.vendor`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormControl>
+                                <Input
+                                  placeholder="Vendor..."
+                                  {...field}
+                                  value={field.value || ""}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <FormField
+                          control={form.control}
+                          name={`lines.${index}.funder`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormControl>
+                                <Input
+                                  placeholder="Funder..."
                                   {...field}
                                   value={field.value || ""}
                                 />
@@ -516,6 +616,7 @@ export function JournalEntryForm({
                     <td colSpan={2} className="px-3 py-2 text-right font-medium">
                       Totals:
                     </td>
+                    <td colSpan={5} />
                     <td className="px-3 py-2 text-right font-medium">
                       ${totalDebit.toFixed(2)}
                     </td>

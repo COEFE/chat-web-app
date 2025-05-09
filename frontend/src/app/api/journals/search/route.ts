@@ -60,6 +60,83 @@ export async function GET(req: NextRequest) {
       }, { status: 400 });
     }
 
+    // Check if there are any journal lines without embeddings
+    console.log(`[journals/search] Checking for entries without embeddings...`);
+    const { rows: missingEmbeddings } = await sql.query(`
+      SELECT COUNT(*) as count
+      FROM journal_lines
+      WHERE embedding IS NULL
+      LIMIT 1
+    `);
+    
+    console.log(`[journals/search] Found ${missingEmbeddings[0].count} entries without embeddings`);
+    
+    // If there are entries missing embeddings, process them first
+    if (missingEmbeddings[0].count > 0) {
+      console.log(`[journals/search] Found entries without embeddings, generating them first...`);
+      try {
+        // Get journal lines without embeddings (limit to a reasonable number)
+        const { rows: journalLines } = await sql.query(`
+          SELECT 
+            jl.id,
+            jl.description,
+            a.name as account_name,
+            jl.debit,
+            jl.credit
+          FROM 
+            journal_lines jl
+          LEFT JOIN
+            accounts a ON jl.account_id = a.id
+          WHERE 
+            jl.embedding IS NULL
+          LIMIT 50
+        `);
+        
+        // Generate and store embeddings
+        let successCount = 0;
+        
+        for (const line of journalLines) {
+          try {
+            // Create text for embedding
+            const textToEmbed = [
+              line.description || '',
+              line.account_name || '',
+              `Debit: ${line.debit || 0}`,
+              `Credit: ${line.credit || 0}`
+            ].filter(Boolean).join(' ');
+            
+            if (textToEmbed.trim().length === 0) {
+              continue; // Skip if no text to embed
+            }
+            
+            // Generate embedding
+            const lineEmbedding = await createEmbedding(textToEmbed);
+            
+            if (lineEmbedding) {
+              // Convert embedding array to string for PostgreSQL
+              const embeddingStr = `[${lineEmbedding.join(',')}]`;
+              
+              // Update the journal line with the embedding
+              await sql.query(`
+                UPDATE journal_lines
+                SET embedding = $1::vector
+                WHERE id = $2
+              `, [embeddingStr, line.id]);
+              
+              successCount++;
+            }
+          } catch (lineError) {
+            console.error(`Error generating embedding for line ${line.id}:`, lineError);
+          }
+        }
+        
+        console.log(`[journals/search] Generated ${successCount} embeddings automatically`);
+      } catch (batchError) {
+        console.error('[journals/search] Error in auto-embedding generation:', batchError);
+        // Continue with search even if embedding generation fails
+      }
+    }
+
     // Generate embedding for the search query
     let embedding: number[];
     try {
@@ -81,26 +158,44 @@ export async function GET(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // No need to log twice
-    
     // Convert embedding array to a string for the SQL query
     const embeddingStr = `[${embedding.join(',')}]`;
     
+    // Check if query is specifically about recent/latest transactions
+    const isRecentQuery = query.toLowerCase().includes('latest') || 
+                          query.toLowerCase().includes('recent') || 
+                          query.toLowerCase().includes('last') || 
+                          query.toLowerCase().includes('newest') || 
+                          query.toLowerCase().includes('just created') || 
+                          query.toLowerCase().includes('just posted');
+                          
+    console.log(`[journals/search] Query contains 'recent/latest' terms: ${isRecentQuery}`);
+    
     // Use vector search to find similar journal entries
     // This uses pgvector's <-> operator for cosine distance
+    // For recent/latest queries, we'll adjust the ranking to favor recent entries
     const { rows: results } = await sql.query(`
       WITH journal_matches AS (
         SELECT 
           jl.journal_id,
-          MIN(jl.embedding <-> $1::vector) as min_distance
+          MIN(jl.embedding <-> $1::vector) as min_distance,
+          MAX(j.id) as journal_id_value, -- Higher IDs are typically more recent
+          MAX(${createdAtColumn}) as created_date
         FROM 
           journal_lines jl
+        JOIN
+          journals j ON jl.journal_id = j.id
         WHERE 
           jl.embedding IS NOT NULL
         GROUP BY 
           jl.journal_id
         ORDER BY 
-          min_distance
+          ${isRecentQuery ? 
+            // For recent queries, prioritize both relevance AND recency
+            // Using MAX(created_at) from the GROUP BY to avoid the SQL error
+            'MIN(jl.embedding <-> $1::vector) * 0.25 + (1.0 / EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MAX(' + createdAtColumn + '))) * -1.0 * 0.75)' : 
+            // Default: prioritize semantic similarity
+            'min_distance'}
         LIMIT $2
         OFFSET $3
       )

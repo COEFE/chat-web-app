@@ -16,7 +16,8 @@ export async function GET(req: NextRequest) {
         a.parent_id,
         p.code AS parent_code,
         a.notes,
-        a.is_custom
+        a.is_custom,
+        a.account_type
       FROM accounts a
       LEFT JOIN accounts p ON p.id = a.parent_id
       ORDER BY a.code

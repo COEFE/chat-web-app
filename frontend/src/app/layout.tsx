@@ -71,6 +71,27 @@ export default function RootLayout({
                 <Button asChild variant="ghost">
                   <Link href="/dashboard/financial-dashboard">Financial Dashboard</Link>
                 </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/accounts-payable/vendors">Accounts Payable</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/accounts-receivable/invoices">Invoices</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/accounts-receivable/customers">Customers</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/banking">Banking</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/crm">CRM</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/admin/database">Admin DB</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/dashboard/admin/audit-logs">Audit Logs</Link>
+                </Button>
               </div>
             </header>
             {children}

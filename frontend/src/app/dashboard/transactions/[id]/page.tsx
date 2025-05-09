@@ -6,7 +6,7 @@ import { format } from "date-fns";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { JournalPostButton } from "@/components/journals/JournalPostButton";
 import { Button } from "@/components/ui/button";
-import { Loader2, ArrowLeft, Pencil, Trash2, FileText } from "lucide-react";
+import { Loader2, ArrowLeft, Pencil, Trash2, FileText, Copy } from "lucide-react";
 import { AttachmentUpload } from "@/components/journals/AttachmentUpload";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/context/AuthContext";
@@ -30,6 +30,10 @@ interface JournalLine {
   debit: string;
   credit: string;
   description: string;
+  category?: string;
+  location?: string;
+  vendor?: string;
+  funder?: string;
 }
 
 interface Attachment {
@@ -168,6 +172,70 @@ export default function JournalDetailPage() {
     router.push(`/dashboard/transactions/${journalId}/edit`);
   };
 
+  // Function to duplicate a journal entry
+  const duplicateJournal = async () => {
+    if (!journal || !user) return;
+    
+    try {
+      // Get authentication token
+      const token = await user.getIdToken();
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+      
+      // Create a new journal object without ID and with current date
+      const newJournal = {
+        journal_type: journal.journal_type || 'GJ',
+        transaction_date: new Date().toISOString().split('T')[0],
+        memo: `Copy of ${journal.memo}`,
+        source: journal.source,
+        reference_number: journal.reference_number,
+        lines: journal.lines.map(line => ({
+          account_id: line.account_id,
+          description: line.description,
+          debit: parseFloat(line.debit) || 0,
+          credit: parseFloat(line.credit) || 0,
+          category: line.category || '',
+          location: line.location || '',
+          vendor: line.vendor || '',
+          funder: line.funder || ''
+        }))
+      };
+      
+      // Create the new journal entry
+      const res = await fetch(`/api/journals`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ journal: newJournal })
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to duplicate journal');
+      }
+      
+      // Show success message
+      toast({
+        title: "Journal duplicated",
+        description: `Successfully created a copy of journal #${journal.id}`,
+      });
+      
+      // Redirect to the new journal entry
+      router.push(`/dashboard/transactions/${data.id}`);
+    } catch (error) {
+      console.error('Error duplicating journal:', error);
+      toast({
+        title: "Error duplicating journal",
+        description: error instanceof Error ? error.message : "Unknown error occurred",
+        variant: "destructive",
+      });
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="container mx-auto py-6 flex justify-center items-center min-h-[60vh]">
@@ -213,6 +281,10 @@ export default function JournalDetailPage() {
           <h1 className="text-3xl font-bold">Journal Entry #{journal.id}</h1>
         </div>
         <div className="flex space-x-2">
+          <Button variant="outline" onClick={duplicateJournal}>
+            <Copy className="h-4 w-4 mr-2" />
+            Duplicate
+          </Button>
           {!journal.is_posted && (
             <>
               <JournalPostButton 
@@ -318,6 +390,10 @@ export default function JournalDetailPage() {
                     <tr>
                       <th className="px-4 py-2 text-left text-xs font-medium text-black dark:text-white uppercase tracking-wider">Account</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-black dark:text-white uppercase tracking-wider">Description</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-black dark:text-white uppercase tracking-wider">Category</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-black dark:text-white uppercase tracking-wider">Location</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-black dark:text-white uppercase tracking-wider">Vendor</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-black dark:text-white uppercase tracking-wider">Funder</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-black dark:text-white uppercase tracking-wider w-32">Debit</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-black dark:text-white uppercase tracking-wider w-32">Credit</th>
                     </tr>
@@ -330,6 +406,10 @@ export default function JournalDetailPage() {
                           <div className="text-sm text-gray-500 dark:text-gray-300">{line.account_name}</div>
                         </td>
                         <td className="px-4 py-2">{line.description || '-'}</td>
+                        <td className="px-4 py-2">{line.category || '-'}</td>
+                        <td className="px-4 py-2">{line.location || '-'}</td>
+                        <td className="px-4 py-2">{line.vendor || '-'}</td>
+                        <td className="px-4 py-2">{line.funder || '-'}</td>
                         <td className="px-4 py-2 text-right font-medium dark:text-green-400">
                           {parseFloat(line.debit) > 0 ? `$${parseFloat(line.debit).toFixed(2)}` : ''}
                         </td>
@@ -341,7 +421,7 @@ export default function JournalDetailPage() {
                   </tbody>
                   <tfoot className="bg-gray-100 dark:bg-gray-700">
                     <tr>
-                      <td colSpan={2} className="px-4 py-2 text-right font-medium dark:text-white">Totals:</td>
+                      <td colSpan={6} className="px-4 py-2 text-right font-medium dark:text-white">Totals:</td>
                       <td className="px-4 py-2 text-right font-bold dark:text-green-400">
                         {
                           (() => {

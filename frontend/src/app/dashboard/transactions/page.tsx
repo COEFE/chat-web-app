@@ -39,6 +39,7 @@ import DatabaseMigration from "@/components/journals/DatabaseMigration";
 import { AccountSetupButton } from "@/components/accounts/AccountSetupButton";
 import { RunDatabaseFixes } from "@/components/journals/RunDatabaseFixes";
 import { FixJournalTotalsButton } from "@/components/journals/FixJournalTotalsButton";
+import { AIChatLink } from "@/components/journals/AIChatLink";
 
 interface Journal {
   id: number;
@@ -66,6 +67,10 @@ interface JournalLine {
   description: string;
   debit: number;
   credit: number;
+  category?: string;
+  location?: string;
+  vendor?: string;
+  funder?: string;
 }
 
 interface JournalFormValues {
@@ -342,8 +347,15 @@ export default function TransactionsPage() {
         <TabsContent value="list">
           <Card>
             <CardHeader>
-              <CardTitle>Journal Entries</CardTitle>
-              <CardDescription>View and manage your journal entries</CardDescription>
+              <div className="flex flex-col md:flex-row justify-between items-start gap-4 mb-4">
+                <div>
+                  <CardTitle>Journal Entries</CardTitle>
+                  <CardDescription>View and manage your journal entries</CardDescription>
+                </div>
+                
+                {/* AI Chat Link */}
+                <AIChatLink className="w-full md:w-96" />
+              </div>
               
               {/* Filters */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">

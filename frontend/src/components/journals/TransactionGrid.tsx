@@ -61,6 +61,10 @@ const journalLineSchema = z.object({
   description: z.string().optional(),
   debit: z.number().nonnegative().optional(),
   credit: z.number().nonnegative().optional(),
+  category: z.string().optional(),
+  location: z.string().optional(),
+  vendor: z.string().optional(),
+  funder: z.string().optional(),
 });
 
 // Define the schema for the entire journal form
@@ -343,8 +347,12 @@ export function TransactionGrid({ accounts, onSubmit, defaultValues }: Transacti
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-[40px]">#</TableHead>
-                      <TableHead className="w-[300px]">Account</TableHead>
-                      <TableHead className="w-[300px]">Description</TableHead>
+                      <TableHead className="w-[250px]">Account</TableHead>
+                      <TableHead className="w-[250px]">Description</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Location</TableHead>
+                      <TableHead>Vendor</TableHead>
+                      <TableHead>Funder</TableHead>
                       <TableHead className="text-right">Debit</TableHead>
                       <TableHead className="text-right">Credit</TableHead>
                       <TableHead className="w-[60px]"></TableHead>
@@ -394,6 +402,74 @@ export function TransactionGrid({ accounts, onSubmit, defaultValues }: Transacti
                                 <Input
                                   placeholder="Line description"
                                   {...field}
+                                  disabled={isSubmitting}
+                                />
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <FormField
+                            control={form.control}
+                            name={`lines.${index}.category`}
+                            render={({ field }) => (
+                              <FormItem className="m-0">
+                                <Input
+                                  placeholder="Category"
+                                  {...field}
+                                  value={field.value || ""}
+                                  disabled={isSubmitting}
+                                />
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <FormField
+                            control={form.control}
+                            name={`lines.${index}.location`}
+                            render={({ field }) => (
+                              <FormItem className="m-0">
+                                <Input
+                                  placeholder="Location"
+                                  {...field}
+                                  value={field.value || ""}
+                                  disabled={isSubmitting}
+                                />
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <FormField
+                            control={form.control}
+                            name={`lines.${index}.vendor`}
+                            render={({ field }) => (
+                              <FormItem className="m-0">
+                                <Input
+                                  placeholder="Vendor"
+                                  {...field}
+                                  value={field.value || ""}
+                                  disabled={isSubmitting}
+                                />
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <FormField
+                            control={form.control}
+                            name={`lines.${index}.funder`}
+                            render={({ field }) => (
+                              <FormItem className="m-0">
+                                <Input
+                                  placeholder="Funder"
+                                  {...field}
+                                  value={field.value || ""}
                                   disabled={isSubmitting}
                                 />
                                 <FormMessage />

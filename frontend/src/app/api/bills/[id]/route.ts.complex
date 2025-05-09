@@ -1,0 +1,159 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticateRequest } from '@/lib/authenticateRequest';
+import { 
+  getBill, 
+  updateBill, 
+  deleteBill,
+  createBillPayment,
+  deleteBillPayment,
+  BillLine,
+  BillPayment
+} from '@/lib/accounting/billQueries';
+
+// GET /api/bills/[id] - fetch a specific bill
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const { userId, error } = await authenticateRequest(request);
+  if (error) return error;
+
+  try {
+    const id = parseInt(params.id, 10);
+    if (isNaN(id)) {
+      return NextResponse.json({ error: 'Invalid bill ID' }, { status: 400 });
+    }
+
+    // Parse query parameters
+    const url = new URL(request.url);
+    const includeLines = url.searchParams.get('includeLines') !== 'false';
+    const includePayments = url.searchParams.get('includePayments') !== 'false';
+
+    const bill = await getBill(id, includeLines, includePayments);
+    if (!bill) {
+      return NextResponse.json({ error: 'Bill not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(bill);
+  } catch (err: any) {
+    console.error(`[bills/${params.id}] GET error:`, err);
+    return NextResponse.json(
+      { error: err.message || 'Failed to fetch bill' },
+      { status: 500 }
+    );
+  }
+}
+
+// PUT /api/bills/[id] - update a specific bill
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const { userId, error } = await authenticateRequest(request);
+  if (error) return error;
+
+  try {
+    const id = parseInt(params.id, 10);
+    if (isNaN(id)) {
+      return NextResponse.json({ error: 'Invalid bill ID' }, { status: 400 });
+    }
+    
+    const body = await request.json();
+    if (!body || !body.bill) {
+      return NextResponse.json({ error: 'Bill data is required' }, { status: 400 });
+    }
+    
+    // Get the existing bill first
+    const existingBill = await getBill(id);
+    if (!existingBill) {
+      return NextResponse.json({ error: 'Bill not found' }, { status: 404 });
+    }
+    
+    // Don't allow updates if bill has payments and we're trying to change certain fields
+    if ((existingBill.amount_paid || 0) > 0) {
+      const { bill } = body;
+      
+      // Check if trying to change critical fields
+      if (
+        (bill.vendor_id && bill.vendor_id !== existingBill.vendor_id) ||
+        (bill.total_amount && bill.total_amount !== existingBill.total_amount) ||
+        (bill.ap_account_id && bill.ap_account_id !== existingBill.ap_account_id)
+      ) {
+        return NextResponse.json({
+          error: 'Cannot modify vendor, total amount, or AP account for a bill that has payments'
+        }, { status: 400 });
+      }
+    }
+    
+    const { bill, lines } = body;
+    
+    // If updating total_amount, make sure it's not less than amount already paid
+    if (bill.total_amount && (existingBill.amount_paid || 0) > bill.total_amount) {
+      return NextResponse.json({
+        error: `Cannot set total amount less than amount already paid (${existingBill.amount_paid})`
+      }, { status: 400 });
+    }
+    
+    // Update the bill
+    const updatedBill = await updateBill(id, {
+      ...bill,
+      // Fields that should never be updated via API
+      amount_paid: undefined, // Never update amount_paid directly, only via payments
+      is_deleted: undefined, // Never update is_deleted directly, use DELETE endpoint
+      deleted_at: undefined, // Never update deleted_at directly, use DELETE endpoint
+    }, lines);
+    
+    return NextResponse.json({
+      success: true,
+      bill: updatedBill
+    });
+  } catch (err: any) {
+    console.error(`[bills/${params.id}] PUT error:`, err);
+    return NextResponse.json(
+      { error: err.message || 'Failed to update bill' },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE /api/bills/[id] - soft delete a bill
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const { userId, error } = await authenticateRequest(request);
+  if (error) return error;
+
+  try {
+    const id = parseInt(params.id, 10);
+    if (isNaN(id)) {
+      return NextResponse.json({ error: 'Invalid bill ID' }, { status: 400 });
+    }
+    
+    // Get the bill to check if it has payments
+    const bill = await getBill(id, false, true);
+    if (!bill) {
+      return NextResponse.json({ error: 'Bill not found' }, { status: 404 });
+    }
+    
+    // Don't allow deletion if bill has payments
+    if ((bill.amount_paid || 0) > 0) {
+      return NextResponse.json({ 
+        error: 'Cannot delete a bill that has payments' 
+      }, { status: 400 });
+    }
+    
+    // Delete the bill (soft delete)
+    await deleteBill(id);
+    
+    return NextResponse.json({
+      success: true
+    });
+  } catch (err: any) {
+    console.error(`[bills/${params.id}] DELETE error:`, err);
+    return NextResponse.json(
+      { error: err.message || 'Failed to delete bill' },
+      { status: 500 }
+    );
+  }
+}

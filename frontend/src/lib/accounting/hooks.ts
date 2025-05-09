@@ -72,12 +72,60 @@ export async function beforePost(
 }
 
 /**
+ * BEFORE-UPDATE Hook
+ * Called before a journal is updated to ensure data validity
+ */
+export async function beforeUpdate(
+  journalId: number, 
+  updates: Partial<Journal>, // The intended updates
+  userId: string
+): Promise<{
+  valid: boolean;
+  error?: string;
+}> {
+  // Check if journal exists and is not posted
+  const { rows } = await sql`SELECT is_posted FROM journals WHERE id = ${journalId} AND is_deleted = FALSE`;
+  if (rows.length === 0) {
+    return { valid: false, error: 'Journal not found or has been deleted' };
+  }
+  if (rows[0].is_posted) {
+    return { valid: false, error: 'Cannot modify a posted journal entry' };
+  }
+  // Add any other specific update validations here if needed
+  return { valid: true };
+}
+
+/**
+ * BEFORE-DELETE Hook
+ * Called before a journal is deleted
+ */
+export async function beforeDelete(
+  journalId: number, 
+  userId: string
+): Promise<{
+  valid: boolean;
+  error?: string;
+}> {
+  // Check if journal exists and is not posted
+  const { rows } = await sql`SELECT is_posted FROM journals WHERE id = ${journalId} AND is_deleted = FALSE`;
+  if (rows.length === 0) {
+    return { valid: false, error: 'Journal not found or has been deleted' };
+  }
+  if (rows[0].is_posted) {
+    return { valid: false, error: 'Cannot delete a posted journal entry' };
+  }
+  return { valid: true };
+}
+
+/**
  * AFTER-POST Hook
  * Called after a journal is successfully posted to handle side-effects
  */
 export async function afterPost(
   journalId: number,
-  userId: string
+  userId: string,
+  beforeState?: any, // Optional: for consistency if pre-fetched
+  afterState?: any   // Optional: for consistency if pre-constructed
 ): Promise<void> {
   console.log(`Running afterPost hook for journal ${journalId}`);
   
@@ -86,7 +134,11 @@ export async function afterPost(
     await generateJournalEmbeddings(journalId);
     
     // 2. Record in audit log
-    await recordAuditEvent(journalId, 'POST', userId);
+    // If afterState is not provided, it implies it needs to be fetched or constructed.
+    // For a 'POST' action, 'beforeState' might be minimal or non-existent (new record).
+    // 'afterState' is crucial here.
+    const finalAfterState = afterState ?? await sql`SELECT * FROM journals WHERE id = ${journalId} AND is_deleted = FALSE`.then(res => res.rows[0]);
+    await recordAuditEvent(journalId, 'POST', userId, beforeState, finalAfterState);
     
     // 3. Update account balance cache (if implemented)
     await updateAccountBalances(journalId);
@@ -145,6 +197,31 @@ export async function afterDelete(
     await reverseAccountBalances(journalId, before);
   } catch (error) {
     console.error('Error in afterDelete hook:', error);
+  }
+}
+
+/**
+ * AFTER-UNPOST Hook
+ * Called after a journal is successfully un-posted
+ */
+export async function afterUnpost(
+  journalId: number,
+  userId: string,
+  beforeState: any,
+  afterState: any
+): Promise<void> {
+  console.log(`Running afterUnpost hook for journal ${journalId}`);
+  try {
+    // 1. Record in audit log
+    await recordAuditEvent(journalId, 'UNPOST', userId, beforeState, afterState);
+
+    // 2. Consider if any other actions from 'afterPost' need reversal here
+    // For example, if embeddings are specific to posted status, or if account balances need adjustment.
+    // For now, primarily focusing on the audit event.
+
+  } catch (error) {
+    console.error('Error in afterUnpost hook:', error);
+    // Don't throw - we don't want to roll back the transaction if hooks fail
   }
 }
 
@@ -247,8 +324,8 @@ async function recordAuditEvent(
     INSERT INTO journal_audit (
       journal_id,
       action,
-      changed_by,
-      changed_at,
+      performed_by,
+      performed_at,
       before_state,
       after_state
     ) VALUES (
