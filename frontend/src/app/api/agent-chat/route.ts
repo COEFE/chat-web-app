@@ -2,13 +2,30 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth } from '@/lib/firebaseAdminConfig';
 import { AccountingOrchestrator } from '@/lib/agents/orchestrator';
 import { GLAgent } from '@/lib/agents/glAgent';
-import { logAgentAction } from '@/lib/auditLogger';
+import { APAgent } from '@/lib/agents/apAgent';
+import { InvoiceAgent } from '@/lib/agents/invoiceAgent';
+import { ReconciliationAgent } from '@/lib/agents/reconciliationAgent';
+import { logAuditEvent } from '@/lib/auditLogger';
 
 // Create and configure the orchestrator with available agents
 // Note: This is a simple approach for now - in production, consider a more robust singleton pattern
 const orchestrator = new AccountingOrchestrator();
+
+// Register the GL Agent
 const glAgent = new GLAgent();
 orchestrator.registerAgent(glAgent);
+
+// Register the AP Agent
+const apAgent = new APAgent();
+orchestrator.registerAgent(apAgent);
+
+// Register the Invoice Agent
+const invoiceAgent = new InvoiceAgent();
+orchestrator.registerAgent(invoiceAgent);
+
+// Register the Reconciliation Agent
+const reconciliationAgent = new ReconciliationAgent();
+orchestrator.registerAgent(reconciliationAgent);
 
 /**
  * API Route: /api/agent-chat
@@ -65,18 +82,19 @@ export async function POST(req: NextRequest) {
 
   try {
     // 4. Log the incoming request
-    await logAgentAction({
-      userId,
-      agentId: "agent_api",
-      actionType: "CHAT_REQUEST",
-      entityType: "CONVERSATION",
-      entityId: conversationId || "new",
+    await logAuditEvent({
+      user_id: userId,
+      action_type: "CHAT_REQUEST",
+      entity_type: "CONVERSATION",
+      entity_id: conversationId || "new",
       context: { 
         query,
         hasDocumentContext: !!documentContext,
-        messageCount: messages?.length || 0
+        messageCount: messages?.length || 0,
+        agentId: "agent_api"
       },
-      status: "ATTEMPT"
+      status: "ATTEMPT",
+      timestamp: new Date().toISOString()
     });
 
     // 5. Process the request through the orchestrator
@@ -85,21 +103,23 @@ export async function POST(req: NextRequest) {
       query,
       conversationId,
       previousMessages: messages || [],
-      documentContext
+      documentContext,
+      token: authorizationHeader.split('Bearer ')[1] // Pass the token for API calls that need auth
     });
 
     // 6. Log successful completion
-    await logAgentAction({
-      userId,
-      agentId: "agent_api",
-      actionType: "CHAT_RESPONSE",
-      entityType: "CONVERSATION",
-      entityId: conversationId || "new",
+    await logAuditEvent({
+      user_id: userId,
+      action_type: "CHAT_RESPONSE",
+      entity_type: "CONVERSATION",
+      entity_id: conversationId || "new",
       context: { 
         success: result.success,
-        messageLength: result.message.length
+        messageLength: result.message.length,
+        agentId: "agent_api"
       },
-      status: "SUCCESS"
+      status: "SUCCESS",
+      timestamp: new Date().toISOString()
     });
 
     // 7. Return the response
@@ -112,15 +132,15 @@ export async function POST(req: NextRequest) {
     console.error("Error processing agent chat request:", error);
     
     // Log the error
-    await logAgentAction({
-      userId,
-      agentId: "agent_api",
-      actionType: "CHAT_RESPONSE",
-      entityType: "CONVERSATION",
-      entityId: conversationId || "new",
-      context: { query },
+    await logAuditEvent({
+      user_id: userId,
+      action_type: "CHAT_RESPONSE",
+      entity_type: "CONVERSATION",
+      entity_id: conversationId || "new",
+      context: { query, agentId: "agent_api" },
       status: "FAILURE",
-      errorDetails: error instanceof Error ? error.message : String(error)
+      error_details: error instanceof Error ? error.message : String(error),
+      timestamp: new Date().toISOString()
     });
     
     return NextResponse.json(

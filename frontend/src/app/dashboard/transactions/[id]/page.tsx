@@ -64,17 +64,24 @@ interface Journal {
   total_debits?: number;
   total_credits?: number;
   is_balanced?: boolean;
+  reversal_of_journal_id?: number;
+  reversed_by_journal_id?: number;
   totals: {
     debit: number;
     credit: number;
     balance: number;
   };
+  debit: number;
+  credit: number;
+  balance: number;
 }
 
 export default function JournalDetailPage() {
-  const [journal, setJournal] = useState<Journal | null>(null);
+  // State hooks
   const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isReversing, setIsReversing] = useState(false);
+  const [journal, setJournal] = useState<Journal | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const router = useRouter();
@@ -120,45 +127,135 @@ export default function JournalDetailPage() {
     if (user) {
       fetchJournal();
     }
-  }, []);  // Empty dependency array since fetchJournal is defined in component body
-  
-  // Re-fetch when user or journalId changes
-  useEffect(() => {
-    if (user && journalId) {
-      fetchJournal();
-    }
   }, [user, journalId]);
 
-  // Delete journal entry
+  // Delete an attachment
+  const deleteAttachment = async (attachmentId: number) => {
+    if (!user || !journal) return;
+
+    try {
+      const token = await user.getIdToken();
+      if (!token) {
+        throw new Error('You must be logged in to delete an attachment');
+      }
+      
+      const res = await fetch(`/api/journals/${journalId}/attachments/${attachmentId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to delete attachment');
+      }
+      
+      toast({
+        title: "Attachment deleted",
+        description: "The file has been successfully deleted",
+        variant: "default",
+      });
+      
+      // Refresh journal to update attachments list
+      fetchJournal();
+    } catch (error) {
+      console.error('Error deleting attachment:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Unknown error occurred",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Reverse the journal - creates a new journal with opposite values
+  const reverseJournal = async () => {
+    if (!user || !journal) return;
+    
+    setIsReversing(true);
+    try {
+      const token = await user.getIdToken();
+      if (!token) {
+        throw new Error('You must be logged in to reverse a journal');
+      }
+      
+      const response = await fetch('/api/journals/reverse', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ journalId: journal.id })
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to reverse journal');
+      }
+      
+      toast({
+        title: "Journal Reversed",
+        description: `Successfully created reversal journal #${data.journalId}`,
+        variant: "default"
+      });
+      
+      // Navigate to the new journal
+      router.push(`/dashboard/transactions/${data.journalId}`);
+    } catch (error) {
+      console.error('Error reversing journal:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Unknown error occurred",
+        variant: "destructive"
+      });
+    } finally {
+      setIsReversing(false);
+    }
+  };
+
+  // Edit journal entry
+  const editJournal = () => {
+    router.push(`/dashboard/transactions/${journalId}/edit`);
+  };
+  
+  // Duplicate the journal
+  const duplicateJournal = () => {
+    router.push(`/dashboard/transactions/${journalId}/duplicate`);
+  };
+  
+  // Delete the journal
   const deleteJournal = async () => {
+    if (!user || !journal) return;
+
     setIsDeleting(true);
     try {
-      const token = await user?.getIdToken();
+      const token = await user.getIdToken();
       if (!token) {
-        throw new Error('Authentication required');
+        throw new Error('You must be logged in to delete a journal');
       }
       
       const res = await fetch(`/api/journals/${journalId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
-      
       const data = await res.json();
+      
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to delete journal entry');
+        throw new Error(data.error || 'Failed to delete journal');
       }
       
       toast({
-        title: "Journal entry deleted",
-        description: "The transaction has been deleted successfully",
+        title: "Journal deleted",
+        description: "The journal entry has been successfully deleted",
+        variant: "default",
       });
       
-      // Redirect to journals list
+      // Navigate back to the journals list
       router.push('/dashboard/transactions');
     } catch (error) {
       console.error('Error deleting journal:', error);
       toast({
-        title: "Error deleting journal",
+        title: "Error",
         description: error instanceof Error ? error.message : "Unknown error occurred",
         variant: "destructive",
       });
@@ -167,105 +264,27 @@ export default function JournalDetailPage() {
     }
   };
 
-  // Edit journal entry
-  const editJournal = () => {
-    router.push(`/dashboard/transactions/${journalId}/edit`);
-  };
-
-  // Function to duplicate a journal entry
-  const duplicateJournal = async () => {
-    if (!journal || !user) return;
-    
-    try {
-      // Get authentication token
-      const token = await user.getIdToken();
-      if (!token) {
-        throw new Error('Authentication required');
-      }
-      
-      // Create a new journal object without ID and with current date
-      const newJournal = {
-        journal_type: journal.journal_type || 'GJ',
-        transaction_date: new Date().toISOString().split('T')[0],
-        memo: `Copy of ${journal.memo}`,
-        source: journal.source,
-        reference_number: journal.reference_number,
-        lines: journal.lines.map(line => ({
-          account_id: line.account_id,
-          description: line.description,
-          debit: parseFloat(line.debit) || 0,
-          credit: parseFloat(line.credit) || 0,
-          category: line.category || '',
-          location: line.location || '',
-          vendor: line.vendor || '',
-          funder: line.funder || ''
-        }))
-      };
-      
-      // Create the new journal entry
-      const res = await fetch(`/api/journals`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ journal: newJournal })
-      });
-      
-      const data = await res.json();
-      
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to duplicate journal');
-      }
-      
-      // Show success message
-      toast({
-        title: "Journal duplicated",
-        description: `Successfully created a copy of journal #${journal.id}`,
-      });
-      
-      // Redirect to the new journal entry
-      router.push(`/dashboard/transactions/${data.id}`);
-    } catch (error) {
-      console.error('Error duplicating journal:', error);
-      toast({
-        title: "Error duplicating journal",
-        description: error instanceof Error ? error.message : "Unknown error occurred",
-        variant: "destructive",
-      });
-    }
-  };
-
+  // Show loading state
   if (isLoading) {
     return (
-      <div className="container mx-auto py-6 flex justify-center items-center min-h-[60vh]">
+      <div className="flex justify-center items-center h-screen">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
+  // Show error state if journal not found
   if (!journal) {
     return (
       <div className="container mx-auto py-6">
-        <div className="flex items-center mb-6">
-          <Button variant="ghost" onClick={() => router.back()} className="mr-4">
+        <div className="flex flex-col items-center justify-center h-[50vh]">
+          <h1 className="text-2xl font-bold mb-4">Journal Entry Not Found</h1>
+          <p className="text-muted-foreground mb-6">The requested journal entry does not exist or you do not have permission to view it.</p>
+          <Button onClick={() => router.push('/dashboard/transactions')}>
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back
+            Back to Transactions
           </Button>
-          <h1 className="text-3xl font-bold">Journal Entry Not Found</h1>
         </div>
-        <Card>
-          <CardContent className="py-8">
-            <div className="text-center">
-              <p className="text-lg text-muted-foreground">
-                The requested journal entry could not be found.
-              </p>
-              <Button onClick={() => router.push('/dashboard/transactions')} className="mt-4">
-                Return to Transactions
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     );
   }
@@ -285,6 +304,35 @@ export default function JournalDetailPage() {
             <Copy className="h-4 w-4 mr-2" />
             Duplicate
           </Button>
+          {journal.is_posted && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline">
+                  <FileText className="h-4 w-4 mr-2" />
+                  Reverse Journal
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Reverse Journal Entry</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will create a new journal entry with reversed debits and credits to offset this entry.
+                    The new entry will be created in draft status for you to review before posting.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={reverseJournal}
+                    disabled={isReversing}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    {isReversing ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create Reversal'}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
           {!journal.is_posted && (
             <>
               <JournalPostButton 
@@ -331,9 +379,7 @@ export default function JournalDetailPage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Transaction Details</CardTitle>
-            <CardDescription>
-              View the details of this journal entry.
-            </CardDescription>
+            <CardDescription>View the details of this journal entry.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
@@ -341,6 +387,29 @@ export default function JournalDetailPage() {
                 <h3 className="text-sm font-medium text-muted-foreground">Journal #</h3>
                 <p>{journal.journal_number || journal.id}</p>
               </div>
+              
+              {journal.reversal_of_journal_id && (
+                <div>
+                  <h3 className="text-sm font-medium text-muted-foreground">Reversal Of</h3>
+                  <p className="text-blue-500 hover:text-blue-700 cursor-pointer"
+                     onClick={() => router.push(`/dashboard/transactions/${journal.reversal_of_journal_id}`)}>
+                    Journal #{journal.reversal_of_journal_id} 
+                    <ArrowLeft className="h-3 w-3 inline ml-1" />
+                  </p>
+                </div>
+              )}
+              
+              {journal.reversed_by_journal_id && (
+                <div>
+                  <h3 className="text-sm font-medium text-muted-foreground">Reversed By</h3>
+                  <p className="text-blue-500 hover:text-blue-700 cursor-pointer"
+                     onClick={() => router.push(`/dashboard/transactions/${journal.reversed_by_journal_id}`)}>
+                    Journal #{journal.reversed_by_journal_id}
+                    <ArrowLeft className="h-3 w-3 inline ml-1" />
+                  </p>
+                </div>
+              )}
+              
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground">Date</h3>
                 <p>{journal.transaction_date || journal.date ? 
@@ -398,45 +467,58 @@ export default function JournalDetailPage() {
                       <th className="px-4 py-2 text-left text-xs font-medium text-black dark:text-white uppercase tracking-wider w-32">Credit</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-200 text-black dark:text-gray-100">
-                    {journal.lines.map((line) => (
-                      <tr key={line.id}>
+                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    {journal.lines.map((line, index) => (
+                      <tr key={line.id || index} className={index % 2 === 0 ? 'bg-gray-50 dark:bg-gray-900' : ''}>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <div>
+                            <p className="text-sm font-medium">{line.account_code}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{line.account_name}</p>
+                          </div>
+                        </td>
                         <td className="px-4 py-2">
-                          <div className="font-medium">{line.account_code}</div>
-                          <div className="text-sm text-gray-500 dark:text-gray-300">{line.account_name}</div>
+                          <p className="text-sm">{line.description || '-'}</p>
                         </td>
-                        <td className="px-4 py-2">{line.description || '-'}</td>
-                        <td className="px-4 py-2">{line.category || '-'}</td>
-                        <td className="px-4 py-2">{line.location || '-'}</td>
-                        <td className="px-4 py-2">{line.vendor || '-'}</td>
-                        <td className="px-4 py-2">{line.funder || '-'}</td>
-                        <td className="px-4 py-2 text-right font-medium dark:text-green-400">
-                          {parseFloat(line.debit) > 0 ? `$${parseFloat(line.debit).toFixed(2)}` : ''}
+                        <td className="px-4 py-2">
+                          <p className="text-sm">{line.category || '-'}</p>
                         </td>
-                        <td className="px-4 py-2 text-right font-medium dark:text-green-400">
-                          {parseFloat(line.credit) > 0 ? `$${parseFloat(line.credit).toFixed(2)}` : ''}
+                        <td className="px-4 py-2">
+                          <p className="text-sm">{line.location || '-'}</p>
+                        </td>
+                        <td className="px-4 py-2">
+                          <p className="text-sm">{line.vendor || '-'}</p>
+                        </td>
+                        <td className="px-4 py-2">
+                          <p className="text-sm">{line.funder || '-'}</p>
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <p className="text-sm font-medium">
+                            {parseFloat(line.debit) ? `$${parseFloat(line.debit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                          </p>
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <p className="text-sm font-medium">
+                            {parseFloat(line.credit) ? `$${parseFloat(line.credit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                          </p>
                         </td>
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot className="bg-gray-100 dark:bg-gray-700">
+                  <tfoot className="bg-gray-200 dark:bg-gray-700">
                     <tr>
-                      <td colSpan={6} className="px-4 py-2 text-right font-medium dark:text-white">Totals:</td>
-                      <td className="px-4 py-2 text-right font-bold dark:text-green-400">
-                        {
-                          (() => {
-                            const debitTotal = journal.total_debits ?? journal.totals?.debit ?? journal.lines.reduce((sum, line) => sum + (parseFloat(String(line.debit)) || 0), 0);
-                            return `$${debitTotal.toFixed(2)}`;
-                          })()
-                        }
+                      <td colSpan={6} className="px-4 py-2 text-right text-sm font-bold">Total</td>
+                      <td className="px-4 py-2 text-right text-sm font-bold">
+                        ${(journal.total_debits || journal.totals?.debit || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
-                      <td className="px-4 py-2 text-right font-bold dark:text-green-400">
-                        {
-                          (() => {
-                            const creditTotal = journal.total_credits ?? journal.totals?.credit ?? journal.lines.reduce((sum, line) => sum + (parseFloat(String(line.credit)) || 0), 0);
-                            return `$${creditTotal.toFixed(2)}`;
-                          })()
-                        }
+                      <td className="px-4 py-2 text-right text-sm font-bold">
+                        ${(journal.total_credits || journal.totals?.credit || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td colSpan={6} className="px-4 py-2 text-right text-sm font-bold">Balance</td>
+                      <td colSpan={2} className={`px-4 py-2 text-right text-sm font-bold ${journal.is_balanced ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                        ${Math.abs(journal.balance || (journal.totals?.debit || 0) - (journal.totals?.credit || 0)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {journal.is_balanced ? ' (Balanced)' : ' (Unbalanced)'}
                       </td>
                     </tr>
                   </tfoot>
@@ -446,56 +528,64 @@ export default function JournalDetailPage() {
           </CardContent>
         </Card>
         
-        {/* Attachments */}
+        {/* Attachments section */}
         <Card>
           <CardHeader>
             <CardTitle>Attachments</CardTitle>
-            <CardDescription>
-              Supporting documents for this transaction.
-            </CardDescription>
+            <CardDescription>Supporting documents for this transaction.</CardDescription>
           </CardHeader>
           <CardContent>
             {journal.attachments && journal.attachments.length > 0 ? (
-              <ul className="space-y-2">
+              <div className="space-y-3">
                 {journal.attachments.map((attachment) => (
-                  <li key={attachment.id} className="border rounded-md p-3">
+                  <div key={attachment.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
                     <div className="flex items-center">
-                      <FileText className="h-5 w-5 mr-2 text-blue-500" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{attachment.file_name}</p>
+                      <FileText className="h-4 w-4 mr-2 text-blue-500" />
+                      <div>
+                        <p className="text-sm font-medium">{attachment.file_name}</p>
                         <p className="text-xs text-gray-500">
-                          {(attachment.file_size / 1024).toFixed(1)} KB
+                          {format(new Date(attachment.uploaded_at), 'MMM d, yyyy')} • 
+                          {(attachment.file_size / 1024).toFixed(0)} KB
                         </p>
                       </div>
-                      <Button size="sm" variant="outline" asChild>
+                    </div>
+                    <div className="flex space-x-2">
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        asChild
+                      >
                         <a href={attachment.file_url} target="_blank" rel="noopener noreferrer">
                           View
                         </a>
                       </Button>
+                      {!journal.is_posted && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => deleteAttachment(attachment.id)}
+                        >
+                          Delete
+                        </Button>
+                      )}
                     </div>
-                  </li>
+                  </div>
                 ))}
-              </ul>
-            ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                <p>No attachments for this transaction.</p>
               </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No attachments for this transaction.</p>
             )}
-          </CardContent>
-          <CardFooter>
+            
             {!journal.is_posted && (
               <AttachmentUpload 
                 journalId={journal.id} 
                 onUploadComplete={() => fetchJournal()} 
-                disabled={journal.is_posted} 
               />
             )}
             {journal.is_posted && (
-              <p className="text-center text-sm text-muted-foreground w-full">
-                Cannot add attachments to posted journal entries
-              </p>
+              <p className="text-sm text-muted-foreground mt-2">Cannot add attachments to posted journal entries</p>
             )}
-          </CardFooter>
+          </CardContent>
         </Card>
       </div>
     </div>

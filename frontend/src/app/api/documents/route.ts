@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { initializeFirebaseAdmin, getAdminAuth, getAdminDb, getAdminStorage } from '@/lib/firebaseAdminConfig'; // Ensure admin app is initialized
+import { randomUUID } from 'crypto';
 
 // Initialize Firebase Admin SDK at the module level
 try {
@@ -223,5 +224,89 @@ export async function DELETE(req: NextRequest) {
     console.error(`DELETE /api/documents - Error deleting document(s):`, error);
     console.error('Error details:', { message: error.message, stack: error.stack });
     return NextResponse.json({ error: 'Failed to delete document(s)', details: error.message }, { status: 500 });
+  }
+}
+
+/**
+ * POST /api/documents
+ * Handles document upload (multipart/form-data with a single `file` field)
+ */
+export async function POST(req: NextRequest) {
+  console.log('POST /api/documents called');
+
+  // Authenticate user
+  const auth = await authenticateUser(req);
+
+  if ('error' in auth) {
+    return NextResponse.json({ error: auth.error, details: auth.details }, { status: auth.status });
+  }
+
+  const userId = auth.userId;
+  console.log(`POST /api/documents - Authenticated user ID: ${userId}`);
+
+  try {
+    // Parse multipart form data
+    const formData = await req.formData();
+    const file = formData.get('file') as File | null;
+
+    if (!file) {
+      return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
+    }
+
+    // Initialize Firebase services
+    initializeFirebaseAdmin();
+    const db = getAdminDb();
+    const storage = getAdminStorage();
+
+    // Determine bucket and storage path
+    const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'web-chat-app-fa7f0.appspot.com';
+    const bucket = storage.bucket(bucketName);
+
+    const timestamp = Date.now();
+    const originalName = file.name;
+    const extension = originalName.split('.').pop() || '';
+    const uniqueName = `${randomUUID()}.${extension}`;
+    const storagePath = `uploads/${userId}/${timestamp}-${uniqueName}`;
+
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // Determine contentType fallbacks
+    let uploadContentType = file.type;
+    if (!uploadContentType) {
+      if (extension === 'xlsx') uploadContentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      else if (extension === 'xls') uploadContentType = 'application/vnd.ms-excel';
+      else if (extension === 'csv') uploadContentType = 'text/csv';
+      else uploadContentType = 'application/octet-stream';
+    }
+
+    // Save to storage
+    const fileRef = bucket.file(storagePath);
+    await fileRef.save(buffer, { metadata: { contentType: uploadContentType } });
+
+    // Make the file publicly accessible via download URL (optional)
+    const [signedUrl] = await fileRef.getSignedUrl({ action: 'read', expires: Date.now() + 1000 * 60 * 60 * 24 * 7 });
+
+    // Store metadata in Firestore
+    const docRef = db.collection('users').doc(userId).collection('documents').doc();
+    const docData = {
+      name: originalName,
+      contentType: uploadContentType,
+      size: file.size,
+      uploadedAt: new Date(),
+      storagePath,
+      downloadURL: signedUrl,
+      status: 'uploaded',
+      userId,
+    };
+
+    await docRef.set(docData);
+
+    console.log(`POST /api/documents - File uploaded and metadata saved (docId: ${docRef.id})`);
+
+    return NextResponse.json({ success: true, document: { id: docRef.id, ...docData } }, { status: 200 });
+  } catch (error: any) {
+    console.error('POST /api/documents - Error uploading document:', error);
+    return NextResponse.json({ error: 'Failed to upload document', details: error.message }, { status: 500 });
   }
 }

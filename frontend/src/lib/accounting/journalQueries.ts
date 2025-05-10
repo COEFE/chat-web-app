@@ -299,6 +299,30 @@ export async function getJournals(
 }
 
 /**
+ * Get the next sequential journal number
+ */
+async function getNextJournalNumber(client: any): Promise<string> {
+  try {
+    // Get the highest journal number currently in use
+    const result = await client.query(`
+      SELECT MAX(CAST(NULLIF(REGEXP_REPLACE(journal_number, '[^0-9]', '', 'g'), '') AS INTEGER)) as max_num 
+      FROM journals 
+      WHERE journal_number ~ '^[0-9]+$'
+    `);
+    
+    const maxNum = result.rows[0].max_num || 0;
+    const nextNum = maxNum + 1;
+    
+    // Format the number with leading zeros
+    return nextNum.toString().padStart(5, '0');
+  } catch (error) {
+    console.error('Error generating next journal number:', error);
+    // Fallback to timestamp-based number if there's an error
+    return Date.now().toString().slice(-6);
+  }
+}
+
+/**
  * Create a new journal entry with lines and attachments
  */
 export async function createJournal(journal: Journal, userId: string): Promise<number> {
@@ -368,9 +392,11 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
       }
       
       if (schema.has_journal_number) {
+        // Get the next journal number
+        const nextJournalNumber = await getNextJournalNumber(client);
         insertColumns.push('journal_number');
         placeholders.push(`$${index++}`);
-        values.push(journal.journal_number || null);
+        values.push(journal.journal_number || nextJournalNumber);
       }
       
       if (schema.has_reference_number) {

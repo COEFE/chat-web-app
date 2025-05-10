@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, Paperclip, X, FileIcon, Download } from "lucide-react";
+import { Loader2, Paperclip, FileIcon, Download, Eye, Trash2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { getAuth } from "firebase/auth";
 
@@ -156,11 +156,14 @@ export function JournalAttachments({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-medium">Attachments</h3>
+      <div className="flex flex-col">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-medium">Attachments</h3>
+          <p className="text-muted-foreground text-sm">Supporting documents for this transaction.</p>
+        </div>
         
         {!readOnly && (
-          <div className="flex items-center">
+          <div className="flex items-center mt-2">
             <Input
               type="file"
               id="file-upload"
@@ -183,7 +186,7 @@ export function JournalAttachments({
                     </>
                   ) : (
                     <>
-                      <Paperclip className="mr-2 h-4 w-4" /> Attach File
+                      <Paperclip className="mr-2 h-4 w-4" /> Add Attachment
                     </>
                   )}
                 </span>
@@ -200,10 +203,10 @@ export function JournalAttachments({
           {attachments.map((attachment) => (
             <div
               key={attachment.id}
-              className="flex items-center justify-between rounded-md border p-2"
+              className="flex items-center justify-between rounded-lg border p-3 hover:bg-muted/30 transition-colors"
             >
-              <div className="flex items-center space-x-2">
-                <FileIcon className="h-5 w-5 text-muted-foreground" />
+              <div className="flex items-center space-x-3">
+                <FileIcon className="h-6 w-6 text-muted-foreground" />
                 <div>
                   <p className="text-sm font-medium">{attachment.file_name}</p>
                   <p className="text-xs text-muted-foreground">
@@ -211,35 +214,46 @@ export function JournalAttachments({
                   </p>
                 </div>
               </div>
-              <div className="flex space-x-2">
+              <div className="flex space-x-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3"
+                  asChild
+                >
+                  <a href={attachment.file_url} target="_blank" rel="noopener noreferrer">
+                    <Eye className="h-4 w-4 mr-1" />
+                    View
+                  </a>
+                </Button>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 bg-red-50 text-destructive hover:text-white hover:bg-destructive"
+                  onClick={() => handleDeleteAttachment(attachment.id)}
+                  disabled={isDeleting === attachment.id || readOnly}
+                >
+                  {isDeleting === attachment.id ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4 mr-1" />
+                  )}
+                  Delete
+                </Button>
+                
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-8 w-8 p-0"
                   asChild
+                  title="Download"
                 >
                   <a href={attachment.file_url} target="_blank" rel="noopener noreferrer" download>
                     <Download className="h-4 w-4" />
                     <span className="sr-only">Download</span>
                   </a>
                 </Button>
-                
-                {!readOnly && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0 text-destructive"
-                    onClick={() => handleDeleteAttachment(attachment.id)}
-                    disabled={isDeleting === attachment.id}
-                  >
-                    {isDeleting === attachment.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <X className="h-4 w-4" />
-                    )}
-                    <span className="sr-only">Delete</span>
-                  </Button>
-                )}
               </div>
             </div>
           ))}

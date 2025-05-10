@@ -14,6 +14,7 @@ export interface AgentContext {
   conversationId?: string;
   previousMessages?: AgentMessage[];
   documentContext?: any;
+  token?: string; // Authentication token for API requests
 }
 
 export interface AgentMessage {

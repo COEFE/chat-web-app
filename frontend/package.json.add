@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "db:migrate": "tsc src/scripts/run-migrations.ts --esModuleInterop --resolveJsonModule --outDir dist && NODE_ENV=development node dist/scripts/run-migrations.js"
+  }
+}

@@ -1,7 +1,7 @@
 import { Agent, AgentContext, AgentResponse, AgentRegistry } from "@/types/agents";
 import Anthropic from "@anthropic-ai/sdk";
 import { MessageParam } from "@anthropic-ai/sdk/resources/messages";
-import { logAgentAction } from "@/lib/auditLogger";
+import { logAuditEvent } from "@/lib/auditLogger";
 
 /**
  * AccountingOrchestrator handles routing user queries to specialized accounting agents
@@ -39,14 +39,14 @@ export class AccountingOrchestrator {
         console.log(`[Orchestrator] Routing to specialized agent: ${targetAgent.id}`);
         
         // Log the routing decision
-        await logAgentAction({
-          userId: context.userId,
-          agentId: "orchestrator",
-          actionType: "ROUTE_QUERY",
-          entityType: "AGENT",
-          entityId: targetAgent.id,
-          context: { query: context.query },
-          status: "SUCCESS"
+        await logAuditEvent({
+          user_id: context.userId,
+          action_type: "ROUTE_QUERY",
+          entity_type: "AGENT",
+          entity_id: targetAgent.id,
+          context: { query: context.query, agentId: "orchestrator" },
+          status: "SUCCESS",
+          timestamp: new Date().toISOString()
         });
         
         // 2. Pass the query to the specialized agent
@@ -60,15 +60,15 @@ export class AccountingOrchestrator {
       console.error("[Orchestrator] Error processing request:", error);
       
       // Log the error
-      await logAgentAction({
-        userId: context.userId,
-        agentId: "orchestrator",
-        actionType: "PROCESS_QUERY",
-        entityType: "QUERY",
-        entityId: "fallback",
-        context: { query: context.query },
+      await logAuditEvent({
+        user_id: context.userId,
+        action_type: "PROCESS_QUERY",
+        entity_type: "QUERY",
+        entity_id: "fallback",
+        context: { query: context.query, agentId: "orchestrator" },
         status: "FAILURE",
-        errorDetails: error instanceof Error ? error.message : String(error)
+        error_details: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString()
       });
       
       return {
@@ -118,7 +118,7 @@ export class AccountingOrchestrator {
         messages: [{ role: "user", content: query }]
       });
       
-      const suggestedAgentId = response.content[0].text.trim().toLowerCase();
+      const suggestedAgentId = typeof response.content[0] === 'object' && 'text' in response.content[0] && typeof response.content[0].text === 'string' ? response.content[0].text.trim().toLowerCase() : 'none';
       console.log(`[Orchestrator] Claude suggested agent: ${suggestedAgentId}`);
       
       if (suggestedAgentId !== "none" && this.agents[suggestedAgentId]) {
@@ -152,7 +152,7 @@ export class AccountingOrchestrator {
         });
       }
       
-      // Add the current query
+      // Add current query
       messages.push({
         role: "user",
         content: context.query
@@ -175,7 +175,7 @@ export class AccountingOrchestrator {
       
       return {
         success: true,
-        message: response.content[0].text,
+        message: typeof response.content[0] === 'object' && 'text' in response.content[0] ? response.content[0].text : '',
       };
     } catch (error) {
       console.error("[Orchestrator] Claude fallback error:", error);

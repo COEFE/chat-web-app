@@ -97,6 +97,7 @@ export function JournalTable({
           <TableRow>
             <TableHead className="w-10"></TableHead>
             <TableHead>Date</TableHead>
+            <TableHead>Journal #</TableHead>
             <TableHead>Memo</TableHead>
             <TableHead>Source</TableHead>
             <TableHead>Amount</TableHead>
@@ -140,6 +141,7 @@ export function JournalTable({
                     )}
                   </TableCell>
                   <TableCell>{formatDate(journal.date)}</TableCell>
+                  <TableCell>{journal.id}</TableCell>
                   <TableCell>{journal.memo}</TableCell>
                   <TableCell>{journal.source || "—"}</TableCell>
                   <TableCell>

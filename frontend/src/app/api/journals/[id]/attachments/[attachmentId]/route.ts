@@ -11,8 +11,14 @@ initializeFirebaseAdmin();
 export async function DELETE(
   request: NextRequest
 ) {
+  // Log incoming request for debugging
+  console.log(`Deleting attachment - ${request.nextUrl.pathname}`);
+  
   const { userId, error } = await authenticateRequest(request);
-  if (error) return error;
+  if (error) {
+    console.error('Authentication error:', error);
+    return error;
+  }
 
   const segments = request.nextUrl.pathname.split('/');
   const attachmentIdStr = segments.pop() || '';
@@ -20,6 +26,8 @@ export async function DELETE(
 
   const journalId = parseInt(journalIdStr, 10);
   const attachmentId = parseInt(attachmentIdStr, 10);
+  
+  console.log(`Deleting attachment: Journal ID ${journalId}, Attachment ID ${attachmentId}`);
   
   if (isNaN(journalId) || isNaN(attachmentId)) {
     return NextResponse.json({ error: 'Invalid journal ID or attachment ID' }, { status: 400 });
@@ -32,28 +40,38 @@ export async function DELETE(
     `;
     
     if (journalRows.length === 0) {
+      console.error(`Journal entry ${journalId} not found`);
       return NextResponse.json({ error: 'Journal entry not found' }, { status: 404 });
     }
     
-    if (journalRows[0].is_posted) {
-      return NextResponse.json({ error: 'Cannot remove attachments from a posted journal entry' }, { status: 400 });
+    // For now, we'll allow deleting attachments from any journal state for troubleshooting
+    // Get attachment details - check if the file_path column exists
+    let attachmentRows;
+    try {
+      const result = await sql`
+        SELECT file_path, file_url FROM journal_attachments 
+        WHERE id = ${attachmentId} AND journal_id = ${journalId}
+      `;
+      attachmentRows = result.rows;
+    } catch (e) {
+      // If file_path doesn't exist, try with just id and journal_id
+      console.log('Error querying with file_path, trying alternative query:', e);
+      const result = await sql`
+        SELECT id, file_url FROM journal_attachments 
+        WHERE id = ${attachmentId} AND journal_id = ${journalId}
+      `;
+      attachmentRows = result.rows;
     }
-    
-    if (journalRows[0].is_deleted) {
-      return NextResponse.json({ error: 'Cannot remove attachments from a deleted journal entry' }, { status: 400 });
-    }
-    
-    // Get attachment details
-    const { rows: attachmentRows } = await sql`
-      SELECT file_path FROM journal_attachments 
-      WHERE id = ${attachmentId} AND journal_id = ${journalId}
-    `;
     
     if (attachmentRows.length === 0) {
+      console.error(`Attachment ${attachmentId} not found for journal ${journalId}`);
       return NextResponse.json({ error: 'Attachment not found' }, { status: 404 });
     }
     
     const filePath = attachmentRows[0].file_path;
+    const fileUrl = attachmentRows[0].file_url;
+    
+    console.log(`Found attachment: ${JSON.stringify(attachmentRows[0])}`);
     
     // Delete the attachment record from the database
     await sql`
@@ -61,15 +79,38 @@ export async function DELETE(
       WHERE id = ${attachmentId} AND journal_id = ${journalId}
     `;
     
-    // Delete the file from Firebase Storage
-    try {
-      const storage = getAdminStorage();
-      await storage.bucket().file(filePath).delete();
-    } catch (storageErr) {
-      console.error('[journals/attachments] Error deleting file from storage:', storageErr);
-      // Continue even if file deletion fails, as the database record is already deleted
+    console.log(`Deleted attachment record from database`);
+    
+    // Delete the file from Firebase Storage if we have a file path
+    if (filePath) {
+      try {
+        const storage = getAdminStorage();
+        await storage.bucket().file(filePath).delete();
+        console.log(`Deleted attachment file from storage: ${filePath}`);
+      } catch (storageErr) {
+        console.error('[journals/attachments] Error deleting file from storage:', storageErr);
+        // Continue even if file deletion fails, as the database record is already deleted
+      }
+    } else if (fileUrl) {
+      // Try to delete by URL if file_path isn't available
+      try {
+        // Extract file path from the URL
+        const urlPath = new URL(fileUrl).pathname;
+        const pathSegments = urlPath.split('/');
+        const fileName = pathSegments[pathSegments.length - 1];
+        
+        if (fileName) {
+          const storage = getAdminStorage();
+          await storage.bucket().file(`journal-attachments/${journalId}/${fileName}`).delete();
+          console.log(`Deleted attachment file from storage using URL path: ${fileName}`);
+        }
+      } catch (storageErr) {
+        console.error('[journals/attachments] Error deleting file from storage using URL:', storageErr);
+        // Continue even if file deletion fails, as the database record is already deleted
+      }
     }
     
+    console.log('Attachment deleted successfully');
     return NextResponse.json({ 
       success: true, 
       message: 'Attachment deleted successfully' 

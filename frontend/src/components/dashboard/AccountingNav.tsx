@@ -72,7 +72,9 @@ export function AccountingNav() {
       href: "/dashboard/admin",
       icon: Settings,
       subLinks: [
-        { name: "Database", href: "/dashboard/admin/database" }
+        { name: "Database", href: "/dashboard/admin/database" },
+        { name: "Run Migrations", href: "/dashboard/admin/database/migrations" },
+        { name: "Migration Status", href: "/dashboard/admin/database/migration-status" }
       ]
     }
   ];

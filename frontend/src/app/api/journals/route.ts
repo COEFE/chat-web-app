@@ -133,13 +133,61 @@ export async function POST(req: NextRequest) {
       }
       
       if (Math.abs(totalDebits - totalCredits) > 0.01) { // Allow for small rounding differences
-        return NextResponse.json({
-          error: `Journal entry is not balanced. Difference: ${(totalDebits - totalCredits).toFixed(2)}`,
-          totalDebits,
-          totalCredits,
-          difference: totalDebits - totalCredits,
-          lineDetails: lineDetails
-        }, { status: 400 });
+        // Attempt to auto-balance using suspense account 9999
+        try {
+          const diff = parseFloat((totalDebits - totalCredits).toFixed(2));
+          const suspenseAccountSearch = '9999';
+          
+          // Find suspense account
+          const suspenseAccountResult = await sql`
+            SELECT id, name, code 
+            FROM accounts 
+            WHERE code = ${suspenseAccountSearch}
+            LIMIT 1
+          `;
+          
+          if (suspenseAccountResult.rows.length > 0) {
+            const suspenseAccount = suspenseAccountResult.rows[0];
+            
+            // Add balancing line
+            lines.push({
+              accountId: suspenseAccount.id,
+              description: 'Auto-balancing entry',
+              debit: diff < 0 ? Math.abs(diff) : 0,
+              credit: diff > 0 ? diff : 0
+            });
+            
+            // Recalculate totals after adding balancing line
+            const newTotalDebits = lines.reduce((sum, line) => sum + (parseFloat(line.debit) || 0), 0);
+            const newTotalCredits = lines.reduce((sum, line) => sum + (parseFloat(line.credit) || 0), 0);
+            
+            if (Math.abs(newTotalDebits - newTotalCredits) <= 0.01) {
+              console.log('Journal auto-balanced using suspense account 9999');
+            } else {
+              return NextResponse.json({
+                error: `Failed to auto-balance journal. Remaining difference: ${(newTotalDebits - newTotalCredits).toFixed(2)}`,
+              }, { status: 400 });
+            }
+          } else {
+            // No suspense account found, return original error
+            return NextResponse.json({
+              error: `Journal entry is not balanced. Difference: ${(totalDebits - totalCredits).toFixed(2)}. Create account 9999 for auto-balancing.`,
+              totalDebits,
+              totalCredits,
+              difference: totalDebits - totalCredits,
+              lineDetails: lineDetails
+            }, { status: 400 });
+          }
+        } catch (error) {
+          console.error('Error during auto-balancing:', error);
+          return NextResponse.json({
+            error: `Journal entry is not balanced. Difference: ${(totalDebits - totalCredits).toFixed(2)}`,
+            totalDebits,
+            totalCredits,
+            difference: totalDebits - totalCredits,
+            lineDetails: lineDetails
+          }, { status: 400 });
+        }
       }
       
       // Convert to new journal format

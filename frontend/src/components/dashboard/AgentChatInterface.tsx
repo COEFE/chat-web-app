@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
-import { Loader2, Send, Bot } from 'lucide-react';
+import { Loader2, Send, Bot, Paperclip } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { format } from 'date-fns';
@@ -41,6 +41,9 @@ const AgentChatInterface: React.FC<AgentChatInterfaceProps> = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadedDoc, setUploadedDoc] = useState<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
@@ -49,6 +52,63 @@ const AgentChatInterface: React.FC<AgentChatInterfaceProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Handle file upload
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    setIsUploading(true);
+    try {
+      const token = await user.getIdToken();
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/documents', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+
+      const data = await response.json();
+      setUploadedDoc(data.document);
+      
+      // Show confirmation message
+      const fileMessage: Message = {
+        role: 'system',
+        content: `File "${file.name}" uploaded successfully and attached to this conversation.`,
+        timestamp: Date.now()
+      };
+      
+      setMessages(prev => [...prev, fileMessage]);
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      const errorMessage: Message = {
+        role: 'system',
+        content: 'Failed to upload file. Please try again.',
+        timestamp: Date.now()
+      };
+      
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsUploading(false);
+      // Reset the file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+  
+  // Trigger file input click
+  const triggerFileUpload = () => {
+    fileInputRef.current?.click();
+  };
 
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
@@ -71,6 +131,18 @@ const AgentChatInterface: React.FC<AgentChatInterfaceProps> = ({
       // Get the authentication token
       const token = await user.getIdToken();
       
+      // Include uploaded document context if available
+      const messageContext = {
+        ...documentContext,
+        ...(uploadedDoc && {
+          fileUrl: uploadedDoc.downloadURL,
+          fileName: uploadedDoc.name,
+          fileType: uploadedDoc.contentType,
+          fileId: uploadedDoc.id,
+          storagePath: uploadedDoc.storagePath
+        })
+      };
+
       // Send the request to the agent-chat API
       const response = await fetch('/api/agent-chat', {
         method: 'POST',
@@ -82,7 +154,7 @@ const AgentChatInterface: React.FC<AgentChatInterfaceProps> = ({
           query: userMessage.content,
           messages: messages,
           conversationId,
-          documentContext
+          documentContext: Object.keys(messageContext).length > 0 ? messageContext : undefined
         })
       });
       
@@ -173,6 +245,29 @@ const AgentChatInterface: React.FC<AgentChatInterfaceProps> = ({
       
       <CardFooter className="p-3 border-t">
         <form onSubmit={handleSubmit} className="flex w-full space-x-2">
+          {/* Hidden file input */}
+          <input 
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+          
+          {/* File upload button */}
+          <Button 
+            type="button" 
+            size="icon" 
+            variant="outline"
+            onClick={triggerFileUpload}
+            disabled={isLoading || isUploading}
+          >
+            {isUploading ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <Paperclip className="h-5 w-5" />
+            )}
+          </Button>
+          
           <Textarea
             placeholder="Ask about invoices, GL codes, reconciliation..."
             value={input}

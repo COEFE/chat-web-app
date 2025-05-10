@@ -493,7 +493,7 @@ export default function TransactionsPage() {
                               format(new Date(journal.transaction_date || journal.date || ''), 'MMM d, yyyy') : 
                               '—'}
                           </td>
-                          <td className="py-2 px-3">{journal.journal_number || '—'}</td>
+                          <td className="py-2 px-3">{journal.journal_number || journal.id || '—'}</td>
                           <td className="py-2 px-3">
                             <Badge variant="outline">
                               {journal.journal_type_name || journal.journal_type || 'General'}

@@ -58,6 +58,11 @@ export interface BillPayment {
 /**
  * Get a list of bills with optional filtering and pagination
  */
+export interface BillWithVendor extends Bill {
+  vendor_name?: string; 
+  ap_account_name?: string;
+}
+
 export async function getBills(
   page: number = 1,
   limit: number = 50,
