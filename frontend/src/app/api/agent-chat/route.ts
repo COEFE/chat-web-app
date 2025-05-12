@@ -6,7 +6,8 @@ import { APAgent } from '@/lib/agents/apAgent';
 import { InvoiceAgent } from '@/lib/agents/invoiceAgent';
 import { ReconciliationAgent } from '@/lib/agents/reconciliationAgent';
 import { logAuditEvent } from '@/lib/auditLogger';
-import { storeChatMessageWithEmbedding, ChatEmbedding, findSimilarChatMessages } from '@/lib/chatEmbeddings';
+// Import from the correct path
+import { ChatEmbedding, storeChatMessageWithEmbedding, findSimilarChatMessages } from '@/lib/chatEmbeddings';
 import Anthropic from '@anthropic-ai/sdk';
 import { isExcelFile, parseExcelToText } from '@/lib/excelParser';
 
