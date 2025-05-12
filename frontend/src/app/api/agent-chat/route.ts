@@ -6,10 +6,22 @@ import { APAgent } from '@/lib/agents/apAgent';
 import { InvoiceAgent } from '@/lib/agents/invoiceAgent';
 import { ReconciliationAgent } from '@/lib/agents/reconciliationAgent';
 import { logAuditEvent } from '@/lib/auditLogger';
-// Import from the correct path
-import { ChatEmbedding, storeChatMessageWithEmbedding, findSimilarChatMessages } from '@/lib/chatEmbeddings';
 import Anthropic from '@anthropic-ai/sdk';
 import { isExcelFile, parseExcelToText } from '@/lib/excelParser';
+import { AgentMessage } from '@/types/agents';
+
+// Interface for file attachments
+interface FileAttachment {
+  name: string;
+  type: string;
+  base64Data: string;
+  size: number;
+}
+
+// Extend AgentMessage with attachments
+interface ExtendedAgentMessage extends AgentMessage {
+  attachments?: FileAttachment[];
+}
 
 // Create and configure the orchestrator with available agents
 // Note: This is a simple approach for now - in production, consider a more robust singleton pattern
@@ -44,294 +56,236 @@ export async function POST(req: NextRequest) {
   try {
     if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
       return NextResponse.json(
-        { error: "Unauthorized: Missing or invalid Authorization header" }, 
+        { error: "Missing or invalid authorization header" },
         { status: 401 }
       );
     }
     
     const idToken = authorizationHeader.split('Bearer ')[1];
-    const auth = getAdminAuth();
-    const decodedToken = await auth.verifyIdToken(idToken);
+    const decodedToken = await getAdminAuth().verifyIdToken(idToken);
     userId = decodedToken.uid;
-    console.log("User authenticated:", userId);
-  } catch (error) {
-    console.error("Authentication error:", error);
+    
+    console.log(`User authenticated: ${userId}`);
+  } catch (authError) {
+    console.error("Authentication error:", authError);
     return NextResponse.json(
-      { error: "Unauthorized: Invalid token" }, 
+      { error: "Authentication failed" },
       { status: 401 }
     );
   }
 
   // 2. Parse the request body
-  let body;
-  try {
-    body = await req.json();
-  } catch (error) {
-    console.error("Error parsing request body:", error);
-    return NextResponse.json(
-      { error: "Invalid request body" }, 
-      { status: 400 }
-    );
-  }
+  let query: string;
+  let conversationId: string;
+  let messages: ExtendedAgentMessage[] | undefined;
+  let documentContext: any;
+  let attachments: FileAttachment[] | undefined;
 
-  // 3. Validate the request
-  const { query, messages, conversationId, documentContext, attachments } = body;
-  
-  // Allow empty query if attachments are present (user might just upload a document)
-  if ((!query || typeof query !== 'string') && (!attachments || !attachments.length)) {
+  try {
+    // Parse JSON request body
+    const body = await req.json();
+    
+    // Extract fields
+    query = body.query || '';
+    conversationId = body.conversationId || `user-${userId}-${Date.now()}`;
+    messages = Array.isArray(body.messages) ? body.messages : [];
+    documentContext = body.documentContext || null;
+    attachments = body.attachments;
+    
+    if (!query.trim() && !attachments?.length) {
+      return NextResponse.json(
+        { error: "Query cannot be empty if no attachments are provided" },
+        { status: 400 }
+      );
+    }
+  } catch (parseError) {
+    console.error("Error parsing request body:", parseError);
     return NextResponse.json(
-      { error: "Missing 'query' or attachments in request body" }, 
+      { error: "Invalid request format" },
       { status: 400 }
     );
   }
   
-  // Validate PDF attachments if any
-  if (attachments && attachments.length > 0) {
-    for (const attachment of attachments) {
-      // Accepted file types for Claude
-      const acceptedTypes = [
-        'application/pdf',                    // PDF
-        'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', // Images
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // DOCX
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',      // XLSX
-        'text/plain', 'text/csv', 'application/rtf'                              // Text formats
-      ];
-      
-      // Validate file type
-      if (!acceptedTypes.includes(attachment.type)) {
-        return NextResponse.json(
-          { error: 'Unsupported file type. Please upload PDF, Word, Excel, or common image formats.' },
-          { status: 400 }
-        );
-      }
-      
-      // Check PDF size (Claude limit is 32MB)
-      const base64Data = attachment.base64Data;
-      if (base64Data) {
-        // Estimate file size: base64 string is ~33% larger than the actual file
-        const estimatedSizeInBytes = Math.ceil((base64Data.length * 3) / 4);
-        if (estimatedSizeInBytes > 32 * 1024 * 1024) { // 32MB in bytes
-          return NextResponse.json(
-            { error: `PDF attachment exceeds 32MB limit: ${(estimatedSizeInBytes / (1024 * 1024)).toFixed(2)}MB` },
-            { status: 400 }
-          );
-        }
-      }
-    }
-  }
+  // Log the user's query for future reference
+  console.log('[Agent-Chat API] Processing user query:', query);
   
-  // Store user query in vector database for future reference
-  const chatId = conversationId || `user-${userId}-${Date.now()}`;
-  let userMessageId: string | undefined;
-  try {
-    console.log(`[Agent-Chat API] Storing user query in vector database`);
-    const chatEmbedding: ChatEmbedding = {
-      user_id: userId,
-      conversation_id: chatId,
-      message_id: `query-${Date.now()}`,
-      role: 'user',
-      content: query
-    };
-    
-    const storedEmbedding = await storeChatMessageWithEmbedding(chatEmbedding);
-    if (storedEmbedding) {
-      userMessageId = storedEmbedding.message_id;
-      console.log(`[Agent-Chat API] Successfully stored user query in vector database with ID ${storedEmbedding.id}`);
-    } else {
-      console.warn(`[Agent-Chat API] Unable to store user query in vector database`);
-    }
-  } catch (vectorErr) {
-    console.error('[Agent-Chat API] Error storing user query in vector database:', vectorErr);
-    // Continue even if vector storage fails
-  }
-  
-  // Retrieve similar past conversations to enhance context
+  // For context enhancement, we'll use the messages history provided in the request
+  // This simplifies the implementation while still providing conversation context
   let similarConversations = '';
   try {
-    console.log(`[Agent-Chat API] Retrieving similar past conversations for enhanced context`);
-    const similarMessages = await findSimilarChatMessages(query, userId, 3, 0.7);
+    console.log('[Agent-Chat API] Using message history for context');
     
-    if (similarMessages.length > 0) {
-      console.log(`[Agent-Chat API] Found ${similarMessages.length} similar past messages for context`);
-      similarConversations = '\n\n### Recent Related Conversations:\n';
+    // Use the most recent messages (up to 3) for context
+    if (messages && messages.length > 0) {
+      const recentMessages = messages.slice(-3);
+      console.log(`[Agent-Chat API] Using ${recentMessages.length} recent messages for context`);
       
-      // Group by conversation
-      const conversationMap = new Map<string, ChatEmbedding[]>();
-      similarMessages.forEach(msg => {
-        if (!conversationMap.has(msg.conversation_id)) {
-          conversationMap.set(msg.conversation_id, []);
-        }
-        conversationMap.get(msg.conversation_id)?.push(msg);
-      });
-      
-      // Format conversations
-      conversationMap.forEach((messages, conversationId) => {
-        // Sort messages by created_at
-        messages.sort((a, b) => {
-          const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-          const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-          return dateA - dateB;
-        });
-        
-        similarConversations += `\nConversation ${conversationId.substring(0, 8)}:\n`;
-        messages.forEach(msg => {
-          similarConversations += `${msg.role === 'user' ? 'User' : 'Agent'}: ${msg.content.substring(0, 300)}${msg.content.length > 300 ? '...' : ''}\n`;
-        });
-      });
-    } else {
-      console.log(`[Agent-Chat API] No similar past conversations found`);
+      similarConversations = recentMessages.map((msg: ExtendedAgentMessage) => {
+        const rolePrefix = msg.role === 'user' ? 'User' : 'Assistant';
+        return `${rolePrefix}: ${msg.content}`;
+      }).join('\n\n');
     }
-  } catch (vectorErr) {
-    console.error('[Agent-Chat API] Error retrieving similar messages from vector database:', vectorErr);
-    // Continue without similar messages if there's an error
+  } catch (error) {
+    console.error('[Agent-Chat API] Error processing message history:', error);
+    // Non-critical - continue execution even if processing fails
   }
 
   try {
-    // 4. Log the incoming request
+    // Log audit event
     await logAuditEvent({
       user_id: userId,
-      action_type: "CHAT_REQUEST",
-      entity_type: "CONVERSATION",
-      entity_id: conversationId || "new",
-      context: { 
+      action_type: 'CHAT_REQUEST',
+      entity_type: 'CONVERSATION',
+      entity_id: conversationId,
+      context: {
         query,
         hasDocumentContext: !!documentContext,
         messageCount: messages?.length || 0,
-        agentId: "agent_api"
+        agentId: 'agent_api'
       },
-      status: "ATTEMPT",
+      status: 'ATTEMPT',
       timestamp: new Date().toISOString()
     });
 
     // 5. Process the request through the orchestrator
-    let enhancedMessages = [...(messages || [])];
+    // If there are PDF attachments, process them directly with Claude instead of using the orchestrator
+    // Make sure messages are valid AgentMessage objects
+    let enhancedMessages: AgentMessage[] = (messages || []).map(msg => {
+      const { attachments, ...agentMsg } = msg;
+      return agentMsg;
+    });
     
     // If we have similar conversations, modify the user query to include the context
-    // We can't use system messages with Anthropic in the messages array
     if (similarConversations && similarConversations.length > 0) {
       console.log(`[Agent-Chat API] Enhancing user query with similar conversations context`);
       
-      // Get the most recent user message or create one if there are no messages
-      const lastUserMessageIndex = enhancedMessages.length > 0 ? 
-        enhancedMessages.findLastIndex(msg => msg.role === 'user') : -1;
-      
-      if (lastUserMessageIndex >= 0) {
-        // Add context to the user's existing message
-        const originalMessage = enhancedMessages[lastUserMessageIndex].content;
-        enhancedMessages[lastUserMessageIndex].content = 
-          `${originalMessage}\n\n(For reference, here are some similar past conversations that might be relevant: ${similarConversations})`;
-      }
-    } else {
-      console.log(`[Agent-Chat API] No similar conversations to add as context`);
-    }
-    
-    let result;
-
-    // If there are PDF attachments, handle them directly with Claude's API
-    if (attachments && attachments.length > 0) {
-      console.log(`[Agent-Chat API] Processing request with ${attachments.length} PDF attachments`);  
-      const anthropic = new Anthropic({
-        apiKey: process.env.ANTHROPIC_API_KEY || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || "",
-      });
-      
-      // Prepare content blocks for Claude
-      const contentBlocks: any[] = [];
-      
-      // Add content blocks for each attachment
-      for (const attachment of attachments) {
-        // Log attachment info for troubleshooting
-        console.log(`[Agent-Chat API] Processing attachment: ${attachment.name}, type: ${attachment.type}`);
-        
-        // Get file extension for reference
-        const ext = attachment.name.split('.').pop()?.toLowerCase();
-        
-        // Handle different file types accordingly
-        if (ext === 'pdf' || attachment.type === 'application/pdf') {
-          // PDF files can be processed directly as documents
-          console.log(`[Agent-Chat API] Processing as PDF document: ${attachment.name}`);
-          contentBlocks.push({
-            type: "document",
-            source: {
-              type: "base64",
-              media_type: "application/pdf",
-              data: attachment.base64Data
-            }
-          });
-        } else if (isExcelFile(attachment.name, attachment.type)) {
-          // Process Excel files - convert to text format for Claude
-          console.log(`[Agent-Chat API] Processing Excel file: ${attachment.name}`);
-          
-          try {
-            // Parse the Excel file into a text representation
-            const excelText = await parseExcelToText(attachment.base64Data, attachment.name);
-            
-            // Add the parsed Excel content as text
-            contentBlocks.push({
-              type: "text",
-              text: excelText
-            });
-            
-            console.log(`[Agent-Chat API] Successfully parsed Excel file: ${attachment.name}`);
-          } catch (error) {
-            console.error(`[Agent-Chat API] Error parsing Excel file:`, error);
-            
-            // Add error message as fallback
-            contentBlocks.push({
-              type: "text",
-              text: `## Excel File Processing Error\n\nThere was an error processing the Excel file "${attachment.name}". ` +
-                   `Please upload the file again or try with a different format.\n\nError details: ${error instanceof Error ? error.message : 'Unknown error'}`
-            });
-          }
-        } else if (attachment.type.startsWith('image/')) {
-          // For images, we can use document vision
-          console.log(`[Agent-Chat API] Processing as image: ${attachment.name}`);
-          contentBlocks.push({
-            type: "document",
-            source: {
-              type: "base64",
-              media_type: attachment.type,
-              data: attachment.base64Data
-            }
-          });
-          contentBlocks.push({
-            type: "text",
-            text: `This is an image file (${attachment.name}). I've uploaded this for you to analyze.`
-          });
-        } else {
-          // For other files (Word docs, etc.), use a simple text description approach
-          let fileDescription = '';
-          if (ext === 'docx' || ext === 'doc') {
-            fileDescription = `## Word Document: ${attachment.name}\n\nThis is a Word document that I've uploaded for analysis.`;
-          } else {
-            fileDescription = `## Document: ${attachment.name} (${ext?.toUpperCase() || 'unknown format'})\n\nI've uploaded this file for your analysis.`;
-          }
-          
-          console.log(`[Agent-Chat API] Processing as text: ${attachment.name}`);
-          contentBlocks.push({
-            type: "text",
-            text: fileDescription + "\n\nPlease analyze this file based on its name and any context I provide about it."
-          });
+      // For now, just prepend to the last message
+      if (enhancedMessages.length > 0) {
+        const lastMessageIndex = enhancedMessages.length - 1;
+        if (enhancedMessages[lastMessageIndex].role === 'user') {
+          // Add context to user's message
+          enhancedMessages[lastMessageIndex].content = 
+            `${enhancedMessages[lastMessageIndex].content}\n\n` +
+            `Consider these relevant past messages for context:\n${similarConversations}`;
         }
       }
+    }
+    
+    // Handle the request - determine if we should use direct Claude API for PDF processing
+    let result: {
+      success: boolean;
+      message: string;
+      agentId?: string;
+      sourceDocuments?: any;
+      data?: any;
+    };
+    
+    if (attachments && attachments.length > 0) {
+      console.log(`[Agent-Chat API] Processing request with ${attachments.length} PDF attachments`);
       
-      // Add the text message if it exists
-      if (query) {
-        contentBlocks.push({
-          type: "text",
-          text: query
-        });
-      }
-
+      // Use Claude's API directly for PDF document processing
       try {
-        // Call Claude directly with the PDF attachments
-        const systemPrompt = `You are an expert accounting assistant specialized in analyzing financial documents, invoices, 
-          receipts, and other accounting materials. When presented with documents, analyze them carefully and provide 
-          clear, accurate information about their contents. Focus on identifying key financial information, dates, amounts, 
-          parties involved, and any accounting-relevant details. If you're uncertain about any information, acknowledge 
+        // Configure Anthropic client
+        const anthropic = new Anthropic({
+          apiKey: process.env.ANTHROPIC_API_KEY || "",
+        });
+        
+        // Prepare content blocks for Claude
+        const contentBlocks: any[] = [];
+        
+        // Add the user's query as a text block
+        if (query && query.trim()) {
+          contentBlocks.push({
+            type: "text",
+            text: query
+          });
+        }
+        
+        // Add content blocks for each attachment
+        for (const attachment of attachments) {
+          // Log attachment info for troubleshooting
+          console.log(`[Agent-Chat API] Processing attachment: ${attachment.name}, type: ${attachment.type}`);
+          
+          // Get file extension for reference
+          const ext = attachment.name.split('.').pop()?.toLowerCase();
+          
+          // Handle different file types accordingly
+          if (ext === 'pdf' || attachment.type === 'application/pdf') {
+            // PDF files can be processed directly as documents
+            console.log(`[Agent-Chat API] Processing as PDF document: ${attachment.name}`);
+            contentBlocks.push({
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: attachment.base64Data
+              }
+            });
+          } else if (isExcelFile(attachment.name, attachment.type)) {
+            // Process Excel files - convert to text format for Claude
+            console.log(`[Agent-Chat API] Processing Excel file: ${attachment.name}`);
+            
+            try {
+              // Parse the Excel file into a text representation
+              const excelText = await parseExcelToText(attachment.base64Data, attachment.name);
+              
+              // Add the parsed Excel content as text
+              contentBlocks.push({
+                type: "text",
+                text: excelText
+              });
+              
+              console.log(`[Agent-Chat API] Successfully parsed Excel file: ${attachment.name}`);
+            } catch (error) {
+              console.error(`[Agent-Chat API] Error parsing Excel file:`, error);
+              
+              // Add error message as fallback
+              contentBlocks.push({
+                type: "text",
+                text: `## Excel File Processing Error\n\nThere was an error processing the Excel file "${attachment.name}". ` +
+                     `Please upload the file again or try with a different format.\n\nError details: ${error instanceof Error ? error.message : 'Unknown error'}`
+              });
+            }
+          } else if (attachment.type.startsWith('image/')) {
+            // For images, we can use document vision
+            console.log(`[Agent-Chat API] Processing as image: ${attachment.name}`);
+            contentBlocks.push({
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: attachment.type,
+                data: attachment.base64Data
+              }
+            });
+            contentBlocks.push({
+              type: "text",
+              text: `This is an image file (${attachment.name}). I've uploaded this for you to analyze.`
+            });
+          } else {
+            // For other files (Word docs, etc.), use a simple text description approach
+            let fileDescription = '';
+            if (ext === 'docx' || ext === 'doc') {
+              fileDescription = `## Word Document: ${attachment.name}\n\nThis is a Word document that I've uploaded for analysis.`;
+            } else {
+              fileDescription = `## Document: ${attachment.name} (${ext?.toUpperCase() || 'unknown format'})\n\nI've uploaded this file for your analysis.`;
+            }
+            
+            console.log(`[Agent-Chat API] Processing as text: ${attachment.name}`);
+            contentBlocks.push({
+              type: "text",
+              text: fileDescription + "\n\nPlease analyze this file based on its name and any context I provide about it."
+            });
+          }
+        }
+        
+        // Create a system prompt for Claude
+        const systemPrompt = `You are an AI accounting assistant with expertise in analyzing financial documents.
+          Answer the user's question about the uploaded document(s) as thoroughly as possible.
+          If you cannot read or analyze the document properly, explain the issue clearly and note
           the limitation instead of making assumptions. End your response with specific actions or insights based on 
           the document contents.
           
-          Context about previous messages and similar conversations: ${Array.isArray(similarConversations) ? similarConversations.join('\n') : (similarConversations || 'None available')}`;
+          Context about previous messages and similar conversations: ${similarConversations}`;
         
         const aiResponse = await anthropic.messages.create({
           model: "claude-3-5-sonnet-20240620",
@@ -363,7 +317,7 @@ export async function POST(req: NextRequest) {
         result = await orchestrator.processRequest({
           userId,
           query, // Use the original query without modification
-          conversationId: chatId, // Use consistent chatId
+          conversationId: conversationId, // Use consistent conversationId
           previousMessages: enhancedMessages, // Use enhanced messages with similar conversations as context
           documentContext,
           token: authorizationHeader.split('Bearer ')[1] // Pass the token for API calls that need auth
@@ -374,69 +328,49 @@ export async function POST(req: NextRequest) {
       result = await orchestrator.processRequest({
         userId,
         query, // Use the original query without modification
-        conversationId: chatId, // Use consistent chatId
+        conversationId: conversationId, // Use consistent conversationId
         previousMessages: enhancedMessages, // Use enhanced messages with similar conversations as context
         documentContext,
         token: authorizationHeader.split('Bearer ')[1] // Pass the token for API calls that need auth
       });
     }
 
-    // 6. Store agent response in vector database
-    try {
-      console.log(`[Agent-Chat API] Storing agent response in vector database`);
-      const agentEmbedding: ChatEmbedding = {
-        user_id: userId,
-        conversation_id: chatId,
-        message_id: `response-${Date.now()}`,
-        role: 'assistant',
-        content: result.message
-      };
-      
-      const storedEmbedding = await storeChatMessageWithEmbedding(agentEmbedding);
-      if (storedEmbedding) {
-        console.log(`[Agent-Chat API] Successfully stored agent response in vector database with ID ${storedEmbedding.id}`);
-      } else {
-        console.warn(`[Agent-Chat API] Unable to store agent response in vector database`);
-      }
-    } catch (vectorErr) {
-      console.error('[Agent-Chat API] Error storing agent response in vector database:', vectorErr);
-      // Continue even if vector storage fails
-    }
-    
-    // 7. Log successful completion
+    // Log audit event for successful response
     await logAuditEvent({
       user_id: userId,
-      action_type: "CHAT_RESPONSE",
-      entity_type: "CONVERSATION",
-      entity_id: chatId,
-      context: { 
-        success: result.success,
+      action_type: 'CHAT_RESPONSE',
+      entity_type: 'CONVERSATION',
+      entity_id: conversationId,
+      context: {
+        success: true,
         messageLength: result.message.length,
-        agentId: "agent_api"
+        agentId: result.agentId || 'agent_api',
       },
-      status: "SUCCESS",
+      status: 'SUCCESS',
       timestamp: new Date().toISOString()
     });
 
-    // 8. Return the response
+    // Return the final response
     return NextResponse.json({
       message: result.message,
       success: result.success,
       data: result.data,
-      conversationId: chatId // Ensure the client has a consistent conversation ID
+      conversationId: conversationId // Ensure the client has a consistent conversation ID
     });
   } catch (error) {
     console.error("Error processing agent chat request:", error);
     
-    // Log the error
+    // Log audit event for failed response
     await logAuditEvent({
       user_id: userId,
-      action_type: "CHAT_RESPONSE",
-      entity_type: "CONVERSATION",
-      entity_id: chatId,
-      context: { query, agentId: "agent_api" },
-      status: "FAILURE",
-      error_details: error instanceof Error ? error.message : String(error),
+      action_type: 'CHAT_RESPONSE',
+      entity_type: 'CONVERSATION', 
+      entity_id: conversationId,
+      context: {
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      },
+      status: 'FAILURE',
       timestamp: new Date().toISOString()
     });
     
