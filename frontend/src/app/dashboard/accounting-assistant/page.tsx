@@ -13,9 +13,10 @@ export default function AccountingAssistantPage() {
   const { user } = useAuth();
 
   return (
-    <div className="container mx-auto py-6 space-y-6">
-      <Card>
-        <CardHeader>
+    <div className="container mx-auto py-4 space-y-4 px-2 sm:px-4 sm:py-6 sm:space-y-6">
+      {/* Info Card - Hidden on smaller screens */}
+      <Card className="hidden sm:block">
+        <CardHeader className="sm:pb-2">
           <CardTitle>Accounting Assistant</CardTitle>
           <CardDescription>
             Our multi-agent accounting system can answer questions about invoices, GL codes, reconciliation, and more
@@ -58,11 +59,21 @@ export default function AccountingAssistantPage() {
         </CardContent>
       </Card>
       
-      {/* The main agent chat interface */}
-      <AgentChatInterface 
-        conversationId={`user-${user?.uid || 'guest'}-${Date.now()}`}
-        className="flex-1" 
-      />
+      {/* Mobile-friendly compact info - Only visible on mobile */}
+      <div className="sm:hidden">
+        <h2 className="text-xl font-bold mb-1">Accounting Assistant</h2>
+        <p className="text-sm text-muted-foreground mb-3">
+          Ask me about invoices, GL codes, reconciliation, and more
+        </p>
+      </div>
+      
+      {/* The main agent chat interface - Always full width on mobile */}
+      <div className="w-full">
+        <AgentChatInterface 
+          conversationId={`user-${user?.uid || 'guest'}-${Date.now()}`}
+          className="w-full" 
+        />
+      </div>
     </div>
   );
 }

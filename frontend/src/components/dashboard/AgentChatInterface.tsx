@@ -5,10 +5,12 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
-import { Loader2, Send, Bot, Paperclip } from 'lucide-react';
+import { Loader2, Send, Bot, FileText, ImageIcon, FileSpreadsheet } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { format } from 'date-fns';
+import FileUploadButton from '@/components/FileUploadButton';
+import ChatAttachment from '@/components/ChatAttachment';
 
 /**
  * AgentChatInterface props
@@ -27,6 +29,12 @@ interface Message {
   content: string;
   timestamp: number;
   agentId?: string;
+  attachments?: Array<{
+    name: string;
+    type: string;
+    base64Data: string;
+    size: number;
+  }>;
 }
 
 /**
@@ -41,9 +49,12 @@ const AgentChatInterface: React.FC<AgentChatInterfaceProps> = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadedDoc, setUploadedDoc] = useState<any>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachment, setAttachment] = useState<{
+    name: string;
+    type: string;
+    base64Data: string;
+    size: number;
+  } | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
@@ -53,74 +64,42 @@ const AgentChatInterface: React.FC<AgentChatInterfaceProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Handle file upload
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
-
-    setIsUploading(true);
-    try {
-      const token = await user.getIdToken();
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/api/documents', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}`);
-      }
-
-      const data = await response.json();
-      setUploadedDoc(data.document);
-      
-      // Show confirmation message
-      const fileMessage: Message = {
-        role: 'system',
-        content: `File "${file.name}" uploaded successfully and attached to this conversation.`,
-        timestamp: Date.now()
-      };
-      
-      setMessages(prev => [...prev, fileMessage]);
-    } catch (error) {
-      console.error('Error uploading file:', error);
-      const errorMessage: Message = {
-        role: 'system',
-        content: 'Failed to upload file. Please try again.',
-        timestamp: Date.now()
-      };
-      
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsUploading(false);
-      // Reset the file input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    }
+  // Handle PDF attachment
+  const handleFileSelect = (fileData: {
+    name: string;
+    type: string;
+    base64Data: string;
+    size: number;
+  }) => {
+    setAttachment(fileData);
+    
+    // Show confirmation message
+    const fileMessage: Message = {
+      role: 'system',
+      content: `File "${fileData.name}" attached to this conversation.`,
+      timestamp: Date.now()
+    };
+    
+    setMessages(prev => [...prev, fileMessage]);
   };
   
-  // Trigger file input click
-  const triggerFileUpload = () => {
-    fileInputRef.current?.click();
+  // Clear file attachment
+  const handleClearAttachment = () => {
+    setAttachment(null);
   };
 
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!input.trim() || !user || isLoading) return;
+    if ((!input.trim() && !attachment) || !user || isLoading) return;
     
     // Add user message to the chat
     const userMessage: Message = {
       role: 'user',
       content: input.trim(),
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      attachments: attachment ? [attachment] : undefined
     };
     
     setMessages(prev => [...prev, userMessage]);
@@ -131,31 +110,23 @@ const AgentChatInterface: React.FC<AgentChatInterfaceProps> = ({
       // Get the authentication token
       const token = await user.getIdToken();
       
-      // Include uploaded document context if available
-      const messageContext = {
-        ...documentContext,
-        ...(uploadedDoc && {
-          fileUrl: uploadedDoc.downloadURL,
-          fileName: uploadedDoc.name,
-          fileType: uploadedDoc.contentType,
-          fileId: uploadedDoc.id,
-          storagePath: uploadedDoc.storagePath
-        })
+      // Prepare request data
+      const requestData = {
+        query: userMessage.content,
+        conversationId,
+        messages: messages,
+        documentContext,
+        attachments: userMessage.attachments
       };
 
       // Send the request to the agent-chat API
-      const response = await fetch('/api/agent-chat', {
+      const response = await fetch(`/api/agent-chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          query: userMessage.content,
-          messages: messages,
-          conversationId,
-          documentContext: Object.keys(messageContext).length > 0 ? messageContext : undefined
-        })
+        body: JSON.stringify(requestData)
       });
       
       if (!response.ok) {
@@ -190,8 +161,8 @@ const AgentChatInterface: React.FC<AgentChatInterfaceProps> = ({
   };
 
   return (
-    <Card className={cn('flex flex-col h-[600px]', className)}>
-      <CardHeader className="px-4 py-2 border-b">
+    <Card className={cn('flex flex-col h-[calc(100vh-130px)] sm:h-[600px] w-full', className)}>
+      <CardHeader className="px-3 py-2 border-b sm:px-4">
         <CardTitle className="text-lg flex items-center">
           <Bot className="mr-2 h-5 w-5" />
           Accounting Assistant (Multi-Agent)
@@ -199,10 +170,10 @@ const AgentChatInterface: React.FC<AgentChatInterfaceProps> = ({
       </CardHeader>
       
       <CardContent className="flex-1 p-0 overflow-hidden">
-        <ScrollArea className="h-full p-4" ref={scrollAreaRef}>
+        <ScrollArea className="h-full p-3 sm:p-4" ref={scrollAreaRef}>
           {messages.length === 0 ? (
             <div className="flex items-center justify-center h-full text-center text-muted-foreground">
-              <div>
+              <div className="px-2">
                 <Bot className="mx-auto h-12 w-12 mb-2 opacity-50" />
                 <p>Ask me anything about accounting, invoices, GL codes, or reconciliation.</p>
                 <p className="text-xs">I'll route your question to the appropriate specialized agent.</p>
@@ -214,15 +185,49 @@ const AgentChatInterface: React.FC<AgentChatInterfaceProps> = ({
                 <div
                   key={index}
                   className={cn(
-                    'flex flex-col max-w-[80%] rounded-lg p-3',
+                    'flex flex-col rounded-lg p-3',
                     message.role === 'user'
-                      ? 'ml-auto bg-primary text-primary-foreground'
-                      : 'bg-muted'
+                      ? 'ml-auto bg-primary text-primary-foreground max-w-[85%] sm:max-w-[80%]'
+                      : 'bg-muted max-w-[85%] sm:max-w-[80%]'
                   )}
                 >
                   {message.agentId && (
                     <div className="text-xs opacity-70 mb-1">
                       Agent: {message.agentId}
+                    </div>
+                  )}
+                  
+                  {/* Display attachments if they exist */}
+                  {message.attachments && message.attachments.length > 0 && (
+                    <div className="mb-2">
+                      {message.attachments.map((attachment, i) => (
+                        <div 
+                          key={i} 
+                          className={cn(
+                            'flex items-center gap-2 p-2 rounded mb-2',
+                            message.role === 'user' 
+                              ? 'bg-primary-foreground/20 text-primary-foreground' 
+                              : 'bg-background/90'
+                          )}
+                        >
+                          {(() => {
+                            // Get file extension
+                            const fileExt = attachment.name.split('.').pop()?.toLowerCase() || '';
+                            
+                            // Show appropriate icon based on file type
+                            if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(fileExt)) {
+                              return <ImageIcon className="h-4 w-4" />;
+                            } else if (['xlsx', 'xls', 'csv'].includes(fileExt)) {
+                              return <FileSpreadsheet className="h-4 w-4" />;
+                            } else {
+                              return <FileText className="h-4 w-4" />;
+                            }
+                          })()}
+                          <div className="text-xs font-medium truncate">
+                            {attachment.name} ({(attachment.size / (1024 * 1024)).toFixed(1)} MB)
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                   
@@ -243,51 +248,49 @@ const AgentChatInterface: React.FC<AgentChatInterfaceProps> = ({
         </ScrollArea>
       </CardContent>
       
-      <CardFooter className="p-3 border-t">
-        <form onSubmit={handleSubmit} className="flex w-full space-x-2">
-          {/* Hidden file input */}
-          <input 
-            type="file"
-            ref={fileInputRef}
-            className="hidden"
-            onChange={handleFileUpload}
-          />
+      <CardFooter className="p-2 sm:p-3 border-t">
+        <form onSubmit={handleSubmit} className="flex w-full space-x-1 sm:space-x-2">
+          {/* File upload button - More compact on mobile */}
+          <div className="flex-shrink-0">
+            <FileUploadButton
+              onFileSelect={handleFileSelect}
+              onClear={handleClearAttachment}
+              selectedFile={attachment ? { name: attachment.name, size: attachment.size } : null}
+              disabled={isLoading}
+            />
+          </div>
           
-          {/* File upload button */}
-          <Button 
-            type="button" 
-            size="icon" 
-            variant="outline"
-            onClick={triggerFileUpload}
-            disabled={isLoading || isUploading}
-          >
-            {isUploading ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <Paperclip className="h-5 w-5" />
-            )}
-          </Button>
+          {/* Input field - Responsive height */}
+          <div className="flex-1 min-w-0"> {/* min-width: 0 prevents overflow */}
+            <Textarea
+              placeholder="Ask about invoices, GL codes..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              className="w-full min-h-[40px] max-h-24 resize-none text-sm sm:text-base py-2"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }
+              }}
+              disabled={isLoading}
+            />
+          </div>
           
-          <Textarea
-            placeholder="Ask about invoices, GL codes, reconciliation..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            className="flex-1 min-h-10 resize-none"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit(e);
-              }
-            }}
-            disabled={isLoading}
-          />
-          <Button type="submit" size="icon" disabled={isLoading}>
-            {isLoading ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <Send className="h-5 w-5" />
-            )}
-          </Button>
+          {/* Submit button - Slightly larger touch target on mobile */}
+          <div className="flex-shrink-0 self-end">
+            <Button 
+              type="submit" 
+              size="icon" 
+              disabled={isLoading}
+              className="h-[40px] w-[40px]">
+              {isLoading ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Send className="h-5 w-5" />
+              )}
+            </Button>
+          </div>
         </form>
       </CardFooter>
     </Card>
