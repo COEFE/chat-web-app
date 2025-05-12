@@ -8,6 +8,7 @@ import { ReconciliationAgent } from '@/lib/agents/reconciliationAgent';
 import { logAuditEvent } from '@/lib/auditLogger';
 import Anthropic from '@anthropic-ai/sdk';
 import { isExcelFile, parseExcelToText } from '@/lib/excelParser';
+import { processVendorBillsFromExcel } from '@/lib/excelDataProcessor';
 import { AgentMessage } from '@/types/agents';
 
 // Interface for file attachments
@@ -171,6 +172,21 @@ export async function POST(req: NextRequest) {
       }
     }
     
+    // Check if the query is about creating vendors or bills from Excel data
+    const isVendorBillCreationRequest = (context: { query: string }): boolean => {
+      const query = context.query.toLowerCase();
+      return (
+        (query.includes('create') || 
+         query.includes('add') || 
+         query.includes('import') || 
+         query.includes('upload') || 
+         query.includes('process') ||
+         query.includes('generate')) &&
+        (query.includes('vendor') || query.includes('supplier') || query.includes('bill') || query.includes('invoice')) &&
+        (attachments && attachments.length > 0 && isExcelFile(attachments[0].name, attachments[0].type))
+      );
+    };
+    
     // Handle the request - determine if we should use direct Claude API for PDF processing
     let result: {
       success: boolean;
@@ -180,8 +196,52 @@ export async function POST(req: NextRequest) {
       data?: any;
     };
     
-    if (attachments && attachments.length > 0) {
-      console.log(`[Agent-Chat API] Processing request with ${attachments.length} PDF attachments`);
+    // Check if this is a request to process vendor/bill data from Excel
+    const isVendorBillRequest = isVendorBillCreationRequest({ query }) === true;
+    
+    if (isVendorBillRequest && attachments && attachments.length > 0 && isExcelFile(attachments[0].name, attachments[0].type)) {
+      console.log(`[Agent-Chat API] Processing vendor/bill creation from Excel file: ${attachments[0].name}`);
+      
+      try {
+        // Process the Excel file to create vendors and bills
+        const processingResult = await processVendorBillsFromExcel(
+          attachments[0].base64Data,
+          attachments[0].name,
+          userId
+        );
+        
+        // Format a detailed response
+        const vendorsList = processingResult.createdVendors.map(v => `- ${v.name} (ID: ${v.id})`).join('\n');
+        const billsList = processingResult.createdBills.map(b => `- Bill #${b.bill_number} for $${b.total_amount} (ID: ${b.id})`).join('\n');
+        const errorsList = processingResult.errors.length > 0 ? `\n\nWarnings/Errors:\n${processingResult.errors.map(e => `- ${e}`).join('\n')}` : '';
+        
+        const responseMessage = `## Excel Processing Results\n\n${processingResult.message}\n\n` +
+          (processingResult.createdVendors.length > 0 ? `### Created Vendors:\n${vendorsList}\n\n` : '') +
+          (processingResult.createdBills.length > 0 ? `### Created Bills:\n${billsList}\n\n` : '') +
+          errorsList +
+          `\n\nThe data has been successfully imported into your accounting system. You can view and edit the created items in the Accounts Payable section.`;
+        
+        // Return the result without going through Claude
+        result = {
+          success: processingResult.success,
+          message: responseMessage,
+          agentId: "excel_processor",
+          data: {
+            createdVendors: processingResult.createdVendors,
+            createdBills: processingResult.createdBills
+          }
+        };
+      } catch (error) {
+        console.error("[Agent-Chat API] Error processing Excel data for vendors/bills:", error);
+        result = {
+          success: false,
+          message: `Failed to process the Excel file for vendor/bill creation: ${error instanceof Error ? error.message : String(error)}\n\nPlease check the file format and try again.`,
+          agentId: "excel_processor"
+        };
+      }
+    }
+    else if (attachments && attachments.length > 0) {
+      console.log(`[Agent-Chat API] Processing request with ${attachments.length} attachments`);
       
       // Use Claude's API directly for PDF document processing
       try {
