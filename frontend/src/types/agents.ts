@@ -15,6 +15,7 @@ export interface AgentContext {
   previousMessages?: AgentMessage[];
   documentContext?: any;
   token?: string; // Authentication token for API requests
+  additionalContext?: Record<string, any>; // Additional context like similar conversations
 }
 
 export interface AgentMessage {
