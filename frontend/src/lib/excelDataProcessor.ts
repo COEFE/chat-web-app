@@ -1,5 +1,6 @@
 import { createVendor, getVendorByName } from "./accounting/vendorQueries";
 import { createBill } from "./accounting/billQueries";
+import { logAuditEvent } from "./auditLogger";
 import * as XLSX from 'xlsx';
 
 /**
@@ -60,58 +61,119 @@ export async function processVendorBillsFromExcel(
         // Process each row as a potential vendor bill
         for (const row of data) {
           try {
+            // Log the raw row data to help with debugging
+            console.log(`[ExcelDataProcessor] Processing row:`, JSON.stringify(row));
+            
             // Extract vendor and bill data from the row
-            // The exact field names will depend on the Excel format
             const vendorData = extractVendorData(row);
             if (!vendorData.name) {
-              errors.push(`Skipped row: Missing vendor name`);
+              const error = `Skipped row: Missing vendor name`;
+              console.error(`[ExcelDataProcessor] ${error}`);
+              errors.push(error);
               continue;
             }
             
             // Check if vendor exists, create if not
             let vendorId: number;
-            const existingVendor = await getVendorByName(vendorData.name);
-            
-            if (existingVendor) {
-              vendorId = existingVendor.id;
-              console.log(`[ExcelDataProcessor] Using existing vendor: ${vendorData.name} (ID: ${vendorId})`);
-            } else {
-              // Create new vendor
-              const newVendor = await createVendor({
-                name: vendorData.name,
-                contact_person: vendorData.contact_person || '',
-                email: vendorData.email || '',
-                phone: vendorData.phone || '',
-                address: vendorData.address || ''
+            try {
+              const existingVendor = await getVendorByName(vendorData.name);
+              if (existingVendor && existingVendor.id) {
+                vendorId = existingVendor.id;
+                console.log(`[ExcelDataProcessor] Using existing vendor: ${vendorData.name} (ID: ${vendorId})`);
+              } else {
+                // Create new vendor
+                console.log(`[ExcelDataProcessor] Creating new vendor:`, vendorData);
+                
+                const newVendor = await createVendor({
+                  name: vendorData.name,
+                  contact_person: vendorData.contact_person || '',
+                  email: vendorData.email || '',
+                  phone: vendorData.phone || '',
+                  address: vendorData.address || ''
+                });
+                
+                console.log(`[ExcelDataProcessor] Vendor created:`, newVendor);
+                
+                if (!newVendor || !newVendor.id) {
+                  throw new Error(`Failed to create vendor: ${vendorData.name}`);
+                }
+                
+                // Log vendor creation
+                await logAuditEvent({
+                  user_id: userId,
+                  action_type: "VENDOR_CREATION",
+                  entity_type: "VENDOR",
+                  entity_id: String(newVendor.id),
+                  context: { source: "excel_import", vendorData },
+                  status: "SUCCESS",
+                  timestamp: new Date().toISOString()
+                });
+                
+                vendorId = newVendor.id;
+                createdVendors.push(newVendor);
+              }
+              
+              // Extract bill data
+              const billData = extractBillData(row, vendorId);
+              if (!billData.bill_number) {
+                const error = `Skipped bill for ${vendorData.name}: Missing bill number`;
+                console.error(`[ExcelDataProcessor] ${error}`);
+                errors.push(error);
+                continue;
+              }
+              
+              // Create the bill
+              console.log(`[ExcelDataProcessor] Creating bill:`, billData);
+              
+              // Convert our line items to match the BillLine interface
+              const formattedLines = (billData.lines || []).map(line => ({
+                description: line.description || '',
+                expense_account_id: String(line.expense_account_id || '2000'), // Default to expense account 2000
+                quantity: '1', // Default quantity
+                unit_price: String(line.amount || 0), // Use the amount as unit price
+                amount: String(line.amount || 0), // Amount as string
+                category: '',
+                location: '',
+                funder: ''
+              }));
+              
+              // Create bill record
+              const newBill = await createBill({
+                vendor_id: vendorId,
+                bill_number: billData.bill_number,
+                bill_date: billData.bill_date,
+                due_date: billData.due_date,
+                total_amount: billData.total_amount,
+                memo: billData.memo || '',
+                status: 'draft',
+                // Add default AP account ID (required)
+                ap_account_id: 1000 // Use a default AP account ID or extract from data
+              }, formattedLines);
+              
+              console.log(`[ExcelDataProcessor] Bill created:`, newBill);
+              
+              if (!newBill || !newBill.id) {
+                throw new Error(`Failed to create bill: ${billData.bill_number}`);
+              }
+              
+              // Log bill creation
+              await logAuditEvent({
+                user_id: userId,
+                action_type: "BILL_CREATION",
+                entity_type: "BILL",
+                entity_id: String(newBill.id),
+                context: { source: "excel_import", billData },
+                status: "SUCCESS",
+                timestamp: new Date().toISOString()
               });
               
-              vendorId = newVendor.id;
-              createdVendors.push(newVendor);
-              console.log(`[ExcelDataProcessor] Created new vendor: ${vendorData.name} (ID: ${vendorId})`);
+              createdBills.push(newBill);
+              console.log(`[ExcelDataProcessor] Created bill: ${billData.bill_number} for vendor ${vendorData.name}`);
+            } catch (dbError) {
+              const errorMsg = `Database error while processing vendor/bill: ${dbError instanceof Error ? dbError.message : String(dbError)}`;
+              console.error(`[ExcelDataProcessor] ${errorMsg}`);
+              errors.push(errorMsg);
             }
-            
-            // Extract bill data
-            const billData = extractBillData(row, vendorId);
-            if (!billData.bill_number) {
-              errors.push(`Skipped bill for ${vendorData.name}: Missing bill number`);
-              continue;
-            }
-            
-            // Create the bill
-            const newBill = await createBill({
-              vendor_id: vendorId,
-              bill_number: billData.bill_number,
-              bill_date: billData.bill_date,
-              due_date: billData.due_date,
-              total_amount: billData.total_amount,
-              memo: billData.memo || '',
-              status: 'draft',
-              lines: billData.lines || []
-            });
-            
-            createdBills.push(newBill);
-            console.log(`[ExcelDataProcessor] Created bill: ${billData.bill_number} for vendor ${vendorData.name}`);
-            
           } catch (rowError) {
             console.error(`[ExcelDataProcessor] Error processing row:`, rowError);
             errors.push(`Error processing row: ${rowError instanceof Error ? rowError.message : String(rowError)}`);
@@ -170,19 +232,35 @@ function extractVendorData(row: any): {
   address?: string;
 } {
   // Handle different possible column names for vendor information
-  const nameFields = ['vendor_name', 'vendor', 'name', 'supplier_name', 'supplier'];
-  const contactFields = ['contact_person', 'contact', 'vendor_contact'];
-  const emailFields = ['email', 'vendor_email', 'contact_email'];
-  const phoneFields = ['phone', 'phone_number', 'contact_phone', 'telephone'];
-  const addressFields = ['address', 'vendor_address', 'billing_address'];
+  const nameFields = ['vendor_name', 'vendor', 'name', 'supplier_name', 'supplier', 'Vendor', 'Vendor Name', 'VENDOR', 'VENDOR_NAME'];
+  const contactFields = ['contact_person', 'contact', 'vendor_contact', 'Contact Person', 'Contact', 'CONTACT'];
+  const emailFields = ['email', 'vendor_email', 'contact_email', 'Email', 'EMAIL'];
+  const phoneFields = ['phone', 'phone_number', 'contact_phone', 'telephone', 'Phone', 'Phone Number', 'PHONE'];
+  const addressFields = ['address', 'vendor_address', 'billing_address', 'Address', 'ADDRESS'];
   
-  return {
-    name: getFirstDefinedValue(row, nameFields) || '',
+  // Log what fields we found
+  console.log('[ExcelDataProcessor] Vendor data extraction - available fields:', Object.keys(row).join(', '));
+  
+  // Get vendor name - try to be very forgiving in how we locate it
+  let vendorName = getFirstDefinedValue(row, nameFields);
+  
+  // If we still don't have a vendor name, try the first column
+  if (!vendorName && Object.keys(row).length > 0) {
+    const firstKey = Object.keys(row)[0];
+    console.log(`[ExcelDataProcessor] Falling back to first column for vendor name: ${firstKey} = ${row[firstKey]}`);
+    vendorName = row[firstKey];
+  }
+  
+  const result = {
+    name: vendorName || '',
     contact_person: getFirstDefinedValue(row, contactFields),
     email: getFirstDefinedValue(row, emailFields),
     phone: getFirstDefinedValue(row, phoneFields),
     address: getFirstDefinedValue(row, addressFields)
   };
+  
+  console.log(`[ExcelDataProcessor] Extracted vendor data:`, result);
+  return result;
 }
 
 /**
@@ -198,15 +276,44 @@ function extractBillData(row: any, vendorId: number): {
   lines?: Array<{
     description: string;
     amount: number;
-    expense_account_id?: number;
+    expense_account_id?: number | string;
+    quantity?: number;
+    unit_price?: number;
   }>;
 } {
-  // Handle different possible column names
-  const billNumberFields = ['bill_number', 'invoice_number', 'reference', 'bill_ref'];
-  const billDateFields = ['bill_date', 'invoice_date', 'date'];
-  const dueDateFields = ['due_date', 'payment_due'];
-  const amountFields = ['total_amount', 'amount', 'total', 'bill_amount'];
-  const memoFields = ['memo', 'description', 'notes'];
+  // Log available fields for debugging
+  console.log('[ExcelDataProcessor] Bill data extraction - available fields:', Object.keys(row).join(', '));
+  
+  // Handle different possible column names with case variations
+  const billNumberFields = [
+    'bill_number', 'invoice_number', 'reference', 'bill_ref', 
+    'Bill Number', 'Invoice Number', 'Reference', 'Bill Ref',
+    'BILL_NUMBER', 'INVOICE_NUMBER', 'REFERENCE', 'Bill #', 'Invoice #'
+  ];
+  
+  const billDateFields = [
+    'bill_date', 'invoice_date', 'date', 
+    'Bill Date', 'Invoice Date', 'Date', 
+    'BILL_DATE', 'INVOICE_DATE', 'DATE'
+  ];
+  
+  const dueDateFields = [
+    'due_date', 'payment_due', 
+    'Due Date', 'Payment Due', 
+    'DUE_DATE', 'PAYMENT_DUE'
+  ];
+  
+  const amountFields = [
+    'total_amount', 'amount', 'total', 'bill_amount', 
+    'Total Amount', 'Amount', 'Total', 'Bill Amount',
+    'TOTAL_AMOUNT', 'AMOUNT', 'TOTAL', 'BILL_AMOUNT'
+  ];
+  
+  const memoFields = [
+    'memo', 'description', 'notes', 
+    'Memo', 'Description', 'Notes',
+    'MEMO', 'DESCRIPTION', 'NOTES'
+  ];
   
   // Get today's date as default in YYYY-MM-DD format
   const today = new Date().toISOString().split('T')[0];
@@ -259,8 +366,24 @@ function extractBillData(row: any, vendorId: number): {
 function getFirstDefinedValue(obj: any, keys: string[]): any {
   for (const key of keys) {
     if (obj[key] !== undefined) {
+      console.log(`[ExcelDataProcessor] Found value for ${key}: ${obj[key]}`);
       return obj[key];
     }
   }
+  
+  // Try case-insensitive match as a fallback
+  const lowerCaseObj: Record<string, any> = {};
+  for (const key in obj) {
+    lowerCaseObj[key.toLowerCase()] = obj[key];
+  }
+  
+  for (const key of keys) {
+    const lowerKey = key.toLowerCase();
+    if (lowerCaseObj[lowerKey] !== undefined) {
+      console.log(`[ExcelDataProcessor] Found case-insensitive value for ${key}: ${lowerCaseObj[lowerKey]}`);
+      return lowerCaseObj[lowerKey];
+    }
+  }
+  
   return undefined;
 }
