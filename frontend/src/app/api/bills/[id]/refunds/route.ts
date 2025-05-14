@@ -5,16 +5,15 @@ import { sql } from '@vercel/postgres';
 /**
  * GET /api/bills/[id]/refunds - Get refunds for a specific bill
  */
-export async function GET(
-  request: NextRequest,
-  context: { params: { id: string } }
-) {
-  const { params } = context;
+export async function GET(request: NextRequest) {
   const { userId, error } = await authenticateRequest(request);
   if (error) return error;
 
   try {
-    const billId = parseInt(params.id);
+    // Extract bill ID from URL path
+    const pathParts = request.nextUrl.pathname.split('/');
+    const billIdStr = pathParts[pathParts.length - 2]; // ID is the second-to-last part in /api/bills/[id]/refunds
+    const billId = parseInt(billIdStr);
     
     if (isNaN(billId)) {
       return NextResponse.json(
