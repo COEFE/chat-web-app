@@ -305,24 +305,8 @@ export async function POST(req: NextRequest) {
         
         const newRefund = refundResult.rows[0];
         
-        // Update the bill's amount_paid to reflect the refund
-        const currentAmountPaid = typeof bill.amount_paid === 'string' ? parseFloat(bill.amount_paid) : Number(bill.amount_paid) || 0;
-        const newAmountPaid = Math.round((currentAmountPaid - refundAmountNum) * 100) / 100;
-        
-        // Determine the new bill status
-        let newStatus = bill.status;
-        if (newAmountPaid <= 0) {
-          newStatus = 'Open';
-        } else if (newAmountPaid < bill.total_amount) {
-          newStatus = 'Partially Paid';
-        }
-        
-        // Update the bill
-        await client.query(`
-          UPDATE bills
-          SET amount_paid = $1, status = $2, updated_at = CURRENT_TIMESTAMP
-          WHERE id = $3
-        `, [newAmountPaid.toString(), newStatus, refund.bill_id]);
+        // No longer update the bill's amount_paid or status
+        // Refunds are tracked separately and don't modify the original bill
         
         // Commit the transaction
         await client.query('COMMIT');
@@ -426,39 +410,8 @@ export async function DELETE(req: NextRequest) {
       
       const refund = refundResult.rows[0];
       
-      // Get the bill to update its amount_paid
-      const billResult = await client.query(`
-        SELECT * FROM bills WHERE id = $1
-      `, [refund.bill_id]);
-      
-      if (billResult.rows.length > 0) {
-        const bill = billResult.rows[0];
-        
-        // Update the bill's amount_paid to add back the refunded amount
-        const currentAmountPaid = typeof bill.amount_paid === 'string' ? 
-          parseFloat(bill.amount_paid) : Number(bill.amount_paid) || 0;
-        const refundAmount = typeof refund.amount === 'string' ? 
-          parseFloat(refund.amount) : Number(refund.amount) || 0;
-        
-        const newAmountPaid = Math.round((currentAmountPaid + refundAmount) * 100) / 100;
-        
-        // Determine the new bill status
-        let newStatus = bill.status;
-        if (newAmountPaid >= bill.total_amount) {
-          newStatus = 'Paid';
-        } else if (newAmountPaid > 0) {
-          newStatus = 'Partially Paid';
-        } else {
-          newStatus = 'Open';
-        }
-        
-        // Update the bill
-        await client.query(`
-          UPDATE bills
-          SET amount_paid = $1, status = $2, updated_at = CURRENT_TIMESTAMP
-          WHERE id = $3
-        `, [newAmountPaid.toString(), newStatus, refund.bill_id]);
-      }
+      // No longer update the bill when deleting a refund
+      // Refunds are tracked separately and don't modify the original bill
       
       // Delete the associated journal entry
       if (refund.journal_id) {
