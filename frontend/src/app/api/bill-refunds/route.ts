@@ -7,6 +7,36 @@ import {
 import { createJournal, Journal, JournalLine } from '@/lib/accounting/journalQueries';
 import { logAuditEvent, AuditLogData } from '@/lib/auditLogger';
 
+// Define interfaces for bill and related data
+interface BillLine {
+  id: number;
+  expense_account_id: number;
+  expense_account_name: string;
+  description?: string;
+  quantity: number;
+  unit_price: number;
+  amount: number;
+}
+
+interface Bill {
+  id: number;
+  vendor_id: number;
+  vendor_name: string;
+  bill_number?: string;
+  bill_date: string;
+  due_date: string;
+  total_amount: number;
+  amount_paid: number;
+  status: string;
+  terms?: string;
+  memo?: string;
+  ap_account_id: number;
+  ap_account_name: string;
+  created_at: string;
+  updated_at: string;
+  lines?: BillLine[];
+}
+
 /**
  * POST /api/bill-refunds - create a new bill refund
  * This endpoint creates a refund for a paid vendor bill
@@ -97,6 +127,28 @@ export async function POST(req: NextRequest) {
     const debitDescription = refund.reference_number ? 
       `Ref: ${refund.reference_number}` : 
       `Refund for Bill ${bill.bill_number || bill.id}`;
+      
+    // Calculate how to distribute the refund across expense accounts
+    // If bill has no lines, we'll credit the AP account as fallback
+    const billLines = (bill as Bill).lines || [];
+    let expenseDistribution: {account_id: number, amount: number}[] = [];
+    
+    if (billLines.length > 0) {
+      // Calculate total amount from bill lines to determine proportions
+      const totalLineAmount = billLines.reduce((sum: number, line: BillLine) => sum + (line.amount || 0), 0);
+      
+      // Distribute refund amount proportionally across expense accounts
+      if (totalLineAmount > 0) {
+        expenseDistribution = billLines.map((line: BillLine) => {
+          const proportion = (line.amount || 0) / totalLineAmount;
+          const amount = Math.round((proportion * refundAmountNum) * 100) / 100; // Round to 2 decimal places
+          return {
+            account_id: line.expense_account_id,
+            amount: amount
+          };
+        });
+      }
+    }
 
     // Create journal entry directly using SQL to avoid trigger issues
     let journalId: number;
@@ -147,41 +199,79 @@ export async function POST(req: NextRequest) {
         const hasLineNumber = lineNumberCheck.rows[0].has_line_number;
         console.log('Journal lines has line_number column:', hasLineNumber);
         
-        // Insert both journal lines at once to avoid trigger validation issues
-        let query, lineValues;
+        // Insert journal lines for the refund
+        // First insert the debit line for the refund account
+        let lineNumber = 1;
         
         if (hasLineNumber) {
-          // If line_number column exists, use it
-          lineValues = [
-            journalId, 1, refund.refund_account_id, debitDescription, refundAmountNum, 0, null, null, null, null, userId,
-            journalId, 2, bill.ap_account_id, creditDescription, 0, refundAmountNum, null, null, null, null, userId
-          ];
-          
-          query = `
-            INSERT INTO journal_lines 
+          // Insert debit line with line number
+          await client.query(
+            `INSERT INTO journal_lines 
               (journal_id, line_number, account_id, description, debit, credit, category, location, vendor, funder, user_id) 
             VALUES 
-              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11),
-              ($12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-          `;
-        } else {
-          // If line_number column doesn't exist, omit it
-          lineValues = [
-            journalId, refund.refund_account_id, debitDescription, refundAmountNum, 0, null, null, null, null, userId,
-            journalId, bill.ap_account_id, creditDescription, 0, refundAmountNum, null, null, null, null, userId
-          ];
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            [journalId, lineNumber++, refund.refund_account_id, debitDescription, refundAmountNum, 0, null, null, null, null, userId]
+          );
           
-          query = `
-            INSERT INTO journal_lines 
+          // Insert credit lines for expense accounts
+          if (expenseDistribution.length > 0) {
+            // Use expense accounts proportionally
+            for (const dist of expenseDistribution) {
+              if (dist.amount > 0) {
+                await client.query(
+                  `INSERT INTO journal_lines 
+                    (journal_id, line_number, account_id, description, debit, credit, category, location, vendor, funder, user_id) 
+                  VALUES 
+                    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                  [journalId, lineNumber++, dist.account_id, creditDescription, 0, dist.amount, null, null, null, null, userId]
+                );
+              }
+            }
+          } else {
+            // Fallback to AP account if no expense accounts available
+            await client.query(
+              `INSERT INTO journal_lines 
+                (journal_id, line_number, account_id, description, debit, credit, category, location, vendor, funder, user_id) 
+              VALUES 
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+              [journalId, lineNumber++, bill.ap_account_id, creditDescription, 0, refundAmountNum, null, null, null, null, userId]
+            );
+          }
+        } else {
+          // Insert debit line without line number
+          await client.query(
+            `INSERT INTO journal_lines 
               (journal_id, account_id, description, debit, credit, category, location, vendor, funder, user_id) 
             VALUES 
-              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10),
-              ($11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-          `;
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [journalId, refund.refund_account_id, debitDescription, refundAmountNum, 0, null, null, null, null, userId]
+          );
+          
+          // Insert credit lines for expense accounts
+          if (expenseDistribution.length > 0) {
+            // Use expense accounts proportionally
+            for (const dist of expenseDistribution) {
+              if (dist.amount > 0) {
+                await client.query(
+                  `INSERT INTO journal_lines 
+                    (journal_id, account_id, description, debit, credit, category, location, vendor, funder, user_id) 
+                  VALUES 
+                    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                  [journalId, dist.account_id, creditDescription, 0, dist.amount, null, null, null, null, userId]
+                );
+              }
+            }
+          } else {
+            // Fallback to AP account if no expense accounts available
+            await client.query(
+              `INSERT INTO journal_lines 
+                (journal_id, account_id, description, debit, credit, category, location, vendor, funder, user_id) 
+              VALUES 
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+              [journalId, bill.ap_account_id, creditDescription, 0, refundAmountNum, null, null, null, null, userId]
+            );
+          }
         }
-        
-        // Insert both lines using a single query with multiple value sets
-        await client.query(query, lineValues);
         
         console.log('Journal lines inserted successfully');
         
