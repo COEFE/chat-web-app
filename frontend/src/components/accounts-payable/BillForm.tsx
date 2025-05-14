@@ -156,6 +156,9 @@ export function BillForm({ bill, onClose }: BillFormProps) {
     return safeToString(value) || defaultValue;
   };
   
+  // Default AP account ID - to be populated when accounts are loaded
+  const [defaultApAccountId, setDefaultApAccountId] = useState<string>("");
+
   // Initialize the form
   const form = useForm<BillFormValues>({
     resolver: zodResolver(billFormSchema),
@@ -166,7 +169,7 @@ export function BillForm({ bill, onClose }: BillFormProps) {
       due_date: bill ? new Date(bill.due_date) : new Date(),
       terms: bill?.terms || "",
       memo: bill?.memo || "",
-      ap_account_id: bill?.ap_account_id?.toString() || "",
+      ap_account_id: bill?.ap_account_id?.toString() || defaultApAccountId,
       status: bill?.status || "Draft",
       lines: bill?.lines && Array.isArray(bill.lines) && bill.lines.length > 0
         ? bill.lines.map(line => ({
@@ -234,7 +237,7 @@ export function BillForm({ bill, onClose }: BillFormProps) {
             due_date: new Date(bill.due_date),
             terms: bill.terms || "",
             memo: bill.memo || "",
-            ap_account_id: bill.ap_account_id?.toString() || "",
+            ap_account_id: bill.ap_account_id?.toString() || defaultApAccountId,
             status: bill.status || "Draft",
             lines: formattedLines
           }, { keepDefaultValues: false });
@@ -309,6 +312,19 @@ export function BillForm({ bill, onClose }: BillFormProps) {
         
         // Make all GL accounts available for AP account selection
         setApAccounts(sortedAccounts);
+
+        // Find and set the default AP account (2010 - Accounts Payable)
+        const apAccount = sortedAccounts.find((account: Account) => 
+          account.code === '2010' && account.name.includes('Accounts Payable')
+        );
+        
+        if (apAccount) {
+          setDefaultApAccountId(apAccount.id.toString());
+          // Only set the form value if no bill is being edited (new bill)
+          if (!bill) {
+            form.setValue('ap_account_id', apAccount.id.toString());
+          }
+        }
         
         // Cash & Bank accounts (for payment) - keeping this for reference
         const cashBankAccounts = sortedAccounts.filter(

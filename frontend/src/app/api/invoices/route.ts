@@ -1,11 +1,20 @@
+export const dynamic = 'force-dynamic';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/authenticateRequest';
 import { query } from '@/lib/db';
 
 // GET /api/invoices - List all invoices with filtering and pagination
 export async function GET(req: NextRequest) {
+  console.log(`[Invoices API] Received GET request: ${req.url}`);
+  
   const { userId, error } = await authenticateRequest(req);
-  if (error) return error;
+  if (error) {
+    console.error(`[Invoices API] Authentication error:`, error);
+    return error;
+  }
+  
+  console.log(`[Invoices API] Authenticated user:`, userId);
 
   try {
     // Parse query parameters
@@ -24,9 +33,9 @@ export async function GET(req: NextRequest) {
     const statusesOnly = searchParams.get('statuses') === 'true';
     if (statusesOnly) {
       const statusesQuery = `
-        SELECT DISTINCT status FROM invoices WHERE is_deleted = false
+        SELECT DISTINCT status FROM invoices WHERE is_deleted = false AND user_id = $1
       `;
-      const statusesResult = await query(statusesQuery);
+      const statusesResult = await query(statusesQuery, [userId]);
       const statuses = statusesResult.rows.map(row => row.status);
       return NextResponse.json(statuses);
     }
@@ -42,15 +51,15 @@ export async function GET(req: NextRequest) {
         JOIN customers c ON i.customer_id = c.id
         JOIN accounts a ON i.ar_account_id = a.id
       WHERE 
-        i.is_deleted = false
+        (i.is_deleted = false OR i.is_deleted IS NULL) AND i.deleted_at IS NULL AND i.user_id = $1
     `;
     
     let countQuery = `
-      SELECT COUNT(*) FROM invoices i WHERE i.is_deleted = false
+      SELECT COUNT(*) FROM invoices i WHERE (i.is_deleted = false OR i.is_deleted IS NULL) AND i.deleted_at IS NULL AND i.user_id = $1
     `;
     
-    const queryParams: any[] = [];
-    let paramIndex = 1;
+    const queryParams: any[] = [userId];
+    let paramIndex = 2;
     
     // Add filters to queries
     if (customerId) {
@@ -81,28 +90,74 @@ export async function GET(req: NextRequest) {
       paramIndex++;
     }
     
-    // Add pagination and sorting
-    invoicesQuery += ` ORDER BY i.invoice_date DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    // Add sorting
+    invoicesQuery += ` ORDER BY i.created_at DESC, i.id DESC`;
+    
+    // Add pagination
+    invoicesQuery += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     queryParams.push(limit, offset);
+    
+    // Log the query for debugging
+    console.log(`[Invoices API] Query: ${invoicesQuery.replace(/\s+/g, ' ')}`);
+    console.log(`[Invoices API] Params:`, queryParams);
     
     // Execute queries
     const [invoicesResult, countResult] = await Promise.all([
       query(invoicesQuery, queryParams),
-      query(countQuery, queryParams.slice(0, paramIndex - 1))
+      query(countQuery, queryParams.slice(0, -2)) // Remove limit and offset params
     ]);
     
-    const invoices = invoicesResult.rows;
-    const totalCount = parseInt(countResult.rows[0].count);
+    // Explicitly filter invoices with is_deleted flag and by checking deleted_at
+    let invoicesList = invoicesResult.rows.filter(inv => {
+      // If is_deleted is true OR deleted_at exists, consider it deleted
+      const isDeleted = inv.is_deleted === true || inv.deleted_at !== null;
+      // If deleted, log it and filter it out
+      if (isDeleted) {
+        console.log(`[Invoices API] Filtering out invoice ${inv.id} that appears to be deleted (is_deleted: ${inv.is_deleted}, deleted_at: ${inv.deleted_at})`);
+      }
+      return !isDeleted;
+    });
     
-    return NextResponse.json({
-      invoices,
+    // Log if any were filtered out
+    const filteredCount = invoicesResult.rows.length - invoicesList.length;
+    if (filteredCount > 0) {
+      console.warn(`[Invoices API] Warning: Filtered out ${filteredCount} deleted invoices based on is_deleted flag or deleted_at timestamp`);
+    }
+    
+    // Get accurate count from database
+    const actualTotal = parseInt(countResult.rows[0].count);
+    
+    // Double-check that our counts match up
+    if (invoicesList.length !== actualTotal && filteredCount === 0) {
+      console.warn(`[Invoices API] Warning: Invoice count mismatch - DB reports ${actualTotal} but we have ${invoicesList.length} after filtering`);
+    }
+    
+    const totalPages = Math.ceil(actualTotal / limit);
+    
+    console.log(`[Invoices API] Successfully fetched ${invoicesList.length} invoices. DB Total: ${actualTotal}, Final Total: ${invoicesList.length}`);
+    
+    // For safety, recalculate the total based on the filtered list length for pagination
+    const finalTotal = invoicesList.length;
+    
+    const response = {
+      invoices: invoicesList,
       pagination: {
         page,
         limit,
-        total: totalCount,
-        totalPages: Math.ceil(totalCount / limit)
+        total: finalTotal,
+        totalPages
       }
-    });
+    };
+    
+    // Create a response with cache-control headers to prevent caching
+    const nextResponse = NextResponse.json(response);
+    
+    // Add cache control headers to prevent caching
+    nextResponse.headers.set('Cache-Control', 'no-store, max-age=0');
+    nextResponse.headers.set('Pragma', 'no-cache');
+    nextResponse.headers.set('Expires', '0');
+    
+    return nextResponse;
   } catch (err: any) {
     console.error('[invoices] GET error:', err);
     return NextResponse.json(
@@ -174,9 +229,10 @@ export async function POST(req: NextRequest) {
       const invoiceInsertQuery = `
         INSERT INTO invoices (
           customer_id, customer_name, invoice_number, invoice_date, due_date, 
-          total_amount, status, terms, memo_to_customer, ar_account_id, ar_account_name
+          total_amount, status, terms, memo_to_customer, ar_account_id, ar_account_name,
+          user_id
         ) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING *
       `;
       
@@ -191,7 +247,8 @@ export async function POST(req: NextRequest) {
         invoice.terms || null,
         invoice.memo_to_customer || null,
         invoice.ar_account_id,
-        arAccountName // Add AR account name
+        arAccountName, // Add AR account name
+        userId // Add user_id for proper data isolation
       ]);
       
       const createdInvoice = invoiceResult.rows[0];
@@ -252,9 +309,192 @@ export async function POST(req: NextRequest) {
         invoiceId
       ]);
       
+      // Create a journal entry for the invoice
+      // Check if journals table has transaction_date or date column
+      const schemaCheck = await query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'journals' AND column_name = 'transaction_date'
+        ) as has_transaction_date
+      `);
+      
+      const schema = schemaCheck.rows[0];
+      
+      // Use the appropriate date column based on schema
+      const dateColumnName = schema.has_transaction_date ? 'transaction_date' : 'date';
+      
+      // Create journal entry with dynamic column name
+      const journalInsertQuery = `
+        INSERT INTO journals (
+          ${dateColumnName}, memo, journal_type, is_posted, created_by, source
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id
+      `;
+      
+      const memo = `Invoice #${invoice.invoice_number} created`;
+      
+      // Adding journal entry with AR type
+      // If the invoice is created with 'Sent' status, the journal should be posted immediately
+      const shouldPostJournal = invoice.status === 'Sent';
+      console.log(`[Invoice Create] Creating journal entry with is_posted=${shouldPostJournal} for invoice status=${invoice.status}`)
+      
+      const journalResult = await query(journalInsertQuery, [
+        invoice.invoice_date,
+        memo,
+        'AR',           // journal_type for Accounts Receivable
+        shouldPostJournal, // is_posted = true if invoice is sent, false if draft
+        userId || 'system',
+        'invoice_create'
+      ]);
+      
+      const journalId = journalResult.rows[0].id;
+      
+      // Check if journal_lines table has line_number column
+      const lineNumberCheck = await query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'journal_lines' AND column_name = 'line_number'
+        ) as has_line_number
+      `);
+      
+      const hasLineNumber = lineNumberCheck.rows[0].has_line_number;
+      
+      // First insert the main AR line
+      let arLineQuery;
+      let arLineParams;
+      
+      if (hasLineNumber) {
+        arLineQuery = `
+          INSERT INTO journal_lines (
+            journal_id, line_number, account_id, description, debit, credit
+          )
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `;
+        
+        arLineParams = [
+          journalId,
+          1,                    // line number
+          invoice.ar_account_id,
+          `AR - ${arAccountName}`,
+          totalAmount,         // debit AR account
+          0
+        ];
+      } else {
+        arLineQuery = `
+          INSERT INTO journal_lines (
+            journal_id, account_id, description, debit, credit
+          )
+          VALUES ($1, $2, $3, $4, $5)
+        `;
+        
+        arLineParams = [
+          journalId,
+          invoice.ar_account_id,
+          `AR - ${arAccountName}`,
+          totalAmount,         // debit AR account
+          0
+        ];
+      }
+      
+      await query(arLineQuery, arLineParams);
+      
+      // Then insert revenue lines for each invoice line item
+      let lineNumber = 2;
+      
+      for (const line of lines) {
+        const lineAmount = parseFloat(line.quantity) * parseFloat(line.unit_price);
+        
+        let revenueLineQuery;
+        let revenueLineParams;
+        
+        if (hasLineNumber) {
+          revenueLineQuery = `
+            INSERT INTO journal_lines (
+              journal_id, line_number, account_id, description, debit, credit
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+          `;
+          
+          revenueLineParams = [
+            journalId,
+            lineNumber,
+            line.revenue_account_id,
+            line.description || 'Revenue',
+            0,
+            lineAmount        // credit revenue account
+          ];
+        } else {
+          revenueLineQuery = `
+            INSERT INTO journal_lines (
+              journal_id, account_id, description, debit, credit
+            )
+            VALUES ($1, $2, $3, $4, $5)
+          `;
+          
+          revenueLineParams = [
+            journalId,
+            line.revenue_account_id,
+            line.description || 'Revenue',
+            0,
+            lineAmount        // credit revenue account
+          ];
+        }
+        
+        await query(revenueLineQuery, revenueLineParams);
+        lineNumber++;
+      }
+      
+      // Check if journal_id column exists in the invoices table
+      try {
+        // First check if the column exists
+        const checkColumnQuery = `
+          SELECT column_name 
+          FROM information_schema.columns 
+          WHERE table_name = 'invoices' AND column_name = 'journal_id'
+        `;
+        
+        const columnResult = await query(checkColumnQuery);
+        
+        if (columnResult.rows.length > 0) {
+          // Column exists, update the invoice with journal reference
+          const updateJournalRefQuery = `
+            UPDATE invoices 
+            SET journal_id = $1
+            WHERE id = $2
+          `;
+          
+          await query(updateJournalRefQuery, [journalId, invoiceId]);
+          console.log(`[Invoice Create] Updated invoice ${invoiceId} with journal reference ${journalId}`);
+        } else {
+          // Column doesn't exist, just log it and continue
+          console.log(`[Invoice Create] Note: journal_id column doesn't exist in invoices table. Created journal ${journalId} for invoice ${invoiceId} without reference.`);
+        }
+      } catch (columnErr) {
+        // Even if this fails, we don't want to fail the whole transaction
+        console.error(`[Invoice Create] Warning: Failed to update journal reference:`, columnErr);
+        // Continue with the transaction - the journal was still created
+      }
+      
+      console.log(`[Invoice Create] Created journal entry ${journalId} for invoice ${invoiceId}`);
+      
       // Commit transaction
       await query('COMMIT');
-      
+      // Force update the status if it's supposed to be 'Sent'
+      // This ensures the status is properly reflected in the database
+      if (invoice.status === 'Sent') {
+        const forceStatusUpdateQuery = `
+          UPDATE invoices
+          SET status = 'Sent'
+          WHERE id = $1
+          RETURNING status
+        `;
+        
+        const statusUpdateResult = await query(forceStatusUpdateQuery, [invoiceId]);
+        console.log(`[Invoice Create] Forced status update result:`, statusUpdateResult.rows[0]);
+      }
+
+      // Return the result
       return NextResponse.json({
         success: true,
         invoice: updatedInvoiceResult.rows[0]

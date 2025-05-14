@@ -175,16 +175,27 @@ export async function POST(req: NextRequest) {
     // Check if the query is about creating vendors or bills from Excel data
     const isVendorBillCreationRequest = (context: { query: string }): boolean => {
       const query = context.query.toLowerCase();
-      return (
-        (query.includes('create') || 
-         query.includes('add') || 
-         query.includes('import') || 
-         query.includes('upload') || 
-         query.includes('process') ||
-         query.includes('generate')) &&
-        (query.includes('vendor') || query.includes('supplier') || query.includes('bill') || query.includes('invoice')) &&
-        (attachments && attachments.length > 0 && isExcelFile(attachments[0].name, attachments[0].type))
+      const hasActionKeywords = (
+        query.includes('create') || 
+        query.includes('add') || 
+        query.includes('import') || 
+        query.includes('upload') || 
+        query.includes('process') ||
+        query.includes('generate')
       );
+      
+      const hasEntityKeywords = (
+        query.includes('vendor') || 
+        query.includes('supplier') || 
+        query.includes('bill') || 
+        query.includes('invoice')
+      );
+      
+      const hasValidAttachment = !!(attachments && 
+        attachments.length > 0 && 
+        isExcelFile(attachments[0].name, attachments[0].type));
+      
+      return hasActionKeywords && hasEntityKeywords && hasValidAttachment;
     };
     
     // Handle the request - determine if we should use direct Claude API for PDF processing

@@ -35,7 +35,9 @@ export async function GET(req: NextRequest) {
     // Special parameter for getting a specific journal
     const journalId = url.searchParams.get('id');
     if (journalId) {
-      const journal = await getJournal(parseInt(journalId, 10));
+      console.log(`[journals/GET] Fetching specific journal ${journalId} for user: ${userId}`);
+      // Pass userId to ensure data privacy
+      const journal = await getJournal(parseInt(journalId, 10), userId);
       if (!journal) {
         return NextResponse.json({ error: 'Journal not found' }, { status: 404 });
       }
@@ -51,13 +53,16 @@ export async function GET(req: NextRequest) {
     }
     
     // Get journals with pagination and filters
+    // Always pass userId for data privacy/isolation
+    console.log(`[journals/GET] Fetching journals for user: ${userId}`);
     const { journals, total } = await getJournals(
       page,
       limit,
       journalType,
       startDate,
       endDate,
-      isPosted
+      isPosted,
+      userId // Pass userId to ensure data privacy
     );
     
     return NextResponse.json({

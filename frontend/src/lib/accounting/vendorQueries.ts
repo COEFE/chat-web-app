@@ -24,7 +24,8 @@ export async function getVendors(
   page: number = 1,
   limit: number = 50,
   search?: string,
-  includeDeleted: boolean = false
+  includeDeleted: boolean = false,
+  userId?: string
 ): Promise<{ vendors: Vendor[], total: number }> {
   const offset = (page - 1) * limit;
   
@@ -54,28 +55,44 @@ export async function getVendors(
   
   // Filter out deleted vendors unless includeDeleted is true
   if (!includeDeleted) {
-    query += ` AND v.is_deleted = $${paramCount}`;
-    queryParams.push(false);
+    query += ` AND v.is_deleted = FALSE`;
+  }
+  
+  // Filter by user_id if provided
+  if (userId) {
+    query += ` AND v.user_id = $${paramCount}`;
+    queryParams.push(userId);
     paramCount++;
   }
   
   // Get total count first
-  const countQuery = `
-    SELECT COUNT(*) as total 
-    FROM vendors v
-    WHERE 1=1
-    ${!includeDeleted ? ' AND v.is_deleted = $1' : ''}
-    ${search ? ` AND (
-      v.name ILIKE $${!includeDeleted ? 2 : 1} 
-      OR v.contact_person ILIKE $${!includeDeleted ? 2 : 1}
-      OR v.email ILIKE $${!includeDeleted ? 2 : 1}
-      OR v.phone ILIKE $${!includeDeleted ? 2 : 1}
-    )` : ''}
-  `;
-  
+  // Build the count query with proper parameter indexing
+  let countQueryText = 'SELECT COUNT(*) as total FROM vendors v WHERE 1=1';
   const countParams = [];
-  if (!includeDeleted) countParams.push(false);
-  if (search) countParams.push(`%${search}%`);
+  let countParamIndex = 1;
+  
+  if (!includeDeleted) {
+    countQueryText += ' AND v.is_deleted = FALSE';
+  }
+  
+  if (search) {
+    countQueryText += ` AND (
+      v.name ILIKE $${countParamIndex} 
+      OR v.contact_person ILIKE $${countParamIndex}
+      OR v.email ILIKE $${countParamIndex}
+      OR v.phone ILIKE $${countParamIndex}
+    )`;
+    countParams.push(`%${search}%`);
+    countParamIndex++;
+  }
+  
+  if (userId) {
+    countQueryText += ` AND v.user_id = $${countParamIndex}`;
+    countParams.push(userId);
+    countParamIndex++;
+  }
+  
+  const countQuery = countQueryText;
   
   const countResult = await sql.query(countQuery, countParams);
   const total = parseInt(countResult.rows[0].total, 10);
@@ -95,17 +112,23 @@ export async function getVendors(
 /**
  * Get a vendor by ID
  */
-export async function getVendor(id: number): Promise<Vendor | null> {
+export async function getVendor(id: number, userId?: string): Promise<Vendor | null> {
+  // Ensure we have a userId for proper data isolation
+  if (!userId) {
+    console.warn('[getVendor] No userId provided for vendor lookup, data isolation may be compromised');
+    return null; // Return null if no userId to prevent data leakage
+  }
+
   const query = `
     SELECT 
       v.*,
       a.name as default_expense_account_name
     FROM vendors v
     LEFT JOIN accounts a ON v.default_expense_account_id = a.id
-    WHERE v.id = $1 AND v.is_deleted = false
+    WHERE v.id = $1 AND v.is_deleted = false AND v.user_id = $2
   `;
   
-  const result = await sql.query(query, [id]);
+  const result = await sql.query(query, [id, userId]);
   
   if (result.rows.length === 0) {
     return null;
@@ -115,9 +138,37 @@ export async function getVendor(id: number): Promise<Vendor | null> {
 }
 
 /**
+ * Get a vendor by name (case-insensitive exact match)
+ */
+export async function getVendorByName(name: string, userId?: string): Promise<Vendor | null> {
+  // Ensure we have a userId for proper data isolation
+  if (!userId) {
+    console.warn('[getVendorByName] No userId provided for vendor lookup, data isolation may be compromised');
+    return null; // Return null if no userId to prevent data leakage
+  }
+
+  const query = `
+    SELECT *
+    FROM vendors
+    WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))
+      AND is_deleted = false
+      AND user_id = $2
+    LIMIT 1
+  `;
+  
+  const params = [name, userId];
+  
+  const result = await sql.query(query, params);
+  if (result.rows.length === 0) {
+    return null;
+  }
+  return result.rows[0];
+}
+
+/**
  * Create a new vendor
  */
-export async function createVendor(vendor: Vendor): Promise<Vendor> {
+export async function createVendor(vendor: Vendor, userId?: string): Promise<Vendor> {
   const {
     name,
     contact_person,
@@ -134,8 +185,9 @@ export async function createVendor(vendor: Vendor): Promise<Vendor> {
       email,
       phone,
       address,
-      default_expense_account_id
-    ) VALUES ($1, $2, $3, $4, $5, $6)
+      default_expense_account_id,
+      user_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *
   `;
   
@@ -145,7 +197,8 @@ export async function createVendor(vendor: Vendor): Promise<Vendor> {
     email || null,
     phone || null,
     address || null,
-    default_expense_account_id || null
+    default_expense_account_id || null,
+    userId || null // Include user_id for proper data isolation
   ]);
   
   return result.rows[0];

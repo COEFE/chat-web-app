@@ -18,14 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { 
-  MoreHorizontal, 
-  Pencil, 
-  Eye, 
-  Calendar, 
-  DollarSign,
-  FileText
-} from "lucide-react";
+import { Eye, FileText, MoreHorizontal, Plus, Trash2, Copy, DollarSign, Ban, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface Invoice {
@@ -56,12 +49,15 @@ interface PaginationProps {
 interface InvoiceTableProps {
   invoices: Invoice[];
   onView: (id: number) => void;
-  onEdit: (invoice: Invoice) => void;
+  onEdit?: (id: number) => void;
+  onDelete?: (invoice: Invoice, isVoid?: boolean) => void;
+  onDuplicate?: (invoice: Invoice) => void;
+  onRecordPayment?: (id: number) => void;
   pagination: PaginationProps;
   onPageChange: (page: number) => void;
 }
 
-export function InvoiceTable({ invoices, onView, onEdit, pagination, onPageChange }: InvoiceTableProps) {
+export function InvoiceTable({ invoices, onView, onEdit, onDelete, onDuplicate, onRecordPayment, pagination, onPageChange }: InvoiceTableProps) {
   // Format currency
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -155,14 +151,16 @@ export function InvoiceTable({ invoices, onView, onEdit, pagination, onPageChang
                             <Eye className="mr-2 h-4 w-4" />
                             View
                           </DropdownMenuItem>
-                          {invoice.status !== 'Paid' && invoice.status !== 'Void' && (
-                            <DropdownMenuItem onClick={() => onEdit(invoice)}>
+                          {onEdit && invoice.status !== 'Paid' && invoice.status !== 'Void' && (
+                            <DropdownMenuItem onClick={() => onEdit(invoice.id)}>
                               <Pencil className="mr-2 h-4 w-4" />
                               Edit
                             </DropdownMenuItem>
                           )}
                           {(invoice.status === 'Sent' || invoice.status === 'Overdue' || invoice.status === 'Partially Paid') && (
-                            <DropdownMenuItem onClick={() => onView(invoice.id)}>
+                            <DropdownMenuItem 
+                              onClick={() => onRecordPayment ? onRecordPayment(invoice.id) : onView(invoice.id)}
+                            >
                               <DollarSign className="mr-2 h-4 w-4" />
                               Record Payment
                             </DropdownMenuItem>
@@ -171,6 +169,32 @@ export function InvoiceTable({ invoices, onView, onEdit, pagination, onPageChang
                             <FileText className="mr-2 h-4 w-4" />
                             Print/Download
                           </DropdownMenuItem>
+                          {onDuplicate && (
+                            <DropdownMenuItem onClick={() => onDuplicate(invoice)}>
+                              <Copy className="mr-2 h-4 w-4" />
+                              Duplicate
+                            </DropdownMenuItem>
+                          )}
+                          {/* For Sent, Overdue, and Partially Paid invoices, show Void option instead of Delete */}
+                          {onDelete && (invoice.status === 'Sent' || invoice.status === 'Overdue' || invoice.status === 'Partially Paid') && (
+                            <DropdownMenuItem 
+                              onClick={() => onDelete(invoice, true)}
+                              className="text-orange-600 hover:text-orange-800 hover:bg-orange-100"
+                            >
+                              <Ban className="mr-2 h-4 w-4" />
+                              Void
+                            </DropdownMenuItem>
+                          )}
+                          {/* For Draft invoices, show Delete option */}
+                          {onDelete && invoice.status === 'Draft' && (
+                            <DropdownMenuItem 
+                              onClick={() => onDelete(invoice)}
+                              className="text-red-600 hover:text-red-800 hover:bg-red-100"
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete
+                            </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>

@@ -95,8 +95,10 @@ export async function getJournalTypes(): Promise<JournalType[]> {
 
 /**
  * Get journal by ID with lines and attachments
+ * @param journalId - The ID of the journal to retrieve
+ * @param userId - Optional user ID to ensure data privacy (only return journals belonging to this user)
  */
-export async function getJournal(journalId: number): Promise<Journal | null> {
+export async function getJournal(journalId: number, userId?: string): Promise<Journal | null> {
   // Check schema first for backwards compatibility
   const schemaCheck = await sql`
     SELECT 
@@ -129,13 +131,23 @@ export async function getJournal(journalId: number): Promise<Journal | null> {
   let joinClause = schema.has_journal_types_table && schema.has_journal_type ? 
     'LEFT JOIN journal_types jt ON j.journal_type = jt.code' : '';
 
-  // Get journal header
+  // Get journal header with user_id filtering for data privacy
+  let whereClause = 'j.id = $1 AND j.is_deleted = FALSE';
+  let queryParams: (number | string)[] = [journalId];
+  
+  // Add user_id filter if provided (for data privacy)
+  if (userId) {
+    whereClause += ' AND j.user_id = $2';
+    queryParams.push(userId);
+    console.log(`[getJournal] Filtering journal ${journalId} for user: ${userId}`);
+  }
+  
   const journalResult = await sql.query(
     `SELECT ${selectFields.trim()}
     FROM journals j
     ${joinClause}
-    WHERE j.id = $1 AND j.is_deleted = FALSE`,
-    [journalId]
+    WHERE ${whereClause}`,
+    queryParams
   );
   
   if (journalResult.rows.length === 0) {
@@ -201,13 +213,21 @@ export async function getJournals(
   type?: string, 
   startDate?: string, 
   endDate?: string, 
-  isPosted?: boolean
+  isPosted?: boolean,
+  userId?: string
 ): Promise<{ journals: Journal[], total: number }> {
   const offset = (page - 1) * limit;
   
   // Build where clauses as an array of conditions
   const conditions = [];
   const params = [];
+  
+  // Always filter by user_id if provided (for data privacy)
+  if (userId) {
+    conditions.push('j.user_id = $' + (params.length + 1));
+    params.push(userId);
+    console.log(`[getJournals] Filtering journals for user: ${userId}`);
+  }
   
   if (type) {
     conditions.push('j.journal_type = $' + (params.length + 1));
@@ -406,9 +426,11 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
       }
       
       // Required columns always exist
-      insertColumns.push('memo', 'source', 'created_by');
-      placeholders.push(`$${index++}`, `$${index++}`, `$${index++}`);
-      values.push(journal.memo, journal.source || null, userId);
+      insertColumns.push('memo', 'source', 'created_by', 'user_id');
+      placeholders.push(`$${index++}`, `$${index++}`, `$${index++}`, `$${index++}`);
+      values.push(journal.memo, journal.source || null, userId, userId);
+      
+      console.log(`[createJournal] Creating journal for user: ${userId}`);
       
       // Build the query
       const insertQuery = `

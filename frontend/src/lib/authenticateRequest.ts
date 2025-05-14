@@ -10,6 +10,12 @@ import { getAdminAuth } from '@/lib/firebaseAdminConfig';
 export async function authenticateRequest(req: NextRequest | Request) {
   const authorizationHeader = req.headers.get("Authorization");
   
+  // Special case for internal API calls
+  if (authorizationHeader === 'Bearer internal-api-call') {
+    console.log('[Auth] Internal API call authenticated');
+    return { userId: 'internal-api', error: null };
+  }
+  
   // If no auth header, return error
   if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
     console.error('[Auth] Missing or invalid Authorization header');

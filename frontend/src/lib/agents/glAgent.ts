@@ -1,5 +1,6 @@
 import { Agent, AgentContext, AgentResponse } from "@/types/agents";
-import { findRelevantGLCodes, mightBeAboutGLCodes } from "@/lib/glUtils";
+import { findRelevantGLCodes, mightBeAboutGLCodes, isGLAccountCreationQuery, extractGLAccountInfoFromQuery, createGLAccount } from "@/lib/glUtils";
+import { isGLAccountCreationWithAI, extractGLAccountInfoWithAI, isJournalCreationWithAI, extractJournalEntryWithAI } from "@/lib/glAiExtraction";
 import { logAuditEvent } from "@/lib/auditLogger";
 import { 
   AIJournalEntry, 
@@ -16,7 +17,9 @@ import {
   extractJournalIdFromEditQuery,
   extractJournalIdFromReversalQuery,
   extractJournalEditDetails,
-  updateJournalEntry
+  updateJournalEntry,
+  findJournalsToPostWithAI,
+  detectSpecificJournalId
 } from "@/lib/journalUtils";
 import Anthropic from "@anthropic-ai/sdk";
 import { MessageParam } from "@anthropic-ai/sdk/resources/messages";
@@ -46,43 +49,60 @@ export class GLAgent implements Agent {
    * Determine if this agent can handle the given query
    */
   async canHandle(query: string): Promise<boolean> {
-    // 1. Check if this is a request about creating GL accounts
-    if (query.toLowerCase().includes('create gl account') || query.toLowerCase().includes('add gl account')) {
-      console.log("[GLAgent] Detected GL account creation query");
+    // Use AI to determine if this is a request about creating GL accounts
+    const isGLAccountCreation = await isGLAccountCreationWithAI(query);
+    if (isGLAccountCreation) {
+      console.log("[GLAgent] AI detected GL account creation query");
       return true;
     }
     
-    // 2. Check if this is a request to delete an attachment from a journal (check BEFORE attachment upload query)
+    // Use AI to determine if this is a request about creating journal entries
+    const isJournalCreation = await isJournalCreationWithAI(query);
+    if (isJournalCreation) {
+      console.log("[GLAgent] AI detected journal creation query");
+      return true;
+    }
+    
+    // For specialized journal operations, we'll still use pattern matching for now
+    // since these are more standardized operations
+    
+    // Check if this is a request to delete an attachment from a journal 
     if (isDeleteAttachmentQuery(query)) {
       console.log("[GLAgent] Detected attachment deletion query");
       return true;
     }
     
-    // 3. Check if this is a journal attachment upload request (check this AFTER deletion check but BEFORE journal creation)
+    // Check if this is a journal attachment upload request
     if (isJournalAttachmentQuery(query)) {
       console.log("[GLAgent] Detected journal attachment upload query");
       return true;
     }
     
-    // 3. Check if this is a journal posting request
+    // Check if this is a journal posting request
     if (isJournalPostingQuery(query)) {
       console.log("[GLAgent] Detected journal posting query");
       return true;
     }
     
-    // 4. Check if this is a journal summary request
+    // Check if this is a journal summary request
     if (isJournalSummaryQuery(query)) {
       console.log("[GLAgent] Detected journal summary query");
       return true;
     }
     
-    // 5. Check if this is a journal edit request
+    // Check if this is a journal edit request
     if (isJournalEditQuery(query)) {
       console.log("[GLAgent] Detected journal edit query");
       return true;
     }
     
-    // 5. Check if this is a request to create a journal entry (check this AFTER attachment query)
+    // Check if this is a journal reversal request
+    if (isJournalReversalQuery(query)) {
+      console.log("[GLAgent] Detected journal reversal query");
+      return true;
+    }
+    
+    // 5.2 Check if this is a request to create a journal entry (check this AFTER attachment query)
     if (this.canCreateJournals && isJournalCreationQuery(query)) {
       console.log("[GLAgent] Detected journal creation query");
       return true;
@@ -93,10 +113,243 @@ export class GLAgent implements Agent {
   }
 
   /**
+   * Check for and process any pending messages from other agents
+   * @param context The agent context
+   */
+  async checkPendingMessages(context: AgentContext): Promise<void> {
+    try {
+      // Import the agent communication functions dynamically to avoid circular dependencies
+      const { getPendingMessagesForAgent, respondToAgentMessage, MessageStatus } = await import('@/lib/agentCommunication');
+      
+      // Get pending messages for this agent
+      const pendingMessages = getPendingMessagesForAgent(this.id);
+      
+      if (pendingMessages.length === 0) {
+        return; // No pending messages to process
+      }
+      
+      console.log(`[GLAgent] Processing ${pendingMessages.length} pending messages`);
+      
+      // Process each message
+      for (const message of pendingMessages) {
+        console.log(`[GLAgent] Processing message: ${message.id}, action: ${message.action}`);
+        
+        // Update message status to processing
+        await respondToAgentMessage(message.id, MessageStatus.PROCESSING, {}, 'Processing request...');
+        
+        try {
+          // Handle different message actions
+          switch (message.action) {
+            case 'CREATE_GL_ACCOUNT':
+              await this.handleGLAccountCreationRequest(message, context);
+              break;
+              
+            default:
+              // Unknown action
+              await respondToAgentMessage(
+                message.id,
+                MessageStatus.REJECTED,
+                { error: 'Unknown action' },
+                `I don't know how to handle the action: ${message.action}`
+              );
+          }
+        } catch (error) {
+          console.error(`[GLAgent] Error processing message ${message.id}:`, error);
+          
+          // Mark message as failed
+          await respondToAgentMessage(
+            message.id,
+            MessageStatus.FAILED,
+            { error: error instanceof Error ? error.message : 'Unknown error' },
+            `Failed to process request: ${error instanceof Error ? error.message : 'Unknown error'}`
+          );
+          
+          // Log the error
+          await logAuditEvent({
+            user_id: message.userId,
+            action_type: "AGENT_MESSAGE_PROCESSING_ERROR",
+            entity_type: "AGENT_MESSAGE",
+            entity_id: message.id,
+            context: { error: error instanceof Error ? error.message : 'Unknown error', message },
+            status: "FAILURE",
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
+    } catch (error) {
+      console.error('[GLAgent] Error checking pending messages:', error);
+    }
+  }
+  
+  /**
+   * Handle a GL account creation request from another agent
+   * @param message The agent message
+   * @param context The agent context
+   */
+  private async handleGLAccountCreationRequest(message: any, context: AgentContext): Promise<void> {
+    const { respondToAgentMessage, MessageStatus } = await import('@/lib/agentCommunication');
+    
+    try {
+      console.log('[GLAgent] Handling GL account creation request:', message);
+      
+      // Extract account information from the message payload
+      const { 
+        expenseDescription, 
+        expenseType, 
+        suggestedName, 
+        accountType,
+        startingBalance,
+        balanceDate 
+      } = message.payload;
+      
+      // Validate required fields
+      if (!suggestedName || !accountType) {
+        throw new Error('Missing required fields for GL account creation');
+      }
+      
+      // Convert starting balance to number if provided
+      const initialBalance = startingBalance ? parseFloat(startingBalance) : undefined;
+      
+      // Generate a code for the account based on the type and description
+      let code = '';
+      let name = suggestedName;
+      
+      // Generate a code based on the account type and description
+      if (accountType === 'expense') {
+        // For expense accounts, use a 5000-5999 range
+        // Find an available code in the expense range
+        let startCode = 5000;
+        let endCode = 5999;
+        let availableCode = null;
+        
+        // First, get all existing expense account codes
+        const query = `
+          SELECT code FROM accounts 
+          WHERE LOWER(account_type) = 'expense' AND code ~ '^[0-9]+$'
+          AND CAST(code AS INTEGER) BETWEEN ${startCode} AND ${endCode}
+          ORDER BY CAST(code AS INTEGER) ASC
+        `;
+        
+        const result = await sql.query(query);
+        
+        if (result.rows.length > 0) {
+          // Convert to array of integers for easier processing
+          const existingCodes = result.rows.map(row => parseInt(row.code));
+          
+          // Find the first available code in the range
+          for (let i = startCode; i <= endCode; i++) {
+            if (!existingCodes.includes(i)) {
+              availableCode = i;
+              break;
+            }
+          }
+          
+          // If we found an available code, use it
+          if (availableCode) {
+            code = availableCode.toString();
+            console.log(`[GLAgent] Found available expense account code: ${code}`);
+          } else {
+            // If all codes in range are taken, use a different range
+            code = '6000';
+            console.log(`[GLAgent] All expense account codes in range ${startCode}-${endCode} are taken, using ${code}`);
+          }
+        } else {
+          // No existing expense accounts, start at the beginning of the range
+          code = startCode.toString();
+          console.log(`[GLAgent] No existing expense accounts, using code: ${code}`);
+        }
+      } else {
+        // For other account types, generate a code based on the type
+        // This is a simplified approach - in a real system, you'd have more logic here
+        const typeCodeMap: Record<string, string> = {
+          'asset': '1000',
+          'liability': '2000',
+          'equity': '3000',
+          'revenue': '4000',
+          'expense': '5000'
+        };
+        
+        code = typeCodeMap[accountType.toLowerCase()] || '9000';
+      }
+      
+      // Create notes from the description if available
+      const notes = expenseDescription 
+        ? `Account created for: ${expenseDescription}${expenseType ? ` (${expenseType})` : ''}` 
+        : `Account created by ${message.sender} agent`;
+      
+      // Create the GL account with optional starting balance
+      const result = await createGLAccount(
+        code, 
+        name, 
+        notes, 
+        message.userId, 
+        initialBalance, 
+        balanceDate
+      );
+      
+      if (result.success) {
+        // Respond with success
+        await respondToAgentMessage(
+          message.id,
+          MessageStatus.COMPLETED,
+          { account: result.account },
+          `Successfully created GL account: ${name} (${code})`
+        );
+        
+        // Log the successful account creation
+        await logAuditEvent({
+          user_id: message.userId,
+          action_type: "GL_ACCOUNT_CREATION",
+          entity_type: "ACCOUNT",
+          entity_id: result.account?.id?.toString() || 'unknown',
+          context: { message, account: result.account },
+          status: "SUCCESS",
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        // Respond with failure
+        await respondToAgentMessage(
+          message.id,
+          MessageStatus.FAILED,
+          { error: result.message },
+          `Failed to create GL account: ${result.message}`
+        );
+        
+        // Log the failed account creation
+        await logAuditEvent({
+          user_id: message.userId,
+          action_type: "GL_ACCOUNT_CREATION",
+          entity_type: "ACCOUNT",
+          entity_id: 'unknown',
+          context: { message, error: result.message },
+          status: "FAILURE",
+          timestamp: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      console.error('[GLAgent] Error handling GL account creation request:', error);
+      
+      // Respond with error
+      await respondToAgentMessage(
+        message.id,
+        MessageStatus.FAILED,
+        { error: error instanceof Error ? error.message : 'Unknown error' },
+        `Error creating GL account: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      
+      // Re-throw the error to be handled by the caller
+      throw error;
+    }
+  }
+
+  /**
    * Process GL-related requests
    */
   async processRequest(context: AgentContext): Promise<AgentResponse> {
     console.log(`[GLAgent] Processing request: ${context.query}`);
+    
+    // Check for pending messages from other agents
+    await this.checkPendingMessages(context);
     
     try {
       // 1. Log the start of processing
@@ -110,13 +363,11 @@ export class GLAgent implements Agent {
         timestamp: new Date().toISOString()
       });
       
-      // 2. Check for GL account creation
-      if (context.query.toLowerCase().includes('create gl account') || context.query.toLowerCase().includes('add gl account')) {
-        // Not implemented here, future enhancement
-        return {
-          success: true,
-          message: "Creating GL accounts isn't supported yet through the chat interface. Please use the Chart of Accounts section in the dashboard."
-        };
+      // 2. Check for GL account creation using AI
+      const isGLAccountCreation = await isGLAccountCreationWithAI(context.query);
+      if (isGLAccountCreation) {
+        console.log("[GLAgent] Handling GL account creation request with AI");
+        return await this.handleGLAccountCreation(context);
       }
       
       // 3. Check if this is an attachment deletion request (check FIRST)
@@ -131,17 +382,25 @@ export class GLAgent implements Agent {
       
       // 4. Check if this is a journal posting request
       if (isJournalPostingQuery(context.query)) {
+        console.log("[GLAgent] Handling journal posting request");
         return await this.handleJournalPosting(context);
       }
       
-      // 5. Check if this is a journal edit request
-      if (isJournalEditQuery(context.query)) {
-        return await this.handleJournalEdit(context);
+      // IMPORTANT: Check if this is a journal reversal request BEFORE checking edit request
+      // because some patterns could overlap
+      console.log("[GLAgent] Checking if this is a journal reversal request: " + context.query);
+      const isReversal = isJournalReversalQuery(context.query);
+      console.log("[GLAgent] Is journal reversal request: " + isReversal);
+      
+      if (isReversal) {
+        console.log("[GLAgent] Handling journal reversal request");
+        return await this.handleJournalReversal(context);
       }
       
-      // 5.1 Check if this is a journal reversal request
-      if (isJournalReversalQuery(context.query)) {
-        return await this.handleJournalReversal(context);
+      // 5. Check if this is a journal edit request (check AFTER reversal)
+      if (isJournalEditQuery(context.query)) {
+        console.log("[GLAgent] Handling journal edit request");
+        return await this.handleJournalEdit(context);
       }
       
       // 5. Check if this is a journal summary request
@@ -149,8 +408,10 @@ export class GLAgent implements Agent {
         return await this.handleJournalSummary(context);
       }
       
-      // 6. Check if this is a journal creation request (check this AFTER attachment query)
-      if (this.canCreateJournals && isJournalCreationQuery(context.query)) {
+      // 6. Check if this is a journal creation request using AI
+      const isJournalCreation = await isJournalCreationWithAI(context.query);
+      if (this.canCreateJournals && isJournalCreation) {
+        console.log("[GLAgent] Handling journal creation request with AI");
         return await this.handleJournalCreation(context);
       }
       
@@ -307,20 +568,19 @@ Make sure the journal entry is valid - debits must equal credits. Every line mus
    */
   /**
    * Handle journal posting requests from the user
-   * Marks unposted journal entries as posted
+   * Marks unposted journal entries as posted using AI to determine which journals to post
    */
   private async handleJournalPosting(context: AgentContext): Promise<AgentResponse> {
     try {
-      // Check if the request is for a specific journal ID
-      const idMatch = context.query.match(/\b(id|number|#)\s*(\d+)\b/i);
-      let journalIds: number[] = [];
+      console.log(`[GLAgent] Handling journal posting request: "${context.query}"`);
       
-      if (idMatch && idMatch[2]) {
-        // Handle posting a specific journal by ID
-        const specificId = parseInt(idMatch[2]);
-        console.log(`[GLAgent] Attempting to post specific journal ID: ${specificId}`);
+      // First, use AI to check for a specific journal ID in the query
+      const specificId = await detectSpecificJournalId(context.query);
+      
+      if (specificId !== null) {
+        console.log(`[GLAgent] AI detected specific journal ID in query: ${specificId}`);
         
-        // Check if this journal exists and is unposted
+        // Verify journal exists and is unposted
         const journalCheck = await sql`
           SELECT id, is_posted FROM journals 
           WHERE id = ${specificId} AND is_deleted = false
@@ -340,26 +600,94 @@ Make sure the journal entry is valid - debits must equal credits. Every line mus
           };
         }
         
-        // Use only this specific ID
-        journalIds = [specificId];
-      } else {
-        // Handle posting all unposted journals
-        const unpostedJournals = await sql`
-          SELECT id FROM journals 
-          WHERE is_posted = false AND is_deleted = false
-          ORDER BY date DESC
+        // Process just this one specific journal
+        const postedDate = new Date().toISOString();
+        
+        // Mark the journal as posted
+        await sql`
+          UPDATE journals 
+          SET is_posted = true
+          WHERE id = ${specificId}
         `;
         
-        // Check if there are any unposted journals
-        if (unpostedJournals.rows.length === 0) {
-          return {
-            success: true,
-            message: "There are no unposted journal entries to post at this time."
-          };
-        }
+        // Log the journal posting action
+        await logAuditEvent({
+          user_id: context.userId,
+          action_type: "POST_JOURNAL",
+          entity_type: "JOURNAL",
+          entity_id: specificId.toString(),
+          context: { postedDate, agentId: this.id },
+          status: "SUCCESS",
+          timestamp: new Date().toISOString()
+        });
         
-        // Use all unposted journal IDs
-        journalIds = unpostedJournals.rows.map(row => row.id);
+        return {
+          success: true,
+          message: `Success! I've posted journal entry #${specificId}.`
+        };
+      }
+      
+      // Use AI to determine which journals the user wants to post if no specific ID was found
+      const aiJournalIds = await findJournalsToPostWithAI(context.query);
+      let journalIds: number[] = [];
+      
+      // Check if AI was able to identify any journals
+      if (aiJournalIds.length > 0) {
+        console.log(`[GLAgent] AI identified journals to post: ${aiJournalIds.join(', ')}`);
+        journalIds = aiJournalIds;
+      } else {
+        // Fallback to the traditional approach if AI couldn't identify journals
+        console.log(`[GLAgent] AI couldn't identify journals, falling back to traditional approach`);
+        
+        // Old pattern as a last resort
+        const idMatch = context.query.match(/\b(id|number|#)\s*(\d+)\b/i);
+        
+        if (idMatch && idMatch[2]) {
+          // Handle posting a specific journal by ID
+          const specificId = parseInt(idMatch[2]);
+          console.log(`[GLAgent] Attempting to post specific journal ID: ${specificId}`);
+          
+          // Check if this journal exists and is unposted
+          const journalCheck = await sql`
+            SELECT id, is_posted FROM journals 
+            WHERE id = ${specificId} AND is_deleted = false
+          `;
+          
+          if (journalCheck.rows.length === 0) {
+            return {
+              success: false,
+              message: `I couldn't find journal entry with ID ${specificId}. It may not exist or has been deleted.`
+            };
+          }
+          
+          if (journalCheck.rows[0].is_posted) {
+            return {
+              success: false,
+              message: `Journal entry with ID ${specificId} is already posted.`
+            };
+          }
+          
+          // Use only this specific ID
+          journalIds = [specificId];
+        } else {
+          // For general posting requests, get unposted journals
+          const unpostedJournals = await sql`
+            SELECT id FROM journals 
+            WHERE is_posted = false AND is_deleted = false
+            ORDER BY transaction_date DESC
+          `;
+          
+          // Check if there are any unposted journals
+          if (unpostedJournals.rows.length === 0) {
+            return {
+              success: true,
+              message: "There are no unposted journal entries to post at this time."
+            };
+          }
+          
+          // Use all unposted journal IDs
+          journalIds = unpostedJournals.rows.map(row => row.id);
+        }
       }
 
       const postedDate = new Date().toISOString();
@@ -483,55 +811,146 @@ Make sure the journal entry is valid - debits must equal credits. Every line mus
       const today = new Date().toISOString().split('T')[0];
       const reversalMemo = `Reversal of Journal #${journalId}: ${originalJournal.memo}`;
       
-      // 3a. Insert the new journal header with reversal relationship
-      const { rows: newJournalRows } = await sql`
-        INSERT INTO journals (
-          memo, 
-          transaction_date, 
-          created_by, 
-          created_at,
-          source,
-          reference_number,
-          reversal_of_journal_id
-        ) VALUES (
-          ${reversalMemo}, 
-          ${today}, 
-          ${context.userId}, 
-          NOW(),
-          'AI Assistant',
-          ${`REV-${journalId}`},
-          ${journalId}
-        )
-        RETURNING id
+      // Ensure the reversal columns exist in the journals table and check which date column exists
+      const { rows: columnRows } = await sql`
+        SELECT 
+          EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'reversal_of_journal_id') as has_reversal_of_journal_id,
+          EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'reversed_by_journal_id') as has_reversed_by_journal_id,
+          EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'date') as has_date_column,
+          EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transaction_date') as has_transaction_date_column
       `;
       
-      const newJournalId = newJournalRows[0].id;
-      
-      // 3b. Insert reversed line items
-      for (const line of lineRows) {
+      // Add missing columns if needed
+      if (!columnRows[0].has_reversal_of_journal_id || !columnRows[0].has_reversed_by_journal_id) {
         await sql`
-          INSERT INTO journal_lines (
-            journal_id,
-            account_id,
-            description,
-            debit,
-            credit
-          ) VALUES (
-            ${newJournalId},
-            ${line.account_id},
-            ${`Reversal of ${line.description || 'entry'}`},
-            ${line.credit}, -- Swap debit and credit
-            ${line.debit}   -- Swap debit and credit
-          )
+          DO $$
+          BEGIN
+            -- Add reversal_of_journal_id column if it doesn't exist
+            IF NOT EXISTS (
+              SELECT FROM information_schema.columns 
+              WHERE table_name = 'journals' AND column_name = 'reversal_of_journal_id'
+            ) THEN
+              ALTER TABLE journals ADD COLUMN reversal_of_journal_id INTEGER REFERENCES journals(id);
+            END IF;
+
+            -- Add reversed_by_journal_id column if it doesn't exist
+            IF NOT EXISTS (
+              SELECT FROM information_schema.columns 
+              WHERE table_name = 'journals' AND column_name = 'reversed_by_journal_id'
+            ) THEN
+              ALTER TABLE journals ADD COLUMN reversed_by_journal_id INTEGER REFERENCES journals(id);
+            END IF;
+          END
+          $$;
         `;
       }
       
-      // 3c. Update the original journal with reversed_by_journal_id
-      await sql`
-        UPDATE journals
-        SET reversed_by_journal_id = ${newJournalId}
-        WHERE id = ${journalId}
-      `;
+      // Determine which date column to use based on schema check
+      const dateColumnName = columnRows[0].has_date_column ? 'date' : 
+                            columnRows[0].has_transaction_date_column ? 'transaction_date' : 
+                            null;
+
+      // 3a. Insert the new journal header with reversal_of_journal_id set
+      // Make the SQL statement dynamically based on column availability
+      let newJournalRows;
+      
+      if (!dateColumnName) {
+        // If no date column is found, use a minimal insert
+        const result = await sql`
+          INSERT INTO journals (
+            memo, 
+            created_by, 
+            source,
+            reversal_of_journal_id
+          ) VALUES (
+            ${reversalMemo}, 
+            ${context.userId}, 
+            'AI Assistant',
+            ${journalId}
+          )
+          RETURNING id
+        `;
+        newJournalRows = result.rows;
+      } else {
+        // Use the appropriate date column based on schema check
+        if (dateColumnName === 'date') {
+          const result = await sql`
+            INSERT INTO journals (
+              memo, 
+              date, 
+              created_by, 
+              source,
+              reversal_of_journal_id
+            ) VALUES (
+              ${reversalMemo}, 
+              ${today}, 
+              ${context.userId}, 
+              'AI Assistant',
+              ${journalId}
+            )
+            RETURNING id
+          `;
+          newJournalRows = result.rows;
+        } else { // transaction_date
+          const result = await sql`
+            INSERT INTO journals (
+              memo, 
+              transaction_date, 
+              created_by, 
+              source,
+              reversal_of_journal_id
+            ) VALUES (
+              ${reversalMemo}, 
+              ${today}, 
+              ${context.userId}, 
+              'AI Assistant',
+              ${journalId}
+            )
+            RETURNING id
+          `;
+          newJournalRows = result.rows;
+        }
+      }
+      
+      const newJournalId = newJournalRows[0].id;
+      
+      // 3b. Insert all reversed line items in a single SQL statement to maintain balance
+      try {
+        // Begin a transaction
+        await sql`BEGIN;`;
+        
+        // Create VALUES portion for a batch insert
+        const valuesSql = lineRows.map(line => 
+          `(${newJournalId}, ${line.account_id}, 'Reversal of ${line.description || 'entry'}', ${line.credit}, ${line.debit})`
+        ).join(',');
+        
+        // Execute a single batch insert for all journal lines to maintain balance in one operation
+        if (lineRows.length > 0) {
+          await sql.query(`
+            INSERT INTO journal_lines (
+              journal_id,
+              account_id,
+              description,
+              debit,
+              credit
+            ) VALUES ${valuesSql};
+          `);
+        }
+        
+        // Update the original journal entry to reference this reversal
+        await sql`
+          UPDATE journals 
+          SET reversed_by_journal_id = ${newJournalId}
+          WHERE id = ${journalId}
+        `;
+        
+        // Commit the transaction if everything was successful
+        await sql`COMMIT;`;
+      } catch (error) {
+        // Roll back the transaction if any operation fails
+        await sql`ROLLBACK;`;
+        throw error; // Re-throw the error after rollback
+      }
       
       // Log success
       await logAuditEvent({
@@ -1576,6 +1995,102 @@ First explain the journal entry you're creating with a clear explanation of why 
     } catch (error: any) {
       console.error("[GLAgent] Attachment upload error:", error);
       return { success: false, message: "Sorry, I couldn't upload the attachment." };
+    }
+  }
+
+  /**
+   * Handle GL account creation requests
+   */
+  private async handleGLAccountCreation(context: AgentContext): Promise<AgentResponse> {
+    try {
+      // Extract account details from the query
+      const accountInfo = extractGLAccountInfoFromQuery(context.query);
+      console.log('[GLAgent] Extracted account info:', accountInfo);
+      
+      // Log audit event
+      await logAuditEvent({
+        user_id: context.userId || 'unknown',
+        action_type: "GL_ACCOUNT_CREATION",
+        entity_type: "GL_ACCOUNT",
+        entity_id: accountInfo.code || 'unknown',
+        context: { query: context.query, accountInfo },
+        status: "ATTEMPT",
+        timestamp: new Date().toISOString()
+      });
+      
+      // Check if we have enough information
+      if (!accountInfo.code || !accountInfo.name) {
+        // Missing information, ask the user for more details
+        const missingFields = [];
+        if (!accountInfo.code) missingFields.push('account code (a numeric code)');
+        if (!accountInfo.name) missingFields.push('account name or description');
+        
+        await logAuditEvent({
+          user_id: context.userId || 'unknown',
+          action_type: "GL_ACCOUNT_CREATION",
+          entity_type: "GL_ACCOUNT",
+          entity_id: 'unknown',
+          context: { query: context.query, accountInfo, status: "MISSING_INFO" },
+          status: "FAILURE",
+          timestamp: new Date().toISOString()
+        });
+        
+        return {
+          success: false,
+          message: `To create a new GL account, I need the following information: ${missingFields.join(' and ')}. Please provide these details.`
+        };
+      }
+      
+      // We have all required information, proceed with account creation
+      const result = await createGLAccount(
+        accountInfo.code,
+        accountInfo.name,
+        accountInfo.notes,
+        context.userId
+      );
+      
+      // Log the result
+      await logAuditEvent({
+        user_id: context.userId || 'unknown',
+        action_type: "GL_ACCOUNT_CREATION",
+        entity_type: "GL_ACCOUNT",
+        entity_id: accountInfo.code,
+        context: { query: context.query, accountInfo, result },
+        status: result.success ? "SUCCESS" : "FAILURE",
+        timestamp: new Date().toISOString()
+      });
+      
+      if (!result.success) {
+        return {
+          success: false,
+          message: result.message || 'Failed to create the GL account. Please try again.'
+        };
+      }
+      
+      return {
+        success: true,
+        message: result.message || `GL account ${accountInfo.code} - ${accountInfo.name} has been created successfully.`
+      };
+      
+    } catch (error) {
+      console.error('[GLAgent] Error in GL account creation:', error);
+      
+      // Log the error
+      await logAuditEvent({
+        user_id: context.userId || 'unknown',
+        action_type: "GL_ACCOUNT_CREATION",
+        entity_type: "GL_ACCOUNT",
+        entity_id: 'unknown',
+        context: { query: context.query, errorType: "ERROR" },
+        status: "FAILURE",
+        error_details: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString()
+      });
+      
+      return {
+        success: false,
+        message: `I encountered an error while trying to create the GL account: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
     }
   }
 }

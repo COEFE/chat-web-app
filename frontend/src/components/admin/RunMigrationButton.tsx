@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, Database } from "lucide-react";
 import { getAuth } from "firebase/auth";
@@ -32,6 +32,8 @@ export function RunMigrationButton({
 }: RunMigrationButtonProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
   const [results, setResults] = useState<{
     success: boolean;
     message: string;
@@ -39,21 +41,104 @@ export function RunMigrationButton({
     details?: string;
   } | null>(null);
   const { toast } = useToast();
+  
+  // Check authentication status when component mounts
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        setAuthChecking(true);
+        const auth = getAuth();
+        const user = auth.currentUser;
+        
+        if (user) {
+          try {
+            // Verify we can get a token
+            const token = await user.getIdToken();
+            if (token) {
+              setIsAuthenticated(true);
+              console.log('User authenticated for database migrations');
+            }
+          } catch (error) {
+            console.error('Error getting auth token:', error);
+            setIsAuthenticated(false);
+          }
+        } else {
+          console.log('No user is currently signed in');
+          setIsAuthenticated(false);
+        }
+      } catch (error) {
+        console.error('Error checking authentication:', error);
+        setIsAuthenticated(false);
+      } finally {
+        setAuthChecking(false);
+      }
+    };
+    
+    checkAuth();
+  }, []);
 
   const handleRunMigration = async () => {
     setIsRunning(true);
     setResults(null);
     
     try {
+      // Check authentication first
+      if (!isAuthenticated) {
+        // Try to refresh authentication
+        const auth = getAuth();
+        const user = auth.currentUser;
+        
+        if (!user) {
+          toast({
+            title: "Authentication Error",
+            description: "You must be logged in to run database migrations. Please refresh the page and try again.",
+            variant: "destructive",
+          });
+          setIsRunning(false);
+          return;
+        }
+        
+        try {
+          await user.getIdToken(true); // Force token refresh
+          setIsAuthenticated(true);
+        } catch (error) {
+          toast({
+            title: "Authentication Error",
+            description: "Failed to refresh authentication. Please log out and log back in.",
+            variant: "destructive",
+          });
+          setIsRunning(false);
+          return;
+        }
+      }
+      
       // Get authorization token
       const auth = getAuth();
       const user = auth.currentUser;
       
       if (!user) {
-        throw new Error("You must be logged in to run database migrations");
+        toast({
+          title: "Authentication Error",
+          description: "You must be logged in to run database migrations. Please refresh the page and try again.",
+          variant: "destructive",
+        });
+        setIsRunning(false);
+        return;
       }
       
-      const token = await user.getIdToken();
+      let token;
+      try {
+        token = await user.getIdToken();
+      } catch (error) {
+        console.error("Error getting token:", error);
+        toast({
+          title: "Authentication Error",
+          description: "Failed to get authentication token. Please refresh the page and try again.",
+          variant: "destructive",
+        });
+        setIsRunning(false);
+        return;
+      }
       
       const response = await fetch("/api/db-migrations/run", {
         method: "POST",
@@ -108,12 +193,22 @@ export function RunMigrationButton({
       <Button
         variant={variant}
         onClick={() => setShowDialog(true)}
-        disabled={isRunning || disabled}
+        disabled={isRunning || authChecking || !isAuthenticated || disabled}
       >
         {isRunning ? (
           <>
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             Running Migration...
+          </>
+        ) : authChecking ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Checking Authentication...
+          </>
+        ) : !isAuthenticated ? (
+          <>
+            <Database className="mr-2 h-4 w-4" />
+            Authentication Required
           </>
         ) : (
           <>

@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     
     // Construct path to migration file
     const migrationsDir = path.join(process.cwd(), 'src', 'app', 'api', 'db-migrations');
-    const filename = '026_create_audit_logs_table.sql';
+    const filename = '035_recreate_audit_logs_table.sql';
     const filePath = path.join(migrationsDir, filename);
     
     if (!fs.existsSync(filePath)) {

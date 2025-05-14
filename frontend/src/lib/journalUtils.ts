@@ -1,5 +1,6 @@
 import { Journal, JournalLine, createJournal } from '@/lib/accounting/journalQueries';
 import { sql } from '@vercel/postgres';
+import Anthropic from "@anthropic-ai/sdk";
 
 /**
  * Interface for a simplified journal entry structure that AI can generate
@@ -75,6 +76,149 @@ export async function findAccountByNameOrCode(accountSearch: string): Promise<{i
 }
 
 /**
+ * Find an account using AI-powered matching
+ * @param accountSearch - Account name or keyword to search for
+ * @param transactionContext - Additional context about the transaction
+ * @param isDebit - Whether this is a debit entry
+ */
+export async function findAccountWithAI(
+  accountSearch: string, 
+  transactionContext: string, 
+  isDebit: boolean
+): Promise<{id: number, name: string, code: string} | null> {
+  // First try the existing database search methods
+  const exactMatch = await findAccountByNameOrCode(accountSearch);
+  if (exactMatch) {
+    console.log(`[journalUtils] Found exact account match: ${exactMatch.code}: ${exactMatch.name}`);
+    return exactMatch;
+  }
+  
+  // If no exact match, use AI to find the most appropriate account
+  console.log(`[journalUtils] Using AI to find appropriate account for: "${accountSearch}"`);
+  
+  try {
+    const anthropic = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || "",
+    });
+    
+    // Get all available accounts for context
+    const availableAccounts = await getAccounts();
+    
+    if (availableAccounts.length === 0) {
+      console.log('[journalUtils] No accounts available for AI matching');
+      return await findFallbackAccount(isDebit ? 'expense' : 'revenue');
+    }
+    
+    // Limit to a reasonable number of accounts to avoid token limitations
+    const accountsForContext = availableAccounts.slice(0, 30);
+    
+    const response = await anthropic.messages.create({
+      model: "claude-3-5-sonnet-20240620",
+      max_tokens: 150,
+      temperature: 0.1,
+      system: `You are an accounting AI that matches transaction descriptions to the most appropriate account.
+      Given a transaction description and a list of available accounts, identify the most suitable account.
+      Consider accounting principles and whether the amount is a debit or credit.
+      
+      Respond ONLY with the account code that best matches. Just the code, nothing else.`,
+      messages: [
+        { 
+          role: "user", 
+          content: `
+            Transaction: "${accountSearch}"
+            Transaction context: "${transactionContext}"
+            Is debit: ${isDebit ? "Yes" : "No"}
+            
+            Available accounts:
+            ${accountsForContext.map(a => `Code: ${a.code}, Name: ${a.name}, Type: ${a.account_type}`).join('\n')}
+            
+            What is the most appropriate account code for this transaction?
+          `
+        }
+      ]
+    });
+    
+    const responseText = typeof response.content[0] === 'object' && 'text' in response.content[0] ? response.content[0].text : '';
+    
+    // Extract just the account code (remove any extra text)
+    const accountCode = responseText.replace(/[^0-9a-zA-Z-]/g, '').trim();
+    
+    if (accountCode) {
+      // Find the account with this code
+      const account = availableAccounts.find(a => a.code === accountCode);
+      if (account) {
+        console.log(`[journalUtils] AI selected account ${account.code}: ${account.name}`);
+        return { id: account.id, name: account.name, code: account.code };
+      }
+    }
+    
+    // If AI couldn't find a match, log and fall back to the existing fallback logic
+    console.log(`[journalUtils] AI could not find a matching account, falling back to type-based matching`);
+    return await findFallbackAccount(isDebit ? 'expense' : 'revenue'); 
+  } catch (error) {
+    console.error('[journalUtils] Error using AI for account matching:', error);
+    return await findFallbackAccount(); // Fall back to existing method
+  }
+}
+
+/**
+ * Find a fallback account when the exact match isn't found
+ * @param accountType - Optional type of account to look for
+ */
+export async function findFallbackAccount(accountType?: 'cash' | 'revenue' | 'expense'): Promise<{id: number, name: string, code: string} | null> {
+  try {
+    let query = '';
+    
+    if (accountType === 'cash') {
+      // Look for cash or bank accounts
+      query = `
+        SELECT id, name, code
+        FROM accounts
+        WHERE LOWER(name) LIKE '%cash%' OR LOWER(name) LIKE '%bank%' OR 
+              LOWER(account_type) = 'asset' AND (LOWER(name) LIKE '%checking%' OR LOWER(name) LIKE '%operating%')
+        LIMIT 1
+      `;
+    } else if (accountType === 'revenue') {
+      // Look for revenue/income accounts
+      query = `
+        SELECT id, name, code
+        FROM accounts
+        WHERE LOWER(account_type) = 'revenue' OR 
+              LOWER(name) LIKE '%sales%' OR LOWER(name) LIKE '%revenue%' OR LOWER(name) LIKE '%income%'
+        LIMIT 1
+      `;
+    } else if (accountType === 'expense') {
+      // Look for expense accounts
+      query = `
+        SELECT id, name, code
+        FROM accounts
+        WHERE LOWER(account_type) = 'expense' OR
+              LOWER(name) LIKE '%expense%' OR LOWER(name) LIKE '%cost%'
+        LIMIT 1
+      `;
+    } else {
+      // Generic fallback - try to find any account
+      query = `
+        SELECT id, name, code
+        FROM accounts
+        LIMIT 1
+      `;
+    }
+    
+    const result = await sql.query(query);
+    
+    if (result.rows.length > 0) {
+      return result.rows[0] as {id: number, name: string, code: string};
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("[journalUtils] Error finding fallback account:", error);
+    return null;
+  }
+}
+
+/**
  * Get all active accounts from the database
  */
 export async function getAccounts(): Promise<{id: number, name: string, code: string, account_type: string}[]> {
@@ -115,13 +259,24 @@ export async function convertAIJournalToSystem(aiJournal: AIJournalEntry, userId
       throw new Error(`Journal line ${i+1} must have either a debit or credit value`);
     }
     
-    // Find the account
-    const account = await findAccountByNameOrCode(line.account_code_or_name);
+    // Determine if this is a debit or credit line
+    const isDebit = line.debit !== undefined && line.debit > 0;
     
+    // Use AI to find the most appropriate account
+    // Pass the full journal memo as transaction context for better matching
+    const account = await findAccountWithAI(
+      line.account_code_or_name,
+      aiJournal.memo || '',
+      isDebit
+    );
+    
+    // If no account found, add to missing accounts
     if (!account) {
       missingAccounts.push(line.account_code_or_name);
       continue;
     }
+    
+    console.log(`[journalUtils] Using account ${account.code}: ${account.name} for '${line.account_code_or_name}'`);
     
     // Add to running totals for balance check
     totalDebits += line.debit || 0;
@@ -331,34 +486,216 @@ export function isJournalSummaryQuery(message: string): boolean {
 }
 
 /**
+ * Get recent unposted journal entries
+ * @param limit - Maximum number of journals to return (default: 20)
+ */
+export async function getUnpostedJournals(limit: number = 20): Promise<{ id: number, transaction_date: string, memo: string, total_debits: number }[]> {
+  try {
+    const query = `
+      SELECT id, transaction_date, memo, total_debits
+      FROM journals
+      WHERE is_posted = false AND is_deleted = false
+      ORDER BY transaction_date DESC, id DESC
+      LIMIT $1
+    `;
+    
+    const result = await sql.query(query, [limit]);
+    return result.rows;
+  } catch (error) {
+    console.error('[journalUtils] Error fetching unposted journals:', error);
+    return [];
+  }
+}
+
+/**
+ * Use AI to detect if the user is requesting a specific journal ID
+ * @param query - The user's query about posting journals
+ * @returns The specific journal ID if detected, or null if not
+ */
+export async function detectSpecificJournalId(query: string): Promise<number | null> {
+  console.log(`[journalUtils] Using AI to detect specific journal ID in: "${query}"`);
+  
+  try {
+    const anthropic = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || "",
+    });
+    
+    const response = await anthropic.messages.create({
+      model: "claude-3-5-sonnet-20240620",
+      max_tokens: 100,
+      temperature: 0.1,
+      system: `You extract the specific journal ID when a user is requesting to post a specific journal entry. 
+      You ONLY respond with a single number or "null" if no specific journal ID is mentioned.
+      - Return ONLY the numeric ID if the user is clearly asking about a specific journal ID.
+      - Return "null" if the user is making a general request about multiple journals, all journals, or recent journals.
+      - DO NOT include any other text, explanation or JSON formatting in your response.`,
+      messages: [{ role: "user", content: `Query: "${query}"` }]
+    });
+    
+    const responseText = typeof response.content[0] === 'object' && 'text' in response.content[0] ? response.content[0].text.trim() : '';
+    
+    if (responseText === "null" || responseText === "") {
+      console.log(`[journalUtils] No specific journal ID detected`);
+      return null;
+    }
+    
+    const journalId = parseInt(responseText, 10);
+    if (!isNaN(journalId)) {
+      console.log(`[journalUtils] Detected specific journal ID: ${journalId}`);
+      
+      // Verify this journal exists and is unposted
+      const verifyQuery = `
+        SELECT id FROM journals 
+        WHERE id = $1 AND is_posted = false AND is_deleted = false
+      `;
+      
+      const verifyResult = await sql.query(verifyQuery, [journalId]);
+      if (verifyResult.rows.length > 0) {
+        console.log(`[journalUtils] Verified journal ID ${journalId} exists and is unposted`);
+        return journalId;
+      } else {
+        console.log(`[journalUtils] Journal ID ${journalId} not found or already posted`);
+        // Return the ID anyway, so we can generate an appropriate error message
+        return journalId;
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('[journalUtils] Error detecting specific journal ID:', error);
+    return null;
+  }
+}
+
+/**
+ * Find journals to post using AI-powered matching
+ * @param query - The user's query about posting journals
+ */
+export async function findJournalsToPostWithAI(query: string): Promise<number[]> {
+  console.log(`[journalUtils] Using AI to find journals to post from: "${query}"`);
+  
+  try {
+    // First, check for specific journal ID using AI
+    const specificJournalId = await detectSpecificJournalId(query);
+    
+    if (specificJournalId !== null) {
+      // Before returning the ID, verify it exists and is unposted
+      const verifyQuery = `
+        SELECT id FROM journals 
+        WHERE id = $1 AND is_posted = false AND is_deleted = false
+      `;
+      
+      const verifyResult = await sql.query(verifyQuery, [specificJournalId]);
+      if (verifyResult.rows.length > 0) {
+        console.log(`[journalUtils] Verified journal ID ${specificJournalId} exists and is unposted`);
+        return [specificJournalId];
+      } else {
+        console.log(`[journalUtils] Journal ID ${specificJournalId} not found or already posted`);
+      }
+    }
+    
+    // If no specific ID match or ID wasn't found, continue with AI approach
+    // Get recent unposted journals
+    const unpostedJournals = await getUnpostedJournals(20);
+    
+    if (unpostedJournals.length === 0) {
+      console.log('[journalUtils] No unposted journals available');
+      return [];
+    }
+    
+    const anthropic = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || "",
+    });
+    
+    const response = await anthropic.messages.create({
+      model: "claude-3-5-sonnet-20240620",
+      max_tokens: 250,
+      temperature: 0.1,
+      system: `You help identify which journal entries a user wants to post based on their natural language request.
+      Given a list of unposted journals and a user query, determine which journals the user likely wants to post.
+      Consider dates, amounts, descriptions, and any identifying information in the query.
+      
+      Respond with ONLY the journal IDs that match the user's intent, as a JSON array.`,
+      messages: [
+        { 
+          role: "user", 
+          content: `
+            User query: "${query}"
+            
+            Available unposted journals:
+            ${unpostedJournals.map(j => 
+              `ID: ${j.id}, Date: ${j.transaction_date}, Memo: ${j.memo}, Amount: $${j.total_debits}`
+            ).join('\n')}
+            
+            Which journal IDs should be posted based on the query?
+          `
+        }
+      ]
+    });
+    
+    const responseText = typeof response.content[0] === 'object' && 'text' in response.content[0] ? response.content[0].text : '';
+    
+    try {
+      // Extract JSON array from response
+      const match = responseText.match(/\[\s*(\d+(?:\s*,\s*\d+)*)\s*\]/);
+      if (match) {
+        const journalIds = JSON.parse(match[0]) as number[];
+        console.log(`[journalUtils] AI identified journals to post: ${journalIds.join(', ')}`);
+        return journalIds;
+      }
+    } catch (error) {
+      console.error('[journalUtils] Error parsing journal IDs:', error);
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('[journalUtils] Error finding journals to post:', error);
+    return [];
+  }
+}
+
+/**
  * Determine if a message is asking to post journal entries
  * @param message - The user's message
  */
 export function isJournalPostingQuery(message: string): boolean {
+  // Normalize message
   const normalizedMessage = message.toLowerCase();
   
-  // First, check for specific journal ID posting pattern
-  // This handles requests like "post journal entry with ID 78"
-  const idPattern = /post\s+(journal|entry|je)\s+(with\s+id|id|number|#)\s*\d+/i;
-  if (idPattern.test(message)) {
-    return true;
-  }
-  
-  // List of keywords that suggest the user wants to post journal entries
-  const postingKeywords = [
-    'post journal', 'post journals', 'post entries', 'post entry', 
-    'publish journal', 'publish journals', 'publish entries',
-    'finalize journal', 'finalize journals', 'finalize entries',
-    'mark journal as posted', 'mark journals as posted',
-    'move to posted', 'submit journal', 'submit journals',
-    'approve journal', 'approve journals',
-    'post unposted', 'post the unposted', 'post all unposted',
-    'post je', 'post this je', 'post the je', 'post j/e',
-    'finalize je', 'approve je', 'submit je',
-    'post all je', 'post these je'
+  // Patterns for journal posting requests
+  const journalPostPatterns = [
+    /post\s+(all\s+|the\s+|all\s+the\s+)?(journal|entry|entries)/i,
+    /mark\s+(journal|entry|entries).+posted/i,
+    /finalize\s+(journal|entry|entries)/i,
+    /approve\s+(journal|entry|entries)/i,
+    /confirm\s+(journal|entry|entries)/i,
+    /complete\s+(journal|entry|entries)/i,
   ];
   
-  return postingKeywords.some(keyword => normalizedMessage.includes(keyword));
+  // Check for ID numbers in posting requests
+  const journalIdPostPatterns = [
+    /post\s+(journal|entry|entries)\s+#?(\d+)/i,
+    /post\s+#?(\d+)/i,
+  ];
+  
+  // Check for general posting patterns
+  const hasGeneralPostPattern = journalPostPatterns.some(pattern => 
+    pattern.test(normalizedMessage)
+  );
+  
+  // Check for ID-specific posting patterns
+  const hasIdPostPattern = journalIdPostPatterns.some(pattern => 
+    pattern.test(normalizedMessage)
+  );
+  
+  // Additional string-based keywords check
+  const stringKeywords = [
+    'post all je', 'post these je', 'post journal entry', 'post unposted',
+    'finalize journal', 'mark as posted', 'post all journals'
+  ];
+  const hasKeyword = stringKeywords.some(keyword => normalizedMessage.includes(keyword));
+  
+  return hasGeneralPostPattern || hasIdPostPattern || hasKeyword;
 }
 
 /**
@@ -673,16 +1010,40 @@ export function extractJournalEditDetails(message: string): {
  */
 export function isJournalReversalQuery(message: string): boolean {
   const normalized = message.toLowerCase();
+  console.log(`[DEBUG] isJournalReversalQuery checking: "${normalized}"`);
   
+  // Super simple pattern that should catch all variations
+  if (/(reverse|reversal|cancel|undo|offset).*?(journal|entry).*?(\d+)|(journal|entry).*?(\d+).*?(reverse|reversal|cancel|undo|offset)/i.test(normalized)) {
+    console.log(`[DEBUG] Found journal reversal match with simple pattern`);
+    return true;
+  }
+  
+  // More specific patterns as fallback
   const reversalPatterns = [
-    /reverse\s+(journal|entry)\s+(#|number|)\s*(\d+)/i,
-    /create\s+(a\s+)?reversal\s+(for\s+)?(journal|entry)\s+(#|number|)\s*(\d+)/i,
-    /cancel\s+(journal|entry)\s+(#|number|)\s*(\d+)/i,
-    /offset\s+(journal|entry)\s+(#|number|)\s*(\d+)/i,
-    /undo\s+(journal|entry)\s+(#|number|)\s*(\d+)/i
+    // Basic pattern for "reverse journal X" or "reverse entry X"
+    /reverse\s+(?:journal|entry|journal entry)(?:\s+#?|\s+number\s*|\s+)([0-9]+)/i,
+    // Pattern for "create reversal..."
+    /create\s+(?:a\s+)?reversal\s+(?:for\s+)?(?:journal|entry|journal entry)(?:\s+#?|\s+number\s*|\s+)([0-9]+)/i,
+    // Pattern for "cancel..."
+    /cancel\s+(?:journal|entry|journal entry)(?:\s+#?|\s+number\s*|\s+)([0-9]+)/i,
+    // Pattern for "offset..."
+    /offset\s+(?:journal|entry|journal entry)(?:\s+#?|\s+number\s*|\s+)([0-9]+)/i,
+    // Pattern for "undo..."
+    /undo\s+(?:journal|entry|journal entry)(?:\s+#?|\s+number\s*|\s+)([0-9]+)/i
   ];
   
-  return reversalPatterns.some(pattern => pattern.test(normalized));
+  // Test each pattern individually for better debugging
+  for (const pattern of reversalPatterns) {
+    const isMatch = pattern.test(normalized);
+    console.log(`[DEBUG] Pattern ${pattern.toString()} matches: ${isMatch}`);
+    if (isMatch) {
+      console.log(`[DEBUG] Found journal reversal match with pattern: ${pattern.toString()}`);
+      return true;
+    }
+  }
+  
+  console.log(`[DEBUG] No journal reversal patterns matched for: "${normalized}"`);
+  return false;
 }
 
 /**
@@ -690,28 +1051,48 @@ export function isJournalReversalQuery(message: string): boolean {
  */
 export function extractJournalIdFromReversalQuery(message: string): number | null {
   const normalized = message.toLowerCase();
+  console.log(`[DEBUG] Extracting journal ID from: "${normalized}"`);
   
-  // Match patterns like "reverse journal 72" or "create a reversal for entry #45"
+  // Super simple pattern that should catch both variations
+  // Pattern 1: "reverse/cancel/etc"... "journal/entry"... "number"
+  const simplePattern1 = /(reverse|reversal|cancel|undo|offset).*?(journal|entry).*?(\d+)/i;
+  const match1 = normalized.match(simplePattern1);
+  if (match1) {
+    const journalId = parseInt(match1[3]);
+    console.log(`[DEBUG] Found journal ID with simple pattern 1: ${journalId}`);
+    return isNaN(journalId) ? null : journalId;
+  }
+  
+  // Pattern 2: "journal/entry"... "number"... "reverse/cancel/etc"
+  const simplePattern2 = /(journal|entry).*?(\d+).*?(reverse|reversal|cancel|undo|offset)/i;
+  const match2 = normalized.match(simplePattern2);
+  if (match2) {
+    const journalId = parseInt(match2[2]);
+    console.log(`[DEBUG] Found journal ID with simple pattern 2: ${journalId}`);
+    return isNaN(journalId) ? null : journalId;
+  }
+  
+  // More specific patterns as fallback
   const reversalPatterns = [
-    /reverse\s+(journal|entry)\s+(#|number|)\s*(\d+)/i,
-    /create\s+(a\s+)?reversal\s+(for\s+)?(journal|entry)\s+(#|number|)\s*(\d+)/i,
-    /cancel\s+(journal|entry)\s+(#|number|)\s*(\d+)/i,
-    /offset\s+(journal|entry)\s+(#|number|)\s*(\d+)/i,
-    /undo\s+(journal|entry)\s+(#|number|)\s*(\d+)/i
+    // Basic pattern for "reverse journal X" or "reverse entry X"
+    /reverse\s+(?:journal|entry|journal entry)(?:\s+#?|\s+number\s*|\s+)([0-9]+)/i,
+    // Pattern for "create reversal..."
+    /create\s+(?:a\s+)?reversal\s+(?:for\s+)?(?:journal|entry|journal entry)(?:\s+#?|\s+number\s*|\s+)([0-9]+)/i,
+    // Pattern for "cancel..."
+    /cancel\s+(?:journal|entry|journal entry)(?:\s+#?|\s+number\s*|\s+)([0-9]+)/i,
+    // Pattern for "offset..."
+    /offset\s+(?:journal|entry|journal entry)(?:\s+#?|\s+number\s*|\s+)([0-9]+)/i,
+    // Pattern for "undo..."
+    /undo\s+(?:journal|entry|journal entry)(?:\s+#?|\s+number\s*|\s+)([0-9]+)/i
   ];
   
   for (const pattern of reversalPatterns) {
     const match = normalized.match(pattern);
     if (match) {
-      // Extract the ID from the appropriate capture group based on the pattern
-      const idIndex = pattern.toString().includes('number|)\\s*(\\d+)') 
-        ? match.length - 1 // Last group contains the ID in these patterns
-        : 3; // Default position in most patterns
-        
-      const id = parseInt(match[idIndex], 10);
-      if (!isNaN(id)) {
-        return id;
-      }
+      // The journal ID is now consistently in the first capturing group
+      const journalId = parseInt(match[1]);
+      console.log(`[DEBUG] Found journal ID with specific pattern: ${journalId}`);
+      return isNaN(journalId) ? null : journalId;
     }
   }
   

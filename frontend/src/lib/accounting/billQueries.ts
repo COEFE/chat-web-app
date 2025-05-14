@@ -70,7 +70,8 @@ export async function getBills(
   startDate?: string,
   endDate?: string,
   status?: string,
-  includeDeleted: boolean = false
+  includeDeleted: boolean = false,
+  userId?: string
 ): Promise<{ bills: Bill[], total: number }> {
   try {
     // Build the query dynamically based on filters
@@ -100,6 +101,13 @@ export async function getBills(
       whereClause += whereClause ? ' AND' : ' WHERE';
       whereClause += ` status = $${paramIndex++}`;
       values.push(status);
+    }
+    
+    // Filter by user_id if provided (for proper data isolation)
+    if (userId) {
+      whereClause += whereClause ? ' AND' : ' WHERE';
+      whereClause += ` b.user_id = $${paramIndex++}`;
+      values.push(userId);
     }
     
     // Get total count for pagination
@@ -160,10 +168,10 @@ export async function getBillStatuses(): Promise<string[]> {
 /**
  * Get a specific bill by ID including its line items
  */
-export async function getBill(id: number, includeLines: boolean = true, includePayments: boolean = true): Promise<Bill | null> {
+export async function getBill(id: number, includeLines: boolean = true, includePayments: boolean = true, userId?: string): Promise<Bill | null> {
   try {
     // Get the bill
-    const billQuery = `
+    let billQuery = `
       SELECT 
         b.*,
         v.name as vendor_name,
@@ -174,7 +182,15 @@ export async function getBill(id: number, includeLines: boolean = true, includeP
       WHERE b.id = $1 AND b.is_deleted = false
     `;
     
-    const billResult = await sql.query(billQuery, [id]);
+    // Add user_id filter if provided (for proper data isolation)
+    if (userId) {
+      billQuery = billQuery.replace('WHERE b.id = $1', 'WHERE b.id = $1 AND b.user_id = $2');
+    }
+    
+    const queryParams: (number | string)[] = [id];
+    if (userId) queryParams.push(userId);
+    
+    const billResult = await sql.query(billQuery, queryParams);
     
     if (billResult.rows.length === 0) {
       return null;
@@ -240,7 +256,7 @@ export async function getBill(id: number, includeLines: boolean = true, includeP
 /**
  * Create a new bill with its line items
  */
-export async function createBill(bill: Bill, lines: BillLine[]): Promise<Bill> {
+export async function createBill(bill: Bill, lines: BillLine[], userId?: string): Promise<Bill> {
   // Start a transaction
   await sql.query('BEGIN');
   
@@ -257,13 +273,19 @@ export async function createBill(bill: Bill, lines: BillLine[]): Promise<Bill> {
         status,
         terms,
         memo,
-        ap_account_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ap_account_id,
+        user_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *
     `;
     
     // Calculate total from line items
     const totalAmount = lines.reduce((sum, line) => sum + parseFloat(line.amount), 0);
+    
+    // Determine the bill status - use the provided status or default to 'Open'
+    // This ensures we use the same status value for both the bill and journal entry
+    const billStatus = bill.status || 'Open';
+    console.log(`[Bill Create] Creating bill with status: ${billStatus}`);
     
     const billResult = await sql.query(billQuery, [
       bill.vendor_id,
@@ -272,10 +294,11 @@ export async function createBill(bill: Bill, lines: BillLine[]): Promise<Bill> {
       bill.due_date,
       totalAmount,
       0, // Initial amount_paid is 0
-      'Open', // Initial status is Open
+      billStatus, // Use the determined status
       bill.terms || null,
       bill.memo || null,
-      bill.ap_account_id
+      bill.ap_account_id,
+      userId || null // Include user_id for proper data isolation
     ]);
     
     const newBill = billResult.rows[0];
@@ -292,8 +315,9 @@ export async function createBill(bill: Bill, lines: BillLine[]): Promise<Bill> {
           amount,
           category,
           location,
-          funder
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          funder,
+          user_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       `;
       
       await sql.query(lineQuery, [
@@ -305,9 +329,153 @@ export async function createBill(bill: Bill, lines: BillLine[]): Promise<Bill> {
         line.amount,
         line.category || null,
         line.location || null,
-        line.funder || null
+        line.funder || null,
+        userId || null // Include user_id for proper data isolation
       ]);
     }
+    
+    // Only create a journal entry if the bill status is Open
+    if (billStatus === 'Open') {
+      try {
+        console.log(`[Bill Create] Creating journal entry for new bill ${newBill.id} with Open status`);
+        
+        // Check if journals table has transaction_date or date column
+        const schemaCheck = await sql.query(`
+          SELECT 
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transaction_date') as has_transaction_date,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journal_lines' AND column_name = 'line_number') as has_line_number
+        `);
+        
+        const schema = schemaCheck.rows[0];
+        const dateColumnName = schema.has_transaction_date ? 'transaction_date' : 'date';
+        const hasLineNumber = schema.has_line_number;
+        
+        // Create journal entry header
+        const journalInsertQuery = `
+          INSERT INTO journals (
+            ${dateColumnName}, memo, journal_type, is_posted, created_by, source, user_id
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          RETURNING id
+        `;
+        
+        const billNumber = newBill.bill_number || `Bill #${newBill.id}`;
+        const memo = `${billNumber} - ${newBill.vendor_id}`;
+        
+        const journalResult = await sql.query(journalInsertQuery, [
+          bill.bill_date,
+          memo,
+          'AP',           // journal_type for Accounts Payable
+          true,           // is_posted = true for Open bills
+          'system',       // created_by
+          'bill_create',  // source
+          userId          // user_id for proper data isolation
+        ]);
+        
+        const journalId = journalResult.rows[0].id;
+        console.log(`[Bill Create] Created journal header with ID: ${journalId}`);
+        
+        // Get AP account name for better description
+        const apAccountResult = await sql.query(`SELECT name FROM accounts WHERE id = $1`, [bill.ap_account_id]);
+        const apAccountName = apAccountResult.rows[0]?.name || 'Accounts Payable';
+        
+        // Create the AP journal line (credit to AP account)
+        if (hasLineNumber) {
+          await sql.query(`
+            INSERT INTO journal_lines (journal_id, line_number, account_id, description, debit, credit, user_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `, [
+            journalId,
+            1,                      // line number
+            bill.ap_account_id,
+            `AP - ${apAccountName}`,
+            0,                      // debit
+            totalAmount,            // credit AP account
+            userId                  // user_id for proper data isolation
+          ]);
+        } else {
+          await sql.query(`
+            INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, user_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
+          `, [
+            journalId,
+            bill.ap_account_id,
+            `AP - ${apAccountName}`,
+            0,                      // debit
+            totalAmount,            // credit AP account
+            userId                  // user_id for proper data isolation
+          ]);
+        }
+        
+        console.log(`[Bill Create] Created AP journal line (credit)`);
+        
+        // Insert debit entries for each expense account
+        let lineNumber = 2;
+        
+        for (const line of lines) {
+          const accountId = line.expense_account_id;
+          const amount = parseFloat(line.amount);
+          
+          // Get expense account name
+          const expenseAccountResult = await sql.query(`SELECT name FROM accounts WHERE id = $1`, [accountId]);
+          const expenseAccountName = expenseAccountResult.rows[0]?.name || 'Expense';
+          
+          // Create expense journal line
+          if (hasLineNumber) {
+            await sql.query(`
+              INSERT INTO journal_lines (journal_id, line_number, account_id, description, debit, credit, user_id)
+              VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `, [
+              journalId,
+              lineNumber++,
+              accountId,
+              `${expenseAccountName} - ${line.description || 'Expense'}`,
+              amount,                // debit expense account
+              0,                     // credit
+              userId                 // user_id for proper data isolation
+            ]);
+          } else {
+            await sql.query(`
+              INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, user_id)
+              VALUES ($1, $2, $3, $4, $5, $6)
+            `, [
+              journalId,
+              accountId,
+              `${expenseAccountName} - ${line.description || 'Expense'}`,
+              amount,                // debit expense account
+              0,                     // credit
+              userId                 // user_id for proper data isolation
+            ]);
+          }
+        }
+        
+        console.log(`[Bill Create] Created expense journal lines (debits)`);
+        
+        // Link the journal to the bill if journal_id column exists in bills table
+        try {
+          const columnCheck = await sql.query(`
+            SELECT EXISTS (
+              SELECT 1 FROM information_schema.columns 
+              WHERE table_name = 'bills' AND column_name = 'journal_id'
+            ) as has_journal_id
+          `);
+          
+          if (columnCheck.rows[0].has_journal_id) {
+            await sql.query(`UPDATE bills SET journal_id = $1 WHERE id = $2`, [journalId, newBill.id]);
+            console.log(`[Bill Create] Linked journal ${journalId} to bill ${newBill.id}`);
+          }
+        } catch (linkErr) {
+          console.error(`[Bill Create] Error linking journal to bill:`, linkErr);
+          // Continue without linking - the journal is still created successfully
+        }
+      } catch (journalError) {
+        console.error(`[Bill Create] Error creating journal entry for bill ${newBill.id}:`, journalError);
+        // Continue without creating journal - the bill was created successfully
+      }
+    } else {
+      console.log(`[Bill Create] Bill ${newBill.id} created with ${billStatus} status, no journal entry needed`);
+    }
+
     
     // Commit the transaction
     await sql.query('COMMIT');
@@ -323,7 +491,7 @@ export async function createBill(bill: Bill, lines: BillLine[]): Promise<Bill> {
 /**
  * Update an existing bill
  */
-export async function updateBill(id: number, bill: Partial<Bill>, lines?: BillLine[]): Promise<Bill | null> {
+export async function updateBill(id: number, bill: Partial<Bill>, lines?: BillLine[], userId?: string): Promise<Bill | null> {
   // Start a transaction
   await sql.query('BEGIN');
   
@@ -387,6 +555,12 @@ export async function updateBill(id: number, bill: Partial<Bill>, lines?: BillLi
       values.push(bill.ap_account_id);
     }
     
+    if (bill.status !== undefined) {
+      setClause += `status = $${paramIndex++}, `;
+      values.push(bill.status);
+      console.log(`[updateBill] Updating status to: ${bill.status}`);
+    }
+    
     // Update line items if provided
     if (lines && lines.length > 0) {
       // Calculate new total amount from line items
@@ -410,8 +584,9 @@ export async function updateBill(id: number, bill: Partial<Bill>, lines?: BillLi
             amount,
             category,
             location,
-            funder
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            funder,
+            user_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         `;
         
         await sql.query(lineQuery, [
@@ -423,7 +598,8 @@ export async function updateBill(id: number, bill: Partial<Bill>, lines?: BillLi
           line.amount,
           line.category || null,
           line.location || null,
-          line.funder || null
+          line.funder || null,
+          userId || null // Include user_id for proper data isolation
         ]);
       }
     }
@@ -493,7 +669,11 @@ export async function deleteBill(id: number): Promise<boolean> {
 /**
  * Create a bill payment
  */
-export async function createBillPayment(payment: BillPayment): Promise<BillPayment> {
+export async function createBillPayment(payment: BillPayment, userId?: string): Promise<BillPayment> {
+  // Ensure we have a userId for proper data isolation
+  if (!userId) {
+    console.warn('[createBillPayment] No userId provided, data isolation may be compromised');
+  }
   // Start a transaction
   await sql.query('BEGIN');
   
@@ -525,8 +705,9 @@ export async function createBillPayment(payment: BillPayment): Promise<BillPayme
         payment_account_id,
         payment_method,
         reference_number,
-        journal_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        journal_id,
+        user_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
     `;
     
@@ -537,7 +718,8 @@ export async function createBillPayment(payment: BillPayment): Promise<BillPayme
       payment.payment_account_id,
       payment.payment_method || null,
       payment.reference_number || null,
-      payment.journal_id || null
+      payment.journal_id || null,
+      userId || null // Include user_id for proper data isolation
     ]);
     
     const newPayment = paymentResult.rows[0];

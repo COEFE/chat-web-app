@@ -73,8 +73,13 @@ interface Customer {
 interface Account {
   id: number;
   name: string;
-  code: string;
-  type: string;
+  code: string; // This is the actual column name in the database
+  account_type: string;
+  parent_id?: number;
+  notes?: string;
+  is_custom?: boolean;
+  balance?: number;
+  is_active?: boolean;
 }
 
 interface InvoiceLine {
@@ -101,14 +106,22 @@ interface Invoice {
   memo_to_customer?: string;
   ar_account_id: number;
   ar_account_name: string;
+  lines?: any[]; // Added to support duplicated invoices with attached line items
 }
 
 interface InvoiceFormProps {
   invoice: Invoice | null;
   onClose: (refreshData?: boolean) => void;
+  viewOnly?: boolean;
 }
 
-export function InvoiceForm({ invoice, onClose }: InvoiceFormProps) {
+export function InvoiceForm({
+  invoice,
+  onClose,
+  viewOnly = false
+}: InvoiceFormProps) {
+  // Determine if this is a new invoice (no invoice prop) or a duplicated invoice (id=0)
+  const isNewOrDuplicated = !invoice || invoice.id === 0;
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -185,33 +198,62 @@ export function InvoiceForm({ invoice, onClose }: InvoiceFormProps) {
         // Make all GL accounts available for selection
         setAccounts(sortedAccounts);
         
-        // If editing an invoice, fetch its lines
+        // Find the Account Receivable account#1100
+        const arAccount = sortedAccounts.find((account: Account) => account.code === '1100');
+        if (arAccount) {
+          // Set the AR Account to Account Receivable account#1100
+          form.setValue('ar_account_id', arAccount.id.toString());
+        } else {
+          console.warn('Account Receivable account#1100 not found in accounts');
+        }
+        
+        // If editing an existing invoice, fetch its lines from the API
+        // If it's a duplicated invoice (id = 0), use the lines already provided
         if (invoice) {
-          const invoiceResponse = await fetch(`/api/invoices/${invoice.id}`, {
-            headers: {
-              'Authorization': `Bearer ${idToken}`
+          if (invoice.id === 0 && invoice.lines) {
+            // This is a duplicated invoice with lines already attached
+            console.log('[InvoiceForm] Using duplicated invoice lines:', invoice.lines.length);
+            
+            // Format the lines for the form
+            const formattedLines = invoice.lines.map((line: any) => ({
+              id: 0, // New line
+              revenue_account_id: line.revenue_account_id.toString(),
+              description: line.description,
+              quantity: line.quantity.toString(),
+              unit_price: line.unit_price.toString(),
+            }));
+            
+            form.setValue("lines", formattedLines);
+            setInvoiceLines(invoice.lines);
+            calculateTotal(invoice.lines);
+          } else {
+            // This is an existing invoice, fetch its lines from the API
+            const invoiceResponse = await fetch(`/api/invoices/${invoice.id}`, {
+              headers: {
+                'Authorization': `Bearer ${idToken}`
+              }
+            });
+            
+            if (!invoiceResponse.ok) {
+              throw new Error(`Error fetching invoice details: ${invoiceResponse.status}`);
             }
-          });
-          
-          if (!invoiceResponse.ok) {
-            throw new Error(`Error fetching invoice details: ${invoiceResponse.status}`);
+            
+            const invoiceData = await invoiceResponse.json();
+            const lines = invoiceData.lines;
+            
+            // Set lines in form
+            const formattedLines = lines.map((line: InvoiceLine) => ({
+              id: line.id,
+              revenue_account_id: line.revenue_account_id.toString(),
+              description: line.description,
+              quantity: line.quantity.toString(),
+              unit_price: line.unit_price.toString(),
+            }));
+            
+            form.setValue("lines", formattedLines);
+            setInvoiceLines(lines);
+            calculateTotal(lines);
           }
-          
-          const invoiceData = await invoiceResponse.json();
-          const lines = invoiceData.lines;
-          
-          // Set lines in form
-          const formattedLines = lines.map((line: InvoiceLine) => ({
-            id: line.id,
-            revenue_account_id: line.revenue_account_id.toString(),
-            description: line.description,
-            quantity: line.quantity.toString(),
-            unit_price: line.unit_price.toString(),
-          }));
-          
-          form.setValue("lines", formattedLines);
-          setInvoiceLines(lines);
-          calculateTotal(lines);
         } else {
           // Add an empty line for new invoices
           append({
@@ -236,26 +278,35 @@ export function InvoiceForm({ invoice, onClose }: InvoiceFormProps) {
     fetchData();
   }, [toast, invoice, append, form]);
 
-  // Calculate line amounts and total
+  // Calculate line amounts and total with precise calculations
   const calculateLineAmount = (quantity: string, unitPrice: string) => {
     const qty = parseFloat(quantity) || 0;
     const price = parseFloat(unitPrice) || 0;
-    return qty * price;
+    return parseFloat((qty * price).toFixed(2)); // Ensure consistent decimal precision
   };
 
   const calculateTotal = (lines: any[]) => {
+    console.log('[InvoiceForm] Calculating total from lines:', JSON.stringify(lines));
+    
     const total = lines.reduce((sum, line) => {
       if (typeof line.amount === 'number') {
+        console.log(`[InvoiceForm] Line with amount: ${line.amount}`);
         return sum + line.amount;
       }
       
       const quantity = parseFloat(line.quantity) || 0;
       const unitPrice = parseFloat(line.unit_price) || 0;
-      return sum + (quantity * unitPrice);
+      const lineTotal = quantity * unitPrice;
+      console.log(`[InvoiceForm] Line calculation: qty=${quantity} * price=${unitPrice} = ${lineTotal}`);
+      return sum + lineTotal;
     }, 0);
     
-    setTotalAmount(total);
-    return total;
+    // Use toFixed to ensure consistent decimal handling, then convert back to number
+    const roundedTotal = parseFloat(total.toFixed(2));
+    console.log(`[InvoiceForm] Final calculated total: ${roundedTotal}`);
+    
+    setTotalAmount(roundedTotal);
+    return roundedTotal;
   };
 
   // Auto-calculate when form values change
@@ -308,7 +359,17 @@ export function InvoiceForm({ invoice, onClose }: InvoiceFormProps) {
         throw new Error("Customer not found. Please select a valid customer.");
       }
 
-      if (invoice) {
+      // Using the isNewOrDuplicated flag defined at component level
+      console.log(`[InvoiceForm] Processing ${isNewOrDuplicated ? 'new/duplicated' : 'existing'} invoice`);
+      
+      if (!isNewOrDuplicated) {
+        // Recalculate the total amount directly from prepared line items to ensure consistency
+        const calculatedTotal = lines.reduce((sum, line) => {
+          return sum + (line.quantity * line.unit_price);
+        }, 0);
+        
+        console.log(`[InvoiceForm] Final total before submission: ${calculatedTotal}, Previous total: ${totalAmount}`);
+        
         // Update existing invoice
         response = await fetch(`/api/invoices/${invoice.id}`, {
           method: 'PUT',
@@ -323,7 +384,7 @@ export function InvoiceForm({ invoice, onClose }: InvoiceFormProps) {
               invoice_number: data.invoice_number,
               invoice_date: formattedInvoiceDate,
               due_date: formattedDueDate,
-              total_amount: totalAmount,
+              total_amount: calculatedTotal, // Use freshly calculated total
               terms: data.terms,
               memo_to_customer: data.memo_to_customer,
               ar_account_id: parseInt(data.ar_account_id),
@@ -333,6 +394,13 @@ export function InvoiceForm({ invoice, onClose }: InvoiceFormProps) {
           })
         });
       } else {
+        // Recalculate the total amount directly from prepared line items to ensure consistency
+        const calculatedTotal = lines.reduce((sum, line) => {
+          return sum + (line.quantity * line.unit_price);
+        }, 0);
+        
+        console.log(`[InvoiceForm] Final total before submission: ${calculatedTotal}, State total: ${totalAmount}`);
+        
         // Create new invoice
         response = await fetch('/api/invoices', {
           method: 'POST',
@@ -347,7 +415,7 @@ export function InvoiceForm({ invoice, onClose }: InvoiceFormProps) {
               invoice_number: data.invoice_number,
               invoice_date: formattedInvoiceDate,
               due_date: formattedDueDate,
-              total_amount: totalAmount,
+              total_amount: calculatedTotal, // Use freshly calculated total
               terms: data.terms,
               memo_to_customer: data.memo_to_customer,
               ar_account_id: parseInt(data.ar_account_id),
@@ -360,21 +428,37 @@ export function InvoiceForm({ invoice, onClose }: InvoiceFormProps) {
       
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || `Error ${invoice ? 'updating' : 'creating'} invoice: ${response.status}`);
+        throw new Error(errorData.error || `Error ${isNewOrDuplicated ? 'creating' : 'updating'} invoice: ${response.status}`);
+      }
+      
+      // Parse response data to ensure we get the latest values
+      const responseData = await response.json();
+      console.log(`[InvoiceForm] ${isNewOrDuplicated ? 'Create' : 'Update'} response:`, responseData);
+      
+      // Verify the total amount was correctly saved
+      if (responseData.invoice) {
+        const returnedTotalAmount = responseData.invoice.total_amount;
+        console.log(`[InvoiceForm] Server returned total_amount: ${returnedTotalAmount}, Local calculation: ${totalAmount}`);
+        
+        // If there's a mismatch, update our local state
+        if (Math.abs(returnedTotalAmount - totalAmount) > 0.01) {
+          console.log(`[InvoiceForm] Total amount discrepancy detected, using server value: ${returnedTotalAmount}`);
+          setTotalAmount(returnedTotalAmount);
+        }
       }
       
       toast({
-        title: invoice ? "Invoice Updated" : "Invoice Created",
-        description: `Invoice was successfully ${invoice ? 'updated' : 'created'}.`,
+        title: isNewOrDuplicated ? "Invoice Created" : "Invoice Updated",
+        description: `Invoice was successfully ${isNewOrDuplicated ? 'created' : 'updated'}.`,
       });
       
       // Close the form and refresh data
       onClose(true);
     } catch (err: any) {
-      console.error(`Error ${invoice ? 'updating' : 'creating'} invoice:`, err);
+      console.error(`Error ${isNewOrDuplicated ? 'creating' : 'updating'} invoice:`, err);
       toast({
         title: "Error",
-        description: err.message || `Failed to ${invoice ? 'update' : 'create'} invoice`,
+        description: err.message || `Failed to ${isNewOrDuplicated ? 'create' : 'update'} invoice`,
         variant: "destructive",
       });
     } finally {
@@ -386,11 +470,17 @@ export function InvoiceForm({ invoice, onClose }: InvoiceFormProps) {
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{invoice ? "Edit Invoice" : "Create New Invoice"}</DialogTitle>
+          <DialogTitle>
+            {viewOnly 
+              ? "View Invoice" 
+              : !isNewOrDuplicated ? "Edit Invoice" : "Create New Invoice"}
+          </DialogTitle>
           <DialogDescription>
-            {invoice
-              ? "Update the invoice information below."
-              : "Fill in the details to create a new invoice."}
+            {viewOnly 
+              ? "View invoice details below."
+              : !isNewOrDuplicated
+                ? "Update the invoice information below."
+                : "Fill in the details to create a new invoice."}
           </DialogDescription>
         </DialogHeader>
 
@@ -400,7 +490,8 @@ export function InvoiceForm({ invoice, onClose }: InvoiceFormProps) {
           </div>
         ) : (
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <form onSubmit={viewOnly ? (e) => e.preventDefault() : form.handleSubmit(onSubmit)} className="space-y-4">
+              <fieldset disabled={viewOnly}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Customer */}
                 <FormField
@@ -567,18 +658,21 @@ export function InvoiceForm({ invoice, onClose }: InvoiceFormProps) {
                       <Select
                         onValueChange={field.onChange}
                         defaultValue={field.value}
+                        disabled={true} // Disable changing AR account
                       >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select AR account" />
+                            <SelectValue placeholder="Account Receivable #1100" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {accounts.map((account) => (
-                            <SelectItem key={account.id} value={account.id.toString()}>
-                              {account.code} - {account.name}
-                            </SelectItem>
-                          ))}
+                          {accounts
+                            .filter(account => account.code === '1100') // Only include AR account #1100
+                            .map((account) => (
+                              <SelectItem key={account.id} value={account.id.toString()}>
+                                {account.code} - {account.name}
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -770,27 +864,38 @@ export function InvoiceForm({ invoice, onClose }: InvoiceFormProps) {
                   </div>
                 </div>
               </div>
+              </fieldset>
 
-              <DialogFooter>
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={() => onClose()} 
-                  disabled={isSubmitting}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={isSubmitting}>
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {invoice ? "Updating..." : "Creating..."}
-                    </>
-                  ) : (
-                    <>{invoice ? "Update" : "Create"} Invoice</>
-                  )}
-                </Button>
-              </DialogFooter>
+              <div className="flex justify-end gap-2 pt-4">
+                {viewOnly ? (
+                  <Button
+                    type="button"
+                    onClick={() => onClose()}
+                  >
+                    Close
+                  </Button>
+                ) : (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => onClose()}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      disabled={isSubmitting}
+                    >
+                      {isSubmitting && (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      )}
+                      {invoice ? "Update Invoice" : "Create Invoice"}
+                    </Button>
+                  </>
+                )}
+              </div>
+
             </form>
           </Form>
         )}

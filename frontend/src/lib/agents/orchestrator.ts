@@ -2,6 +2,7 @@ import { Agent, AgentContext, AgentResponse, AgentRegistry } from "@/types/agent
 import Anthropic from "@anthropic-ai/sdk";
 import { MessageParam } from "@anthropic-ai/sdk/resources/messages";
 import { logAuditEvent } from "@/lib/auditLogger";
+import { classifyUserIntent } from "@/lib/intentClassifier";
 
 /**
  * AccountingOrchestrator handles routing user queries to specialized accounting agents
@@ -10,6 +11,8 @@ import { logAuditEvent } from "@/lib/auditLogger";
 export class AccountingOrchestrator {
   private agents: Record<string, Agent> = {};
   private anthropic: Anthropic;
+  // Track last agent used per conversation
+  private lastAgentUsed: Record<string, string> = {};
 
   constructor() {
     this.anthropic = new Anthropic({
@@ -32,11 +35,46 @@ export class AccountingOrchestrator {
     console.log(`[Orchestrator] Processing request: ${context.query}`);
     
     try {
-      // 1. Determine which specialized agent should handle this query
-      const targetAgent = await this.determineTargetAgent(context.query);
+      // Check if we should maintain conversation with previous agent
+      const conversationId = context.conversationId || `user-${context.userId}-${Date.now()}`;
+      const lastAgentId = this.lastAgentUsed[conversationId];
+      let targetAgent;
+      
+      // Check if conversation is in progress with previously used agent
+      if (lastAgentId && this.agents[lastAgentId] && conversationId) {
+        const lastAgent = this.agents[lastAgentId];
+        const normalizedQuery = context.query.toLowerCase().trim();
+        
+        // Special handling for very short responses in ongoing conversations
+        // These are likely confirmations or simple follow-ups to a previous agent's question
+        const isShortResponse = normalizedQuery.length < 10;
+        const isSimpleResponse = ['yes', 'no', 'okay', 'sure', 'confirm', 'cancel', 'proceed'].includes(normalizedQuery);
+        
+        if (isShortResponse || isSimpleResponse) {
+          console.log(`[Orchestrator] Prioritizing conversation continuity for short response: ${normalizedQuery}`);
+          targetAgent = lastAgent;
+        } else {
+          // Check if last agent might handle this as a follow-up
+          const canHandle = await lastAgent.canHandle(context.query);
+          
+          if (canHandle) {
+            console.log(`[Orchestrator] Continuing with previous agent: ${lastAgentId}`);
+            targetAgent = lastAgent;
+          } else {
+            // If last agent can't handle it, determine a new target agent
+            targetAgent = await this.determineTargetAgent(context.query);
+          }
+        }
+      } else {
+        // New conversation or no last agent, determine target
+        targetAgent = await this.determineTargetAgent(context.query);
+      }
       
       if (targetAgent) {
         console.log(`[Orchestrator] Routing to specialized agent: ${targetAgent.id}`);
+        
+        // Store this agent for future messages in this conversation
+        this.lastAgentUsed[conversationId] = targetAgent.id;
         
         // Log the routing decision
         await logAuditEvent({
@@ -80,51 +118,59 @@ export class AccountingOrchestrator {
 
   /**
    * Determine which specialized agent should handle the query
-   * Uses Claude to analyze the query and recommend the most appropriate agent
+   * Uses AI-based intent classification to route to the appropriate agent
    */
   private async determineTargetAgent(query: string): Promise<Agent | undefined> {
-    // First check if any registered agent claims it can handle this query
-    for (const agentId in this.agents) {
-      const agent = this.agents[agentId];
-      const canHandle = await agent.canHandle(query);
-      
-      if (canHandle) {
-        return agent;
-      }
-    }
+    console.log(`[Orchestrator] Determining target agent for query: "${query}"`);
     
-    // If no agent directly claims the query, use Claude to determine the best agent
     try {
-      // Only ask Claude to route if we have registered agents
+      // Only proceed if we have registered agents
       if (Object.keys(this.agents).length === 0) {
+        console.log(`[Orchestrator] No agents registered, cannot determine target agent.`);
         return undefined;
       }
       
-      const agentDescriptions = Object.values(this.agents).map(
-        agent => `${agent.id}: ${agent.description}`
-      ).join("\n");
+      // Use AI-based intent classification 
+      const classification = await classifyUserIntent(query);
+      console.log(`[Orchestrator] Query classified as: ${classification.intent} (confidence: ${classification.confidence})`);
       
-      const response = await this.anthropic.messages.create({
-        model: "claude-3-5-sonnet-20240620",
-        max_tokens: 150,
-        temperature: 0.2,
-        system: `You are an expert accounting query classifier that determines which specialized agent should handle a user query.
-        Your task is to select the most appropriate agent from the following options:
-        
-        ${agentDescriptions}
-        
-        Analyze the user's query and respond ONLY with the ID of the most appropriate agent, with no additional text.
-        If no agent is appropriate, respond with "none".`,
-        messages: [{ role: "user", content: query }]
-      });
+      // Map intents to agent IDs
+      let targetAgentId: string | undefined = undefined;
       
-      const suggestedAgentId = typeof response.content[0] === 'object' && 'text' in response.content[0] && typeof response.content[0].text === 'string' ? response.content[0].text.trim().toLowerCase() : 'none';
-      console.log(`[Orchestrator] Claude suggested agent: ${suggestedAgentId}`);
-      
-      if (suggestedAgentId !== "none" && this.agents[suggestedAgentId]) {
-        return this.agents[suggestedAgentId];
+      switch (classification.intent) {
+        case 'ap_bill':
+          targetAgentId = 'ap_agent';
+          break;
+        case 'ar_invoice':
+          targetAgentId = 'invoice-agent';
+          break;
+        case 'gl_query':
+          targetAgentId = 'gl_agent';
+          break;
+        case 'reconciliation':
+          targetAgentId = 'reconciliation_agent';
+          break;
+        default:
+          // For unknown queries, as a fallback, we'll check if any agent claims it can handle the query
+          for (const agentId in this.agents) {
+            const agent = this.agents[agentId];
+            const canHandle = await agent.canHandle(query);
+            
+            if (canHandle) {
+              console.log(`[Orchestrator] ${agentId} claims it can handle the query.`);
+              return agent;
+            }
+          }
       }
       
+      // Return the target agent if we found one
+      if (targetAgentId && this.agents[targetAgentId]) {
+        console.log(`[Orchestrator] Selected agent ${targetAgentId} based on intent classification.`);
+        return this.agents[targetAgentId];
+      }
+      
+      // If we get here, no agent was selected
+      console.log(`[Orchestrator] No suitable agent found for query.`);
       return undefined;
     } catch (error) {
       console.error("[Orchestrator] Error determining target agent:", error);

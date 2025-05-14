@@ -25,13 +25,17 @@ export async function GET(req: NextRequest) {
     const offset = (page - 1) * limit;
     const search = searchParams.get('search') || '';
     
+    // Get user ID from token for proper data isolation
+    const decodedToken = await auth.verifyIdToken(token);
+    const userId = decodedToken.uid;
+    
     // Build SQL query based on parameters
     let customersQuery = `
       SELECT * FROM customers 
-      WHERE is_deleted = false
+      WHERE is_deleted = false AND user_id = $1
     `;
     
-    const queryParams: any[] = [];
+    const queryParams: any[] = [userId];
     
     if (search) {
       customersQuery += ` AND name ILIKE $${queryParams.length + 1}`;
@@ -44,17 +48,17 @@ export async function GET(req: NextRequest) {
     // Count total for pagination
     let countQuery = `
       SELECT COUNT(*) FROM customers 
-      WHERE is_deleted = false
+      WHERE is_deleted = false AND user_id = $1
     `;
     
     if (search) {
-      countQuery += ` AND name ILIKE $1`;
+      countQuery += ` AND name ILIKE $2`;
     }
     
     // Execute queries
     const [customersResult, countResult] = await Promise.all([
       query(customersQuery, queryParams),
-      query(countQuery, search ? [`%${search}%`] : [])
+      query(countQuery, search ? [userId, `%${search}%`] : [userId])
     ]);
     
     const customers = customersResult.rows;
@@ -118,13 +122,17 @@ export async function POST(req: NextRequest) {
       );
     }
     
+    // Get user ID from token for proper data isolation
+    const decodedToken = await auth.verifyIdToken(token);
+    const userId = decodedToken.uid;
+    
     // Insert customer record
     const insertQuery = `
       INSERT INTO customers (
         name, contact_person, email, phone, billing_address, 
-        shipping_address, default_revenue_account_id
+        shipping_address, default_revenue_account_id, user_id
       ) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
     `;
     
@@ -135,7 +143,8 @@ export async function POST(req: NextRequest) {
       phone || null,
       billing_address || null,
       shipping_address || null,
-      default_revenue_account_id || null
+      default_revenue_account_id || null,
+      userId
     ]);
     
     // Return the created customer record

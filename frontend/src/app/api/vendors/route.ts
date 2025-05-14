@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
     // Handle specific vendor request
     const vendorId = url.searchParams.get('id');
     if (vendorId) {
-      const vendor = await getVendor(parseInt(vendorId, 10));
+      const vendor = await getVendor(parseInt(vendorId, 10), userId);
       if (!vendor) {
         return NextResponse.json({ error: 'Vendor not found' }, { status: 404 });
       }
@@ -39,7 +39,8 @@ export async function GET(req: NextRequest) {
       page,
       limit,
       search,
-      includeDeleted
+      includeDeleted,
+      userId // Pass user_id for proper data isolation
     );
     
     return NextResponse.json({
@@ -84,7 +85,8 @@ export async function POST(req: NextRequest) {
       default_expense_account_id: body.vendor.default_expense_account_id
     };
     
-    const newVendor = await createVendor(vendorData);
+    // Pass userId to ensure proper data isolation
+    const newVendor = await createVendor(vendorData, userId);
 
     // Audit Log for Vendor Creation
     if (userId && newVendor && typeof newVendor.id !== 'undefined') {

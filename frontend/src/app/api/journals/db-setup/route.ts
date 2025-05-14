@@ -60,8 +60,23 @@ export async function POST(req: NextRequest) {
         ) as exists;
       `;
       
-      // If the date column exists, migrate data to transaction_date
+      // If the date column exists, we need to check if transaction_date exists
       if (dateColumnExists.rows[0].exists) {
+        // Check if transaction_date column exists
+        const transactionDateExists = await sql`
+          SELECT EXISTS (
+            SELECT 1 
+            FROM information_schema.columns 
+            WHERE table_name = 'journals' AND column_name = 'transaction_date'
+          ) as exists;
+        `;
+        
+        // If transaction_date doesn't exist yet, add it
+        if (!transactionDateExists.rows[0].exists) {
+          console.log('Adding transaction_date column...');
+          await sql`ALTER TABLE journals ADD COLUMN transaction_date DATE;`;
+        }
+        
         console.log('Migrating date column to transaction_date...');
         await sql`
           UPDATE journals 

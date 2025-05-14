@@ -108,9 +108,13 @@ export default function InvoiceDetailPage() {
       const auth = getAuth();
       const idToken = await auth.currentUser?.getIdToken();
       
-      const response = await fetch(`/api/invoices/${invoiceId}`, {
+      // Use a cache-busting query parameter with the current timestamp
+      const timestamp = new Date().getTime();
+      const response = await fetch(`/api/invoices/${invoiceId}?_nocache=${timestamp}`, {
         headers: {
-          'Authorization': `Bearer ${idToken}`
+          'Authorization': `Bearer ${idToken}`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
         }
       });
 
@@ -125,9 +129,12 @@ export default function InvoiceDetailPage() {
       
       // Fetch customer details
       if (data.invoice?.customer_id) {
-        const customerResponse = await fetch(`/api/customers/${data.invoice.customer_id}`, {
+        const customerTimestamp = new Date().getTime();
+        const customerResponse = await fetch(`/api/customers/${data.invoice.customer_id}?_=${customerTimestamp}`, {
           headers: {
-            'Authorization': `Bearer ${idToken}`
+            'Authorization': `Bearer ${idToken}`,
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
           }
         });
         
@@ -154,12 +161,16 @@ export default function InvoiceDetailPage() {
   };
 
   const handleEditClick = () => {
-    // Navigate to edit page or open edit form
-    // For now, just show a message
-    toast({
-      title: "Edit Invoice",
-      description: "Edit functionality to be implemented",
-    });
+    // Navigate to /dashboard/accounts-receivable/invoices with query param for editing
+    if (invoice && invoice.id) {
+      router.push(`/dashboard/accounts-receivable/invoices?edit=${invoice.id}`);
+    } else {
+      toast({
+        title: "Error",
+        description: "Cannot edit invoice: Invoice details are missing",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleRecordPayment = () => {

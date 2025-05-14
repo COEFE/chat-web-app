@@ -15,10 +15,10 @@ export async function GET(req: NextRequest) {
   try {
     const customerQuery = `
       SELECT * FROM customers 
-      WHERE id = $1 AND is_deleted = false
+      WHERE id = $1 AND is_deleted = false AND user_id = $2
     `;
     
-    const result = await query(customerQuery, [id]);
+    const result = await query(customerQuery, [id, userId]);
     
     if (result.rows.length === 0) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
@@ -63,10 +63,10 @@ export async function PUT(req: NextRequest) {
     // Check if customer exists
     const checkQuery = `
       SELECT id FROM customers 
-      WHERE id = $1 AND is_deleted = false
+      WHERE id = $1 AND is_deleted = false AND user_id = $2
     `;
     
-    const checkResult = await query(checkQuery, [id]);
+    const checkResult = await query(checkQuery, [id, userId]);
     
     if (checkResult.rows.length === 0) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
@@ -84,7 +84,7 @@ export async function PUT(req: NextRequest) {
         shipping_address = $6, 
         default_revenue_account_id = $7,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $8
+      WHERE id = $8 AND user_id = $9
       RETURNING *
     `;
     
@@ -96,7 +96,8 @@ export async function PUT(req: NextRequest) {
       billing_address || null,
       shipping_address || null,
       default_revenue_account_id || null,
-      id
+      id,
+      userId
     ]);
     
     return NextResponse.json({
@@ -126,10 +127,10 @@ export async function DELETE(req: NextRequest) {
     // Check if customer has associated invoices
     const checkInvoicesQuery = `
       SELECT COUNT(*) FROM invoices 
-      WHERE customer_id = $1 AND is_deleted = false
+      WHERE customer_id = $1 AND is_deleted = false AND user_id = $2
     `;
     
-    const invoicesResult = await query(checkInvoicesQuery, [id]);
+    const invoicesResult = await query(checkInvoicesQuery, [id, userId]);
     const invoiceCount = parseInt(invoicesResult.rows[0].count);
     
     if (invoiceCount > 0) {
@@ -143,11 +144,11 @@ export async function DELETE(req: NextRequest) {
     const deleteQuery = `
       UPDATE customers 
       SET is_deleted = true, deleted_at = CURRENT_TIMESTAMP 
-      WHERE id = $1 AND is_deleted = false
+      WHERE id = $1 AND is_deleted = false AND user_id = $2
       RETURNING id
     `;
     
-    const deleteResult = await query(deleteQuery, [id]);
+    const deleteResult = await query(deleteQuery, [id, userId]);
     
     if (deleteResult.rows.length === 0) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });

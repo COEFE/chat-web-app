@@ -16,10 +16,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid bank account ID' }, { status: 400 });
     }
 
-    // Check if bank account exists
+    // Check if bank account exists AND belongs to the current user
+    console.log(`[bank-transactions] Validating account ${bankAccountId} for user: ${userId}`);
     const bankAccountCheck = await query(
-      'SELECT id FROM bank_accounts WHERE id = $1 AND is_deleted = false',
-      [bankAccountId]
+      'SELECT id FROM bank_accounts WHERE id = $1 AND is_deleted = false AND user_id = $2',
+      [bankAccountId, userId]
     );
     
     if (bankAccountCheck.rows.length === 0) {
@@ -156,10 +157,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid bank account ID' }, { status: 400 });
     }
 
-    // Check if bank account exists
+    // Check if bank account exists AND belongs to the current user
+    console.log(`[bank-transactions] Validating account ${bankAccountId} for user: ${userId}`);
     const bankAccountCheck = await query(
-      'SELECT id FROM bank_accounts WHERE id = $1 AND is_deleted = false',
-      [bankAccountId]
+      'SELECT id FROM bank_accounts WHERE id = $1 AND is_deleted = false AND user_id = $2',
+      [bankAccountId, userId]
     );
     
     if (bankAccountCheck.rows.length === 0) {

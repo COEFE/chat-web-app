@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
         JOIN accounts a ON ba.gl_account_id = a.id
       WHERE 
         ba.is_deleted = false
+        AND ba.user_id = $3
     `;
     
     // Only show active accounts unless explicitly asked for all
@@ -43,17 +44,20 @@ export async function GET(req: NextRequest) {
     
     // Count total for pagination
     let countQuery = `
-      SELECT COUNT(*) FROM bank_accounts ba WHERE ba.is_deleted = false
+      SELECT COUNT(*) FROM bank_accounts ba WHERE ba.is_deleted = false AND ba.user_id = $1
     `;
     
     if (!includeInactive) {
       countQuery += ` AND ba.is_active = true`;
     }
     
-    // Execute queries
+    // Log the user filtering for audit purposes
+    console.log(`[bank-accounts] Fetching accounts for user: ${userId}`);
+    
+    // Execute queries with user ID filtering for data privacy
     const [bankAccountsResult, countResult] = await Promise.all([
-      query(bankAccountsQuery, [limit, offset]),
-      query(countQuery)
+      query(bankAccountsQuery, [limit, offset, userId]),
+      query(countQuery, [userId])
     ]);
     
     const total = parseInt(countResult.rows[0].count);

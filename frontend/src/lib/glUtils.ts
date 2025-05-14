@@ -1,5 +1,6 @@
 import { sql } from '@vercel/postgres';
 import OpenAI from 'openai';
+import { NextResponse } from 'next/server';
 
 // Create OpenAI client for embeddings
 let openaiClient: OpenAI | null = null;
@@ -210,8 +211,388 @@ async function findGLCodesByTextSearch(query: string, limit: number = 5): Promis
     console.log(`[GLUtils] No specific search terms, returning ${rows.length} GL codes`);
     return rows;
   } catch (error) {
-    console.error('[GLUtils] Error in text search fallback:', error);
+    console.error('[GLUtils] Error finding GL codes by text search:', error);
     return [];
+  }
+}
+
+/**
+ * Determine if a message is requesting to create a GL account
+ */
+export function isGLAccountCreationQuery(message: string): boolean {
+  const normalized = message.toLowerCase();
+  
+  // Patterns for GL account creation queries
+  const glCreatePatterns = [
+    // Basic patterns for creating GL accounts/codes
+    /create\s+(new\s+)?(gl|g\.l\.|general\s+ledger)\s+(account|code)/i,
+    /add\s+(new\s+)?(gl|g\.l\.|general\s+ledger)\s+(account|code)/i,
+    /set\s+up\s+(new\s+)?(gl|g\.l\.|general\s+ledger)\s+(account|code)/i,
+    
+    // Patterns with prepositions
+    /create\s+(an?\s+)?(account|code)\s+(in|for|to)\s+(the\s+)?(gl|g\.l\.|general\s+ledger|chart\s+of\s+accounts)/i,
+    /add\s+(an?\s+)?(account|code)\s+(in|for|to)\s+(the\s+)?(gl|g\.l\.|general\s+ledger|chart\s+of\s+accounts)/i,
+    
+    // Additional patterns with 'call', 'called', 'named', etc.
+    /create\s+(an?\s+)?(new\s+)?(gl|g\.l\.|general\s+ledger)\s+(account|code)\s+(call|called|name|named|with\s+name|with\s+description)/i,
+    /add\s+(an?\s+)?(new\s+)?(gl|g\.l\.|general\s+ledger)\s+(account|code)\s+(call|called|name|named|with\s+name|with\s+description)/i,
+    
+    // Simplified patterns that should catch most variations
+    /create\s+(an?\s+)?new\s+(account|code|gl\s+account|gl\s+code)/i,
+    /add\s+(an?\s+)?new\s+(account|code|gl\s+account|gl\s+code)/i,
+  ];
+  
+  console.log(`[GLUtils] Checking for GL account creation in: "${normalized}"`); 
+  // Check if any pattern matches
+  let isCreationQuery = glCreatePatterns.some(pattern => pattern.test(normalized));
+  
+  // Fallback check for when message contains key terms that suggest account creation
+  if (!isCreationQuery) {
+    // Check if message contains both GL account creation terms and numeric code indicators
+    const hasGLAccountTerms = [
+      /gl account/i, 
+      /account#/i, 
+      /account number/i, 
+      /gl code/i,
+      /create.+account/i,
+      /new.+account/i,
+      /add.+account/i
+    ].some(pattern => pattern.test(normalized));
+    
+    const hasNumberIndicator = /[#]?\d{3,5}\b/.test(normalized);
+    
+    isCreationQuery = hasGLAccountTerms && hasNumberIndicator;
+  }
+  console.log(`[GLUtils] Is GL account creation query: ${isCreationQuery}`);
+  return isCreationQuery;
+}
+
+/**
+ * Extract GL account information from a creation query
+ */
+export function extractGLAccountInfoFromQuery(message: string): { code?: string; name?: string; notes?: string } {
+  const result: { code?: string; name?: string; notes?: string } = {};
+  const normalized = message.toLowerCase();
+  
+  console.log(`[GLUtils] Extracting GL account info from: "${normalized}"`);
+  
+  // Extract account code
+  const codePatterns = [
+    // Standard patterns with labels
+    /code\s*[:=]?\s*["']?([0-9]{3,6})["']?/i,
+    /account\s+number\s*[:=]?\s*["']?([0-9]{3,6})["']?/i,
+    /gl\s+code\s*[:=]?\s*["']?([0-9]{3,6})["']?/i,
+    /account\s+code\s*[:=]?\s*["']?([0-9]{3,6})["']?/i,
+    /gl\s+account\s*[:=]?\s*["']?([0-9]{3,6})["']?/i,
+    
+    // Variations with # symbol
+    /account#\s*[:=]?\s*["']?([0-9]{3,6})["']?/i,
+    /account\s+#\s*[:=]?\s*["']?([0-9]{3,6})["']?/i,
+    /code\s+#\s*[:=]?\s*["']?([0-9]{3,6})["']?/i,
+    /#\s*([0-9]{3,6})["']?/i,
+    
+    // Patterns with 'should be' or 'is'
+    /(?:code|account|number)\s+(?:should|is|should be|is going to be|will be)\s+([0-9]{3,6})/i,
+    /(?:should|is|should be|is going to be|will be)\s+([0-9]{3,6})/i,
+    
+    // Generic pattern for numbers that look like GL codes - last resort
+    /\b([0-9]{3,6})\b/i
+  ];
+  
+  for (const pattern of codePatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      result.code = match[1];
+      console.log(`[GLUtils] Found GL code: ${result.code}`);
+      break;
+    }
+  }
+  
+  // Extract account name/description
+  const namePatterns = [
+    // Standard patterns
+    /name\s*[:=]?\s*["']?([^"']+)["']?/i,
+    /description\s*[:=]?\s*["']?([^"']+)["']?/i,
+    /title\s*[:=]?\s*["']?([^"']+)["']?/i,
+    
+    // Called/named patterns - allow # in names but stop at certain keywords
+    /called\s+["']?([^"']+?)(?:\s+(?:with|and|the|account|number|code|should|is|\bthe\s+account#\b)|$)/i,
+    /call\s+["']?([^"']+?)(?:\s+(?:with|and|the|account|number|code|should|is|\bthe\s+account#\b)|$)/i,  // For "create a GL account call Test"
+    /named\s+["']?([^"']+?)(?:\s+(?:with|and|the|account|number|code|should|is|\bthe\s+account#\b)|$)/i,
+    
+    // For patterns like "create a new GL account [name] with account# [code]"
+    /account\s+([^\d]+?)\s+(?:with|and)\s+(?:account|code|#)/i,
+    /gl\s+account\s+([^\d]+?)\s+(?:with|and)\s+(?:account|code|#)/i,
+    
+    // More generic patterns - use these as last resort, allow # in names
+    /gl\s+account\s+([^\d]+?)\s+(?:should|is|account|number)/i,
+    /new\s+account\s+([^\d]+?)\s+(?:should|is|account|number)/i,
+    // After 'call' or 'called' up until 'the account'
+    /(?:call|called)\s+([^\s]+[^\s]*?)\s+the\s+account/i
+  ];
+  
+  for (const pattern of namePatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      result.name = match[1].trim();
+      console.log(`[GLUtils] Found GL name: ${result.name}`);
+      break;
+    }
+  }
+  
+  // Post-processing to clean up extracted name if it's too long or contains keywords
+  if (result.name) {
+    // If the name contains keywords that indicate we've captured too much, trim it
+    const cutoffWords = ['account', 'code', 'number', 'with', 'should', 'the account#'];
+    for (const word of cutoffWords) {
+      const index = result.name.toLowerCase().indexOf(` ${word}`);
+      if (index > 0) {
+        result.name = result.name.substring(0, index).trim();
+        console.log(`[GLUtils] Trimmed GL name to: ${result.name}`);
+      }
+    }
+    
+    // Special handling for query like "account call Test#2 the account#"
+    // which might leave "Test#2 the" as the name
+    if (result.name && result.name.toLowerCase().endsWith(' the')) {
+      result.name = result.name.substring(0, result.name.length - 4).trim();
+      console.log(`[GLUtils] Removed trailing 'the' from GL name: ${result.name}`);
+    }
+    
+    // Limit name length to something reasonable (e.g., 50 characters)
+    if (result.name.length > 50) {
+      result.name = result.name.substring(0, 50).trim();
+      console.log(`[GLUtils] Truncated GL name to: ${result.name}`);
+    }
+  }
+  
+  // Extract notes if any
+  const notesPatterns = [
+    /notes?\s*[:=]?\s*["']?([^"']+)["']?/i,
+    /description\s*[:=]?\s*["']?([^"']+)["']?/i,
+    /comment\s*[:=]?\s*["']?([^"']+)["']?/i
+  ];
+  
+  for (const pattern of notesPatterns) {
+    const match = message.match(pattern);
+    if (match && match[1] !== result.name) { // Ensure notes are different from name
+      result.notes = match[1].trim();
+      console.log(`[GLUtils] Found GL notes: ${result.notes}`);
+      break;
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * Create a new GL account using the provided information
+ * @param code The account code
+ * @param name The account name/description
+ * @param notes Optional notes for the account
+ * @param userId The user creating the account
+ * @param startingBalance Optional starting balance for the account
+ * @param balanceDate Optional date for the starting balance (defaults to current date)
+ * @param accountType Optional account type (asset, liability, equity, revenue, expense)
+ */
+/**
+ * Helper function to determine account type from account code
+ * This is a fallback when account type is not explicitly provided
+ */
+function getAccountTypeFromCode(code: string): 'asset' | 'liability' | 'equity' | 'revenue' | 'expense' {
+  const accountCode = parseInt(code);
+  
+  // Asset accounts (1000-1999)
+  if (accountCode >= 1000 && accountCode < 2000) {
+    return 'asset';
+  }
+  // Liability accounts (2000-2999)
+  else if (accountCode >= 2000 && accountCode < 3000) {
+    return 'liability';
+  }
+  // Equity accounts (3000-3999)
+  else if (accountCode >= 3000 && accountCode < 4000) {
+    return 'equity';
+  }
+  // Revenue accounts (4000-4999)
+  else if (accountCode >= 4000 && accountCode < 5000) {
+    return 'revenue';
+  }
+  // Expense accounts (5000-5999)
+  else if (accountCode >= 5000 && accountCode < 6000) {
+    return 'expense';
+  }
+  
+  // Default to expense if code doesn't match any range
+  return 'expense';
+}
+
+export async function createGLAccount(
+  code: string,
+  name: string,
+  notes?: string,
+  userId?: string,
+  startingBalance?: number,
+  balanceDate?: string,
+  accountType?: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense'
+): Promise<{ success: boolean; message: string; account?: any; journalId?: number }> {
+  try {
+    console.log(`[GLUtils] Creating GL account: ${code} - ${name}`);
+    
+    if (!code || !name) {
+      return { success: false, message: 'Both code and name are required to create a GL account.' };
+    }
+    
+    // Check if account with this code already exists
+    const { rows: existingAccounts } = await sql`
+      SELECT code, name FROM accounts WHERE code = ${code}
+    `;
+    
+    if (existingAccounts.length > 0) {
+      return { 
+        success: false, 
+        message: `A GL account with code ${code} already exists (${existingAccounts[0].name}).` 
+      };
+    }
+    
+    // Start a transaction to ensure both account creation and journal entry (if needed) succeed or fail together
+    const client = await sql.connect();
+    let journalId: number | undefined;
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Insert the new account
+      const accountResult = await client.query(`
+        INSERT INTO accounts (code, name, notes, is_custom, account_type)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, code, name, notes, is_custom, account_type
+      `, [code, name, notes ?? null, true, accountType || getAccountTypeFromCode(code)]);
+      
+      const account = accountResult.rows[0];
+      
+      // If a starting balance is provided, create a journal entry
+      if (startingBalance && startingBalance !== 0) {
+        // Determine if this is a debit or credit balance based on account type
+        // Get the account type from the parameter or from the account we just created
+        const effectiveAccountType = accountType || account.account_type;
+        let isDebitBalance = false;
+        
+        // Asset and Expense accounts typically have debit balances
+        // Liability, Equity, and Revenue accounts typically have credit balances
+        if (effectiveAccountType === 'asset' || effectiveAccountType === 'expense') {
+          isDebitBalance = true;
+        }
+        
+        // Format the date or use current date
+        const transactionDate = balanceDate || new Date().toISOString().split('T')[0];
+        
+        // Get the equity account to balance against (typically Retained Earnings or Opening Balance Equity)
+        const equityAccountQuery = await client.query(`
+          SELECT id FROM accounts 
+          WHERE (LOWER(name) LIKE '%retained earnings%' OR LOWER(name) LIKE '%opening balance%') 
+          AND LOWER(account_type) = 'equity'
+          LIMIT 1
+        `);
+        
+        let equityAccountId: number;
+        
+        if (equityAccountQuery.rows.length > 0) {
+          equityAccountId = equityAccountQuery.rows[0].id;
+        } else {
+          // Create an Opening Balance Equity account if none exists
+          const openingBalanceResult = await client.query(`
+            INSERT INTO accounts (code, name, account_type, is_custom)
+            VALUES ('3900', 'Opening Balance Equity', 'equity', TRUE)
+            RETURNING id
+          `);
+          equityAccountId = openingBalanceResult.rows[0].id;
+        }
+        
+        // Create journal header - using transaction_date or date depending on schema
+        // First check if transaction_date column exists
+        const columnCheckQuery = await client.query(`
+          SELECT column_name 
+          FROM information_schema.columns 
+          WHERE table_name = 'journals' AND column_name = 'transaction_date'
+        `);
+        
+        const dateColumnName = columnCheckQuery.rows.length > 0 ? 'transaction_date' : 'date';
+        
+        // Create journal header
+        const journalResult = await client.query(`
+          INSERT INTO journals (
+            ${dateColumnName}, journal_type, memo, source, created_by, user_id, is_posted
+          ) VALUES (
+            $1, 'GJ', $2, 'System', $3, $4, true
+          ) RETURNING id
+        `, [
+          transactionDate,
+          `Initial balance for account ${code} - ${name}`,
+          userId || 'system',
+          userId || 'system'
+        ]);
+        
+        journalId = journalResult.rows[0].id;
+        
+        // Create journal lines - always omit line_number since it's causing issues
+        if (isDebitBalance) {
+          // Debit the new account, credit equity
+          await client.query(`
+            INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, user_id)
+            VALUES ($1, $2, $3, $4, 0, $5)
+          `, [journalId, account.id, `Initial balance`, Math.abs(startingBalance), userId || 'system']);
+          
+          await client.query(`
+            INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, user_id)
+            VALUES ($1, $2, $3, 0, $4, $5)
+          `, [journalId, equityAccountId, `Initial balance for ${code} - ${name}`, Math.abs(startingBalance), userId || 'system']);
+        } else {
+          // Credit the new account, debit equity
+          await client.query(`
+            INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, user_id)
+            VALUES ($1, $2, $3, 0, $4, $5)
+          `, [journalId, account.id, `Initial balance`, Math.abs(startingBalance), userId || 'system']);
+          
+          await client.query(`
+            INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, user_id)
+            VALUES ($1, $2, $3, $4, 0, $5)
+          `, [journalId, equityAccountId, `Initial balance for ${code} - ${name}`, Math.abs(startingBalance), userId || 'system']);
+        }
+      }
+      
+      // Commit the transaction
+      await client.query('COMMIT');
+      
+      // Return success with account info and journal ID if created
+      return { 
+        success: true, 
+        message: `GL account ${code} - ${name} has been created successfully${startingBalance ? ' with initial balance of ' + startingBalance : ''}.`,
+        account: accountResult.rows[0],
+        journalId
+      };
+    } catch (error) {
+      // Rollback the transaction if anything fails
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      // Release the client back to the pool
+      client.release();
+    }
+  } catch (error) {
+    console.error('[GLUtils] Error creating GL account:', error);
+    let errorMessage = 'An unknown error occurred while creating the GL account.';
+    
+    if (error instanceof Error) {
+      // Extract meaningful information from SQL errors if possible
+      if (error.message.includes('duplicate key')) {
+        errorMessage = `A GL account with code ${code} already exists.`;
+      } else {
+        errorMessage = `Error creating GL account: ${error.message}`;
+      }
+    }
+    
+    return { success: false, message: errorMessage };
   }
 }
 

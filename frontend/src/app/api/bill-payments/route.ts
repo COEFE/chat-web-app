@@ -18,14 +18,18 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     
-    // Validate required fields
-    if (!body.payment) {
+    // Handle both formats: { payment: {...} } or direct payment object
+    let payment;
+    if (body.payment) {
+      payment = body.payment;
+    } else if (body.bill_id) {
+      // If the body itself has bill_id, treat it as the payment object
+      payment = body;
+    } else {
       return NextResponse.json({ 
         error: 'Payment data is required' 
       }, { status: 400 });
     }
-    
-    const { payment } = body;
     
     if (!payment.bill_id) {
       return NextResponse.json({ error: 'Bill ID is required' }, { status: 400 });
@@ -43,10 +47,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Payment account ID is required' }, { status: 400 });
     }
     
-    // Check if bill exists
-    const bill = await getBill(payment.bill_id);
+    // Check if bill exists and belongs to the current user
+    const billId = typeof payment.bill_id === 'number' ? payment.bill_id : parseInt(payment.bill_id.toString());
+    const bill = await getBill(billId, true, true, userId); // Pass correct parameters: id, includeLines, includePayments, userId
     if (!bill) {
-      return NextResponse.json({ error: 'Bill not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Bill not found or you do not have permission to access it' }, { status: 404 });
     }
     
     // Check if bill is already fully paid
@@ -82,8 +87,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Journal entry description
-    const journalMemo = `Payment for Bill ${bill.bill_number || bill.id}`;
-    const debitDescription = `Payment to vendor for bill #${bill.bill_number || bill.id}`;
+    // Handle vendor_name which might come from the payment object or need to be fetched
+    const vendorName = payment.vendor_name || (bill as any).vendor_name || 'vendor';
+    const journalMemo = `Payment for Bill ${bill.bill_number || bill.id} to ${vendorName}`;
+    const debitDescription = `Payment to ${vendorName} for bill #${bill.bill_number || bill.id}`;
     const creditDescription = payment.reference_number ? 
       `Ref: ${payment.reference_number}` : 
       `Payment for Bill ${bill.bill_number || bill.id}`;
@@ -116,11 +123,11 @@ export async function POST(req: NextRequest) {
         // Insert journal header with dynamic column name
         const journalResult = await client.query(
           `INSERT INTO journals 
-            (${dateColumnName}, memo, source, journal_type, is_posted, created_by) 
+            (${dateColumnName}, memo, source, journal_type, is_posted, created_by, user_id) 
           VALUES 
-            ($1, $2, $3, $4, $5, $6) 
+            ($1, $2, $3, $4, $5, $6, $7) 
           RETURNING id`,
-          [payment.payment_date, journalMemo, 'AP', 'BP', true, userId]
+          [payment.payment_date, journalMemo, 'AP', 'BP', true, userId, userId]
         );
         
         journalId = journalResult.rows[0].id;
@@ -143,30 +150,30 @@ export async function POST(req: NextRequest) {
         if (hasLineNumber) {
           // If line_number column exists, use it
           lineValues = [
-            journalId, 1, bill.ap_account_id, debitDescription, amountPaidNum, 0, null, null, null, null,
-            journalId, 2, payment.payment_account_id, creditDescription, 0, amountPaidNum, null, null, null, null
+            journalId, 1, bill.ap_account_id, debitDescription, amountPaidNum, 0, null, null, null, null, userId,
+            journalId, 2, payment.payment_account_id, creditDescription, 0, amountPaidNum, null, null, null, null, userId
           ];
           
           query = `
             INSERT INTO journal_lines 
-              (journal_id, line_number, account_id, description, debit, credit, category, location, vendor, funder) 
+              (journal_id, line_number, account_id, description, debit, credit, category, location, vendor, funder, user_id) 
             VALUES 
-              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10),
-              ($11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11),
+              ($12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
           `;
         } else {
           // If line_number column doesn't exist, omit it
           lineValues = [
-            journalId, bill.ap_account_id, debitDescription, amountPaidNum, 0, null, null, null, null,
-            journalId, payment.payment_account_id, creditDescription, 0, amountPaidNum, null, null, null, null
+            journalId, bill.ap_account_id, debitDescription, amountPaidNum, 0, null, null, null, null, userId,
+            journalId, payment.payment_account_id, creditDescription, 0, amountPaidNum, null, null, null, null, userId
           ];
           
           query = `
             INSERT INTO journal_lines 
-              (journal_id, account_id, description, debit, credit, category, location, vendor, funder) 
+              (journal_id, account_id, description, debit, credit, category, location, vendor, funder, user_id) 
             VALUES 
-              ($1, $2, $3, $4, $5, $6, $7, $8, $9),
-              ($10, $11, $12, $13, $14, $15, $16, $17, $18)
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10),
+              ($11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
           `;
         }
         
@@ -205,7 +212,8 @@ export async function POST(req: NextRequest) {
       journal_id: journalId // Link to the created journal entry
     };
     
-    const newPayment = await createBillPayment(paymentData);
+    // Create the bill payment - make sure to pass the userId for proper data isolation
+    const newPayment = await createBillPayment(paymentData, userId);
 
     // Audit Log for Bill Payment Creation
     if (userId && newPayment && typeof newPayment.id !== 'undefined') {

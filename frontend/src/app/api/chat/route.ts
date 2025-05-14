@@ -24,6 +24,7 @@ import { File as GoogleCloudFile } from '@google-cloud/storage';
 import * as XLSX from 'xlsx-js-style'; 
 import { extractText } from 'unpdf'; 
 import { findRelevantGLCodes, mightBeAboutGLCodes } from '@/lib/glUtils';
+import { storeChatMessageWithEmbedding, ChatEmbedding, findSimilarChatMessages } from '@/lib/chatEmbeddings';
 
 console.log("--- MODULE LOAD: /api/chat/route.ts ---");
 
@@ -726,22 +727,87 @@ Please use this transaction data to answer the user's query about journal entrie
   console.log(`Active Sheet provided: ${activeSheet}`);
 
   // --- Persist user message so it shows after refresh ---
+  let userMessageId: string | undefined;
   try {
     const messagesCollectionPath = `users/${userId}/chats/${chatId}/messages`;
     const messagesCollectionRef = db.collection(messagesCollectionPath);
-    await messagesCollectionRef.add({
+    const docRef = await messagesCollectionRef.add({
       role: 'user',
       content: userMessageContent,
       userId,
       chatId,
       createdAt: firestore.FieldValue.serverTimestamp(),
     });
-    console.log(`[Chat API] User message persisted for chatId ${chatId}`);
+    userMessageId = docRef.id;
+    console.log(`[Chat API] User message persisted for chatId ${chatId} with docId ${userMessageId}`);
+    
+    // Store user message in vector database for semantic search
+    try {
+      console.log(`[Chat API] Storing user message in vector database`);
+      const chatEmbedding: ChatEmbedding = {
+        user_id: userId,
+        conversation_id: chatId,
+        message_id: userMessageId,
+        role: 'user',
+        content: userMessageContent
+      };
+      
+      const storedEmbedding = await storeChatMessageWithEmbedding(chatEmbedding);
+      if (storedEmbedding) {
+        console.log(`[Chat API] Successfully stored user message in vector database with embedding ID ${storedEmbedding.id}`);
+      } else {
+        console.warn(`[Chat API] Unable to store user message in vector database`);
+      }
+    } catch (vectorErr) {
+      console.error('[Chat API] Error storing user message in vector database:', vectorErr);
+      // Continue even if vector storage fails
+    }
   } catch(saveUserErr) {
     console.error('[Chat API] Failed to save user message:', saveUserErr);
   }
 
-  let systemPrompt = DEFAULT_SYSTEM_PROMPT;
+  // Retrieve similar past conversations to add to context
+  let similarConversations = '';
+  try {
+    console.log(`[Chat API] Retrieving similar past conversations for enhanced context`);
+    const similarMessages = await findSimilarChatMessages(userMessageContent, userId, 5, 0.7);
+    
+    if (similarMessages.length > 0) {
+      console.log(`[Chat API] Found ${similarMessages.length} similar past messages for context`);
+      similarConversations = '\n\n### Recent Related Conversations:\n';
+      
+      // Group by conversation
+      const conversationMap = new Map<string, ChatEmbedding[]>();
+      similarMessages.forEach(msg => {
+        if (!conversationMap.has(msg.conversation_id)) {
+          conversationMap.set(msg.conversation_id, []);
+        }
+        conversationMap.get(msg.conversation_id)?.push(msg);
+      });
+      
+      // Format conversations
+      conversationMap.forEach((messages, conversationId) => {
+        // Sort messages by created_at
+        messages.sort((a, b) => {
+          const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return dateA - dateB;
+        });
+        
+        similarConversations += `\nConversation ${conversationId.substring(0, 8)}:\n`;
+        messages.forEach(msg => {
+          similarConversations += `${msg.role === 'user' ? 'User' : 'You'}: ${msg.content.substring(0, 300)}${msg.content.length > 300 ? '...' : ''}\n`;
+        });
+      });
+    } else {
+      console.log(`[Chat API] No similar past conversations found`);
+    }
+  } catch (vectorErr) {
+    console.error('[Chat API] Error retrieving similar messages from vector database:', vectorErr);
+    // Continue without similar messages if there's an error
+  }
+  
+  let systemPrompt = DEFAULT_SYSTEM_PROMPT + similarConversations;
   let fileContent: string | Buffer | null = null;
   let isImageContext = false;
   let imageMediaType: string | undefined;
@@ -1054,7 +1120,7 @@ Please use this transaction data to answer the user's query about journal entrie
         try {
           const messagesCollectionPath = `users/${userId}/chats/${chatId}/messages`;
           const messagesCollectionRef = db.collection(messagesCollectionPath);
-          await messagesCollectionRef.add({
+          const docRef = await messagesCollectionRef.add({
             role: 'assistant',
             content: finalAiMessageContent,
             userId,
@@ -1062,7 +1128,30 @@ Please use this transaction data to answer the user's query about journal entrie
             createdAt: firestore.FieldValue.serverTimestamp(),
             ...(excelProcessingResult?.success && excelFileUrl ? { excelFileUrl } : {})
           });
-          console.log(`[route.ts][onFinish] Assistant message saved for chatId ${chatId}. Content: ${finalAiMessageContent.substring(0,100)}...`);
+          const assistantMessageId = docRef.id;
+          console.log(`[route.ts][onFinish] Assistant message saved for chatId ${chatId} with docId ${assistantMessageId}. Content: ${finalAiMessageContent.substring(0,100)}...`);
+          
+          // Store assistant message in vector database for semantic search
+          try {
+            console.log(`[route.ts][onFinish] Storing assistant message in vector database`);
+            const chatEmbedding: ChatEmbedding = {
+              user_id: userId,
+              conversation_id: chatId,
+              message_id: assistantMessageId,
+              role: 'assistant',
+              content: finalAiMessageContent
+            };
+            
+            const storedEmbedding = await storeChatMessageWithEmbedding(chatEmbedding);
+            if (storedEmbedding) {
+              console.log(`[route.ts][onFinish] Successfully stored assistant message in vector database with embedding ID ${storedEmbedding.id}`);
+            } else {
+              console.warn(`[route.ts][onFinish] Unable to store assistant message in vector database`);
+            }
+          } catch (vectorErr) {
+            console.error('[route.ts][onFinish] Error storing assistant message in vector database:', vectorErr);
+            // Continue even if vector storage fails
+          }
         } catch (saveErr) {
           console.error('[route.ts][onFinish] Error saving assistant message:', saveErr);
         }

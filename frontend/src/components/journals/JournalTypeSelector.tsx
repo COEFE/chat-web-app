@@ -43,10 +43,32 @@ export function JournalTypeSelector({
         
         if (!user) {
           console.log('User not logged in, using fallback journal types');
-          throw new Error('Authentication required');
+          // Instead of throwing an error, use the fallback types
+          setJournalTypes([
+            { code: 'GJ', name: 'General Journal', description: 'For general accounting entries', requires_approval: false },
+            { code: 'AP', name: 'Accounts Payable', description: 'For vendor bills and payments', requires_approval: false },
+            { code: 'AR', name: 'Accounts Receivable', description: 'For customer invoices and payments', requires_approval: false },
+            { code: 'ADJ', name: 'Adjusting Entries', description: 'For period-end adjustments', requires_approval: false }
+          ]);
+          setIsLoading(false);
+          return; // Exit early
         }
         
-        const token = await user.getIdToken();
+        let token;
+        try {
+          token = await user.getIdToken();
+        } catch (error) {
+          console.error('Error getting auth token:', error);
+          // Use fallback types on token error
+          setJournalTypes([
+            { code: 'GJ', name: 'General Journal', description: 'For general accounting entries', requires_approval: false },
+            { code: 'AP', name: 'Accounts Payable', description: 'For vendor bills and payments', requires_approval: false },
+            { code: 'AR', name: 'Accounts Receivable', description: 'For customer invoices and payments', requires_approval: false },
+            { code: 'ADJ', name: 'Adjusting Entries', description: 'For period-end adjustments', requires_approval: false }
+          ]);
+          setIsLoading(false);
+          return; // Exit early
+        }
         
         // Try to get journal types from regular endpoint with auth token
         let response = await fetch('/api/journals?types=true', {

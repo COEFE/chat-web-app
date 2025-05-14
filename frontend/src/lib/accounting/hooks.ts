@@ -320,23 +320,36 @@ async function recordAuditEvent(
   before?: any,
   after?: any
 ): Promise<void> {
-  await sql`
-    INSERT INTO journal_audit (
-      journal_id,
-      action,
-      performed_by,
-      performed_at,
-      before_state,
-      after_state
-    ) VALUES (
-      ${journalId},
-      ${action},
-      ${userId},
-      CURRENT_TIMESTAMP,
-      ${before ? JSON.stringify(before) : null},
-      ${after ? JSON.stringify(after) : null}
-    )
-  `;
+  try {
+    // Insert into audit_logs table which actually exists instead of journal_audit
+    await sql`
+      INSERT INTO audit_logs (
+        timestamp,
+        user_id,
+        action_type,
+        entity_type,
+        entity_id,
+        changes_made,
+        status,
+        context
+      ) VALUES (
+        CURRENT_TIMESTAMP,
+        ${userId},
+        ${action},
+        'JOURNAL',
+        ${journalId.toString()},
+        ${after ? JSON.stringify({ after }) : null},
+        'SUCCESS',
+        ${JSON.stringify({
+          before: before ? JSON.stringify(before) : null,
+          journalId
+        })}
+      )
+    `;
+  } catch (error) {
+    // Log error but don't rethrow - audit logging should not block main operations
+    console.error('Error recording journal audit event:', error);
+  }
 }
 
 /**

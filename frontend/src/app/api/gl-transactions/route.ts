@@ -1,5 +1,5 @@
-import { sql } from '@vercel/postgres';
 import { NextRequest, NextResponse } from 'next/server';
+import { sql } from '@vercel/postgres';
 import { authenticateRequest } from '@/lib/authenticateRequest';
 
 export async function GET(req: NextRequest) {
@@ -17,6 +17,9 @@ export async function GET(req: NextRequest) {
 
   try {
     // Handle potential errors with the query more gracefully
+    console.log(`[gl-transactions] Fetching transactions for user: ${userId}`);
+    
+    // Ensure we're strictly filtering by user_id for data privacy
     const { rows } = await sql`
       SELECT 
         id, 

@@ -93,6 +93,9 @@ export default function RootLayout({
                   <Link href="/dashboard/admin/database">Admin DB</Link>
                 </Button>
                 <Button asChild variant="ghost">
+                  <Link href="/admin/agent-tests">Agent Tests</Link>
+                </Button>
+                <Button asChild variant="ghost">
                   <Link href="/dashboard/admin/audit-logs">Audit Logs</Link>
                 </Button>
               </div>
