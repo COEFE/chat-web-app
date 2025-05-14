@@ -7,8 +7,9 @@ import { sql } from '@vercel/postgres';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: { id: string } }
 ) {
+  const { params } = context;
   const { userId, error } = await authenticateRequest(request);
   if (error) return error;
 
