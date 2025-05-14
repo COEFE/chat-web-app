@@ -56,6 +56,23 @@ export interface BillPayment {
 }
 
 /**
+ * Interface for Bill Refund objects
+ */
+export interface BillRefund {
+  id?: number;
+  bill_id: number;
+  refund_date: string;
+  amount: number;
+  refund_account_id: number;
+  refund_method?: string;
+  reference_number?: string;
+  journal_id?: number;
+  reason?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/**
  * Get a list of bills with optional filtering and pagination
  */
 export interface BillWithVendor extends Bill {
@@ -756,6 +773,97 @@ export async function createBillPayment(payment: BillPayment, userId?: string): 
   } catch (error) {
     // Rollback in case of error
     await sql.query('ROLLBACK');
+    throw error;
+  }
+}
+
+/**
+ * Delete a bill payment
+ */
+/**
+ * Create a bill refund
+ */
+export async function createBillRefund(refund: BillRefund, userId?: string): Promise<BillRefund> {
+  // Ensure we have a userId for proper data isolation
+  if (!userId) {
+    console.warn('[createBillRefund] No userId provided, data isolation may be compromised');
+  }
+  
+  try {
+    // Insert the refund
+    const refundQuery = `
+      INSERT INTO bill_refunds (
+        bill_id,
+        refund_date,
+        amount,
+        refund_account_id,
+        refund_method,
+        reference_number,
+        journal_id,
+        reason,
+        user_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING *
+    `;
+    
+    const refundResult = await sql.query(refundQuery, [
+      refund.bill_id,
+      refund.refund_date,
+      refund.amount,
+      refund.refund_account_id,
+      refund.refund_method || null,
+      refund.reference_number || null,
+      refund.journal_id || null,
+      refund.reason || 'Vendor refund',
+      userId || null // Include user_id for proper data isolation
+    ]);
+    
+    return refundResult.rows[0] as BillRefund;
+  } catch (error) {
+    console.error('Error creating bill refund:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a bill refund
+ */
+export async function deleteBillRefund(id: number, userId?: string): Promise<boolean> {
+  // Ensure we have a userId for proper data isolation
+  if (!userId) {
+    console.warn('[deleteBillRefund] No userId provided, data isolation may be compromised');
+  }
+  
+  try {
+    // Get the refund details first
+    const refundQuery = `
+      SELECT * FROM bill_refunds WHERE id = $1 ${userId ? 'AND user_id = $2' : ''}
+    `;
+    
+    const refundResult = await sql.query(refundQuery, userId ? [id, userId] : [id]);
+    
+    if (refundResult.rows.length === 0) {
+      return false;
+    }
+    
+    const refund = refundResult.rows[0];
+    
+    // Delete the refund
+    const deleteQuery = `
+      DELETE FROM bill_refunds WHERE id = $1 ${userId ? 'AND user_id = $2' : ''}
+    `;
+    
+    const result = await sql.query(deleteQuery, userId ? [id, userId] : [id]);
+    
+    // If the refund has a journal ID, delete the journal entry as well
+    if (refund.journal_id) {
+      await sql.query(`DELETE FROM journal_lines WHERE journal_id = $1`, [refund.journal_id]);
+      await sql.query(`DELETE FROM journals WHERE id = $1`, [refund.journal_id]);
+    }
+    
+    return result.rowCount !== null && result.rowCount > 0;
+  } catch (error) {
+    console.error('Error deleting bill refund:', error);
     throw error;
   }
 }

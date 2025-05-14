@@ -41,7 +41,9 @@ export default function DatabaseAdminPage() {
       "027_fix_journal_balance_trigger.sql",
       "034_add_journal_reversal_columns.sql",
       "035_recreate_audit_logs_table.sql",
-      "036_add_user_id_to_journals.sql"
+      "036_add_user_id_to_journals.sql",
+      "037_create_bill_refunds_table.sql",
+      "038_add_bill_refund_journal_type.sql"
     ];
     setAvailableMigrations(migrations);
   }, []);
@@ -62,7 +64,9 @@ export default function DatabaseAdminPage() {
       "027_fix_journal_balance_trigger.sql": "Converts journal balance trigger to a deferrable constraint trigger, preventing false imbalance errors when saving multi-line journal entries.",
       "034_add_journal_reversal_columns.sql": "Adds reversal_of_journal_id and reversed_by_journal_id columns to the journals table. Required for the journal reversal feature.",
       "035_recreate_audit_logs_table.sql": "Recreates the audit_logs table to resolve issues with the previous migration. Required for the audit trail system to function properly.",
-      "036_add_user_id_to_journals.sql": "Adds user_id column to journals table and creates an index for better performance. CRITICAL SECURITY UPDATE: Required for proper data isolation between user accounts."
+      "036_add_user_id_to_journals.sql": "Adds user_id column to journals table and creates an index for better performance. CRITICAL SECURITY UPDATE: Required for proper data isolation between user accounts.",
+      "037_create_bill_refunds_table.sql": "Creates the bill_refunds table for tracking refunds against paid vendor bills. Required for the vendor bill refund feature.",
+      "038_add_bill_refund_journal_type.sql": "Adds the 'BR' (Bill Refund) journal type to the journal_types table. Required for properly categorizing bill refund transactions."
     };
     return descriptions[filename] || "Run this migration to update your database schema.";
   };

@@ -18,7 +18,8 @@ import {
   Calendar,
   ClipboardCheck,
   Building,
-  CreditCard 
+  CreditCard,
+  RotateCcw
 } from "lucide-react";
 import {
   AlertDialog,
@@ -35,6 +36,8 @@ import { useAuth } from "@/context/AuthContext";
 import { getAuth } from "firebase/auth";
 import { BillForm } from "@/components/accounts-payable/BillForm";
 import { BillPaymentForm } from "@/components/accounts-payable/BillPaymentForm";
+import CreateBillRefundButton from "@/components/bills/CreateBillRefundButton";
+import BillRefundsTable from "@/components/bills/BillRefundsTable";
 
 interface BillLine {
   id: number;
@@ -57,6 +60,21 @@ interface BillPayment {
   reference_number?: string;
   journal_id?: number;
   created_at: string;
+}
+
+interface BillRefund {
+  id: number;
+  bill_id: number;
+  refund_date: string;
+  amount: number;
+  refund_account_id: number;
+  refund_account_name?: string;
+  refund_method?: string;
+  reference_number?: string;
+  journal_id?: number;
+  reason?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 interface Bill {
@@ -94,6 +112,10 @@ export default function BillDetailsPage() {
   const [showPaymentForm, setShowPaymentForm] = useState<boolean>(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  
+  const [refunds, setRefunds] = useState<BillRefund[]>([]);
+  const [refundsLoading, setRefundsLoading] = useState<boolean>(false);
+  const [accounts, setAccounts] = useState<{id: number; name: string; code: string}[]>([]);
 
   // Check if we should show the payment form (from URL parameter)
   useEffect(() => {
@@ -139,8 +161,62 @@ export default function BillDetailsPage() {
   useEffect(() => {
     if (user && id) {
       fetchBill();
+      fetchRefunds();
+      fetchAccounts();
     }
   }, [user, id]);
+  
+  // Fetch refunds for this bill
+  const fetchRefunds = async () => {
+    if (!id) return;
+    
+    setRefundsLoading(true);
+    
+    try {
+      const auth = getAuth();
+      const idToken = await auth.currentUser?.getIdToken();
+      
+      const response = await fetch(`/api/bills/${id}/refunds`, {
+        headers: {
+          'Authorization': `Bearer ${idToken}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Error fetching refunds: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setRefunds(data.refunds || []);
+    } catch (err: any) {
+      console.error("Error fetching refunds:", err);
+    } finally {
+      setRefundsLoading(false);
+    }
+  };
+  
+  // Fetch accounts for the refund form
+  const fetchAccounts = async () => {
+    try {
+      const auth = getAuth();
+      const idToken = await auth.currentUser?.getIdToken();
+      
+      const response = await fetch('/api/accounts', {
+        headers: {
+          'Authorization': `Bearer ${idToken}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Error fetching accounts: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setAccounts(data.accounts || []);
+    } catch (err: any) {
+      console.error("Error fetching accounts:", err);
+    }
+  };
 
   const handleBackClick = () => {
     router.push("/dashboard/accounts-payable/bills");
@@ -342,6 +418,16 @@ export default function BillDetailsPage() {
                 Record Payment
               </Button>
             </>
+          )}
+          
+          {bill.status === 'Paid' && (
+            <CreateBillRefundButton
+              billId={bill.id}
+              billNumber={bill.bill_number}
+              amountPaid={bill.amount_paid}
+              onRefundCreated={fetchRefunds}
+              accounts={accounts}
+            />
           )}
           
           {bill.amount_paid === 0 && (
@@ -581,6 +667,34 @@ export default function BillDetailsPage() {
               )}
             </CardContent>
           </Card>
+          
+          {/* Refunds Card - Only show for paid bills with refunds or if refunds exist */}
+          {(bill.status === 'Paid' || refunds.length > 0) && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Refund History</CardTitle>
+                <CardDescription>
+                  {refunds.length === 0 
+                    ? "No refunds recorded yet" 
+                    : `${refunds.length} refund(s) recorded`}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {refundsLoading ? (
+                  <div className="flex justify-center py-4">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : (
+                  <BillRefundsTable
+                    billId={bill.id}
+                    billNumber={bill.bill_number}
+                    refunds={refunds}
+                    onRefundDeleted={fetchRefunds}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          )}
           
           {/* Bill Info Card */}
           <Card>
