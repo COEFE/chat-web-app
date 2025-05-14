@@ -71,22 +71,67 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ results });
     }
     // Single account creation
-    const { code, name, notes, parent_id } = body;
+    const { code, name, notes, parent_id, account_type, is_bank_account } = body;
     if (!code || !name) {
       return NextResponse.json({ error: 'Code and name are required' }, { status: 400 });
     }
-    const { rows } = await sql`
-      INSERT INTO accounts (code, name, parent_id, notes, is_custom)
-      VALUES (
-        ${code},
-        ${name},
-        ${parent_id ?? null},
-        ${notes ?? null},
-        TRUE
-      )
-      RETURNING id, code, name, parent_id, notes, is_custom
-    `;
-    return NextResponse.json({ account: rows[0] });
+    
+    // Check if is_bank_account column exists
+    try {
+      const { rows } = await sql`
+        INSERT INTO accounts (
+          code, 
+          name, 
+          parent_id, 
+          notes, 
+          is_custom, 
+          account_type, 
+          is_bank_account,
+          user_id
+        )
+        VALUES (
+          ${code},
+          ${name},
+          ${parent_id ?? null},
+          ${notes ?? null},
+          TRUE,
+          ${account_type ?? 'ASSET'},
+          ${is_bank_account ?? false},
+          ${userId}
+        )
+        RETURNING id, code, name, parent_id, notes, is_custom, account_type, is_bank_account
+      `;
+      return NextResponse.json({ account: rows[0] });
+    } catch (err: any) {
+      // If the is_bank_account column doesn't exist yet, try without it
+      if (err.message && err.message.includes("column \"is_bank_account\" of relation \"accounts\" does not exist")) {
+        console.log('[accounts] is_bank_account column not found, inserting without it');
+        const { rows } = await sql`
+          INSERT INTO accounts (
+            code, 
+            name, 
+            parent_id, 
+            notes, 
+            is_custom, 
+            account_type, 
+            user_id
+          )
+          VALUES (
+            ${code},
+            ${name},
+            ${parent_id ?? null},
+            ${notes ?? null},
+            TRUE,
+            ${account_type ?? 'ASSET'},
+            ${userId}
+          )
+          RETURNING id, code, name, parent_id, notes, is_custom, account_type
+        `;
+        return NextResponse.json({ account: rows[0] });
+      } else {
+        throw err; // Re-throw if it's a different error
+      }
+    }
   } catch (err: any) {
     console.error('[accounts] POST error:', err);
     return NextResponse.json({ error: err.message || 'Unknown error' }, { status: 500 });
