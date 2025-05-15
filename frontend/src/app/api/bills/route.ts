@@ -358,7 +358,11 @@ export async function GET(req: NextRequest) {
     const vendorId = url.searchParams.get('vendorId') ? parseInt(url.searchParams.get('vendorId') as string, 10) : undefined;
     const startDate = url.searchParams.get('startDate') || undefined;
     const endDate = url.searchParams.get('endDate') || undefined;
-    const status = url.searchParams.get('status') || undefined;
+    
+    // Handle multiple status values
+    const statusValues = url.searchParams.getAll('status');
+    const status = statusValues.length > 0 ? statusValues : undefined;
+    
     const includeDeletedParam = url.searchParams.get('includeDeleted');
     const page = parseInt(url.searchParams.get('page') || '1', 10);
     const limit = parseInt(url.searchParams.get('limit') || '50', 10);

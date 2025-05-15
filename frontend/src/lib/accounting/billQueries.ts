@@ -86,7 +86,7 @@ export async function getBills(
   vendorId?: number,
   startDate?: string,
   endDate?: string,
-  status?: string,
+  status?: string | string[],
   includeDeleted: boolean = false,
   userId?: string
 ): Promise<{ bills: Bill[], total: number }> {
@@ -115,9 +115,19 @@ export async function getBills(
     }
     
     if (status) {
-      whereClause += whereClause ? ' AND' : ' WHERE';
-      whereClause += ` status = $${paramIndex++}`;
-      values.push(status);
+      if (Array.isArray(status) && status.length > 0) {
+        // Handle multiple status values
+        whereClause += whereClause ? ' AND' : ' WHERE';
+        const statusPlaceholders = status.map((_, i) => `$${paramIndex + i}`).join(', ');
+        whereClause += ` status IN (${statusPlaceholders})`;
+        values.push(...status);
+        paramIndex += status.length;
+      } else if (typeof status === 'string') {
+        // Handle single status value
+        whereClause += whereClause ? ' AND' : ' WHERE';
+        whereClause += ` status = $${paramIndex++}`;
+        values.push(status);
+      }
     }
     
     // Filter by user_id if provided (for proper data isolation)
