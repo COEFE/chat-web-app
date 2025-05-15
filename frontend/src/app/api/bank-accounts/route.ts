@@ -125,10 +125,11 @@ export async function POST(req: NextRequest) {
         institution_name, 
         gl_account_id, 
         is_active,
+        user_id,
         created_at,
         updated_at
       ) 
-      VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING *
     `;
     
@@ -138,7 +139,8 @@ export async function POST(req: NextRequest) {
       body.routing_number || null,
       body.institution_name,
       body.gl_account_id,
-      body.is_active !== undefined ? body.is_active : true
+      body.is_active !== undefined ? body.is_active : true,
+      userId // Include the authenticated user's ID
     ]);
     
     return NextResponse.json(result.rows[0]);

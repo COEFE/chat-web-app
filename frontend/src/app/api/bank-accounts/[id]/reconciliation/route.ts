@@ -72,8 +72,9 @@ export async function POST(req: NextRequest) {
           starting_balance,
           ending_balance,
           bank_statement_balance,
-          status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+          status,
+          user_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id`,
         [
           bankAccountId,
@@ -82,7 +83,8 @@ export async function POST(req: NextRequest) {
           bookBalance,      // starting_balance
           bookBalance,      // ending_balance initialised to same value; will update upon reconciliation completion
           bank_statement_balance,
-          'in_progress'
+          'in_progress',
+          userId           // Add authenticated user ID
         ]
       );
       
