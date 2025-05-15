@@ -313,17 +313,41 @@ export function BillForm({ bill, onClose }: BillFormProps) {
         // Make all GL accounts available for AP account selection
         setApAccounts(sortedAccounts);
 
-        // Find and set the default AP account (2010 - Accounts Payable)
-        const apAccount = sortedAccounts.find((account: Account) => 
-          account.code === '2010' && account.name.includes('Accounts Payable')
+        // Find and set the default AP account using multiple matching strategies
+        // This ensures we always select an Accounts Payable account for vendor bills
+        let apAccount = null;
+        
+        // Strategy 1: Find standard Accounts Payable account with code 2000
+        apAccount = sortedAccounts.find((account: Account) => 
+          (account.code === '2000' || account.code === '2010') && 
+          account.name.toLowerCase().includes('accounts payable')
         );
         
+        // Strategy 2: Find any account with Accounts Payable in the name
+        if (!apAccount) {
+          apAccount = sortedAccounts.find((account: Account) => 
+            account.name.toLowerCase().includes('accounts payable')
+          );
+        }
+        
+        // Strategy 3: Find any liability account in the 2000-2999 range
+        if (!apAccount) {
+          apAccount = sortedAccounts.find((account: Account) => 
+            account.type?.toLowerCase() === 'liability' && 
+            account.code.startsWith('2')
+          );
+        }
+        
+        // If we found an AP account, set it as default and immediately apply it
         if (apAccount) {
+          console.log(`[BillForm] Found default AP account: ${apAccount.name} (${apAccount.code})`);
           setDefaultApAccountId(apAccount.id.toString());
-          // Only set the form value if no bill is being edited (new bill)
-          if (!bill) {
-            form.setValue('ap_account_id', apAccount.id.toString());
-          }
+          
+          // Always set the AP account ID, even for existing bills
+          // This ensures all bills use a proper AP account
+          form.setValue('ap_account_id', apAccount.id.toString());
+        } else {
+          console.warn("[BillForm] No Accounts Payable account found. Please create one.");
         }
         
         // Cash & Bank accounts (for payment) - keeping this for reference
@@ -650,25 +674,35 @@ export function BillForm({ bill, onClose }: BillFormProps) {
                   name="ap_account_id"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>AP Account*</FormLabel>
+                      <FormLabel className="font-semibold text-blue-700">Accounts Payable*</FormLabel>
                       <Select 
                         onValueChange={field.onChange} 
                         defaultValue={field.value}
                         disabled={(bill?.amount_paid || 0) > 0}
                       >
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger className="border-blue-500 bg-blue-50">
                             <SelectValue placeholder="Select an AP account" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {apAccounts.map((account) => (
-                            <SelectItem key={account.id} value={account.id.toString()}>
-                              {account.code} - {account.name}
-                            </SelectItem>
+                          {/* Only show liability accounts for AP */}
+                          {apAccounts
+                            .filter(account => 
+                              account.type?.toLowerCase() === 'liability' || 
+                              account.code.startsWith('2') || 
+                              account.name.toLowerCase().includes('payable')
+                            )
+                            .map((account) => (
+                              <SelectItem key={account.id} value={account.id.toString()}>
+                                {account.code} - {account.name}
+                              </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                      <div className="text-xs text-muted-foreground">
+                        Vendor bills must use an Accounts Payable (liability) account
+                      </div>
                       <FormMessage />
                     </FormItem>
                   )}

@@ -2413,6 +2413,106 @@ Use the following information to help answer the user's query about accounts pay
     }
   }
 
+  /**
+   * STRICTLY find an Accounts Payable account - this will NEVER return a non-liability account
+   * 
+   * This is a safety mechanism that ensures we ONLY use proper liability-type
+   * Accounts Payable accounts for bills, following accounting standards
+   */
+  private async findStrictApAccount(context: AgentContext): Promise<number> {
+    console.log(`[APAgent] Starting STRICT search for proper Accounts Payable account`);
+
+    try {
+      // STEP 1: Try to find an existing standard Accounts Payable account
+      const accountTypes = ['liability'];
+      const accountCodes = ['2000', '2010', '2100'];
+      const accountNamePatterns = ['accounts payable', 'account payable', 'ap account', 'trade creditors'];
+      
+      // Build a comprehensive query that STRICTLY ensures we get a liability account
+      const strictApQuery = `
+        SELECT id, name, code, account_type 
+        FROM accounts 
+        WHERE user_id = ${context.userId || 'NULL'}
+        AND (
+          LOWER(account_type) = 'liability' OR 
+          account_type = 'Liability' OR 
+          account_type = 'LIABILITY'
+        )
+        AND (
+          ${accountCodes.map(code => `code = '${code}'`).join(' OR ')}
+          OR
+          ${accountNamePatterns.map(pattern => `LOWER(name) LIKE '%${pattern}%'`).join(' OR ')}
+          OR
+          code LIKE '2%'
+        )
+        ORDER BY 
+          CASE 
+            WHEN code = '2000' AND LOWER(name) LIKE '%accounts payable%' THEN 1
+            WHEN code = '2000' THEN 2
+            WHEN LOWER(name) = 'accounts payable' THEN 3
+            WHEN LOWER(name) LIKE '%payable%' THEN 4
+            WHEN code LIKE '2%' THEN 5
+            ELSE 6
+          END ASC,
+          id ASC
+        LIMIT 1
+      `;
+      
+      console.log(`[APAgent] Executing STRICT AP account query`);
+      const strictResult = await sql.query(strictApQuery);
+      
+      // If we found a standard AP account, use it
+      if (strictResult.rows.length > 0) {
+        const accountId = strictResult.rows[0].id;
+        const accountType = strictResult.rows[0].account_type;
+        const accountName = strictResult.rows[0].name;
+        const accountCode = strictResult.rows[0].code;
+        
+        // CRITICAL - Validate the account really is a liability account
+        // This prevents any possibility of using an asset account
+        if (accountType?.toLowerCase() !== 'liability') {
+          console.error(`[APAgent] ERROR - Retrieved non-liability account: ${accountName} (${accountCode}) type:${accountType}`);
+          throw new Error(`Retrieved non-liability account for Accounts Payable: ${accountName}`);
+        }
+        
+        console.log(`[APAgent] Found validated AP account: ${accountName} (${accountCode}), ID: ${accountId}`);
+        return accountId;
+      }
+      
+      // STEP 2: No AP account found - CREATE ONE IMMEDIATELY
+      console.warn(`[APAgent] No AP account found - creating a standard Accounts Payable account...`);
+      
+      // Create directly in database to ensure it works
+      const insertResult = await sql.query(`
+        INSERT INTO accounts (user_id, name, code, account_type, description, is_active, created_at, updated_at)
+        VALUES (
+          ${context.userId || 'NULL'}, 
+          'Accounts Payable', 
+          '2000', 
+          'liability', 
+          'Standard accounts payable - money owed to vendors and suppliers', 
+          true, 
+          NOW(), 
+          NOW()
+        )
+        RETURNING id
+      `);
+
+      if (insertResult.rows.length > 0) {
+        const newAccountId = insertResult.rows[0].id;
+        console.log(`[APAgent] Successfully created standard Accounts Payable account: ${newAccountId}`);
+        return newAccountId;
+      }
+      
+      // If we get here, something is very wrong - no accounts could be created or found
+      throw new Error('Failed to find or create any Accounts Payable account');
+      
+    } catch (error) {
+      console.error('[APAgent] Critical error in AP account handling:', error);
+      throw new Error('Could not establish a proper Accounts Payable account for bills');
+    }
+  }
+  
   private async createBillWithInfo(context: AgentContext): Promise<AgentResponse> {
     try {
       // Check if we have pending bill creation info
@@ -2446,113 +2546,20 @@ Use the following information to help answer the user's query about accounts pay
         thirtyDaysLater.setDate(today.getDate() + 30);
         dueDate = `${thirtyDaysLater.getFullYear()}-${(thirtyDaysLater.getMonth() + 1).toString().padStart(2, '0')}-${thirtyDaysLater.getDate().toString().padStart(2, '0')}`;
       }
+
+      // *** CRITICAL: Always use a validated AP account ***
+      // Using our strict AP account finder that ONLY returns liability accounts
+      console.log(`[APAgent] Finding a valid Accounts Payable account for bill creation`);
+      const apAccountId = await this.findStrictApAccount(context);
+      console.log(`[APAgent] Using strictly validated AP account ID: ${apAccountId}`);
       
-      /**
-       * Get a valid Accounts Payable account ID from database
-       * 
-       * As a world-class accounting system, we must follow proper double-entry accounting
-       * principles. For vendor bills, we MUST use an Accounts Payable liability account
-       * (never an asset account) as this represents money we owe to vendors.
-       */
-      let apAccountId;
-      try {
-        console.log(`[APAgent] Starting comprehensive search for proper Accounts Payable account`);
-        
-        // FORCE-CREATE a standard Accounts Payable account if it doesn't exist
-        // This is critical for proper accounting - we need a liability account for bills
-        
-        // First, check if a standard AP account already exists
-        const standardApQuery = `
-          SELECT id, name, code, account_type 
-          FROM accounts 
-          WHERE user_id = ${context.userId || 'NULL'}
-          AND LOWER(account_type) = 'liability'
-          AND (
-            LOWER(name) = 'accounts payable' OR
-            code = '2000'
-          )
-          ORDER BY 
-            CASE 
-              WHEN LOWER(name) = 'accounts payable' AND code = '2000' THEN 1
-              WHEN LOWER(name) = 'accounts payable' THEN 2
-              WHEN code = '2000' THEN 3
-              ELSE 4
-            END ASC,
-            id ASC
-          LIMIT 1
-        `;
-        
-        console.log(`[APAgent] Looking for standard AP account`);
-        const standardResult = await sql.query(standardApQuery);
-        
-        // If we found a standard AP account, use it
-        if (standardResult.rows.length > 0) {
-          apAccountId = standardResult.rows[0].id;
-          console.log(`[APAgent] Found standard AP account: ${standardResult.rows[0].name} (${standardResult.rows[0].code}), ID: ${apAccountId}`);
-        } else {
-          // No standard AP account found - CREATE ONE
-          console.log(`[APAgent] No standard AP account found. Creating one now...`);
-          
-          // Create a proper AP account via GL agent
-          const glAccountResult = await this.requestGLAccountCreation(
-            context,
-            "Accounts Payable",
-            "2000", // Standard AP account code
-            0,       // No starting balance
-            undefined,    // No balance date
-            false    // Not an expense account
-          );
-          
-          if (glAccountResult.success && glAccountResult.accountId) {
-            apAccountId = glAccountResult.accountId;
-            console.log(`[APAgent] Created new Accounts Payable account with ID: ${apAccountId}`);
-          } else {
-            // If we couldn't create an AP account (rare), try fallbacks
-            console.warn(`[APAgent] Failed to create AP account. Looking for fallbacks...`);
-            
-            // Try fallback: ANY liability account
-            const liabilityQuery = `
-              SELECT id, name, code, account_type 
-              FROM accounts 
-              WHERE user_id = ${context.userId || 'NULL'}
-              AND LOWER(account_type) = 'liability'
-              ORDER BY id ASC
-              LIMIT 1
-            `;
-            
-            const liabilityResult = await sql.query(liabilityQuery);
-            
-            if (liabilityResult.rows.length > 0) {
-              apAccountId = liabilityResult.rows[0].id;
-              console.log(`[APAgent] Using liability account as fallback: ${liabilityResult.rows[0].name} (${liabilityResult.rows[0].code}), ID: ${apAccountId}`);
-            } else {
-              // Absolute worst case: Create a direct insert of a bare-minimum AP account
-              console.warn(`[APAgent] No liability accounts found. Performing direct AP account creation...`);
-              
-              try {
-                const insertResult = await sql.query(`
-                  INSERT INTO accounts (user_id, name, code, account_type, description, is_active, created_at, updated_at)
-                  VALUES (${context.userId || 'NULL'}, 'Accounts Payable', '2000', 'liability', 'Tracks money owed to vendors', true, NOW(), NOW())
-                  RETURNING id
-                `);
-                
-                if (insertResult.rows.length > 0) {
-                  apAccountId = insertResult.rows[0].id;
-                  console.log(`[APAgent] Successfully created AP account via direct insert: ${apAccountId}`);
-                } else {
-                  throw new Error('Failed to create AP account via direct insert');
-                }
-              } catch (directInsertError) {
-                console.error('[APAgent] Failed to create AP account via direct insert:', directInsertError);
-                throw new Error('Could not create or find any suitable liability account for bills');
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.error('[APAgent] Error in AP account handling:', err);
-        throw new Error('Failed to find or create a valid account for AP');
+      // Ensure we actually have a valid AP account ID (belt-and-suspenders check)
+      if (!apAccountId) {
+        throw new Error('Could not establish a valid Accounts Payable account for bill creation');
       }
+      
+      // Explicit verification in logs that we're using the right account
+      console.log(`[APAgent] ✓ VERIFIED: Using Accounts Payable account ${apAccountId} for bill creation`);
       
       // Determine payment terms from extracted data or default to Net 30
       let paymentTerms = 'Net 30';
@@ -2617,16 +2624,53 @@ Use the following information to help answer the user's query about accounts pay
         // Continue anyway, using just the description
       }
       
-      // Find or request an appropriate expense account using BOTH bill description AND vendor name
-      const expenseAccountResult = await this.findOrRequestExpenseAccount(
-        context, 
-        billInfo.description || 'General Expense',
-        vendorName // Pass vendor name to help with intelligent category selection
-      );
+      // INTELLIGENT EXPENSE ACCOUNT SELECTION:
+      // Analyze both description and vendor to determine the best expense account
+      console.log(`[APAgent] Performing intelligent expense account selection based on vendor:"${vendorName}" and description:"${billInfo.description || 'General Expense'}"`);
       
-      if (!expenseAccountResult.accountId) {
-        throw new Error('Failed to find a valid expense account: ' + expenseAccountResult.message);
+      // Get expense account using our enhanced algorithm
+      let expenseAccountResult;
+      try {
+        // First, try to find a categorized expense account using our advanced matcher
+        expenseAccountResult = await this.findOrRequestExpenseAccount(
+          context, 
+          billInfo.description || 'General Expense',
+          vendorName // Pass vendor name to help with intelligent category selection
+        );
+        
+        // Verify the account is valid
+        if (!expenseAccountResult.accountId) {
+          console.warn(`[APAgent] First expense account selection attempt failed, creating default expense account`);
+          
+          // Direct database insertion as last resort - Create a general expense account
+          const directInsertResult = await sql.query(`
+            INSERT INTO accounts (user_id, name, code, account_type, description, is_active, created_at, updated_at)
+            VALUES (${context.userId || 'NULL'}, 'General Operating Expense', '5000', 'expense', 'General expenses', true, NOW(), NOW())
+            RETURNING id
+          `);
+          
+          if (directInsertResult.rows.length > 0) {
+            expenseAccountResult = {
+              accountId: directInsertResult.rows[0].id,
+              requestedCreation: true,
+              message: `Created a General Operating Expense account as none existed.`
+            };
+          } else {
+            throw new Error('Failed to create any expense account');
+          }
+        }
+      } catch (expenseError) {
+        console.error('[APAgent] Critical error in expense account selection:', expenseError);
+        throw new Error(`Failed to find a valid expense account: ${expenseError instanceof Error ? expenseError.message : 'Unknown error'}`);
       }
+      
+      // Final verification that we have a valid expense account
+      if (!expenseAccountResult.accountId) {
+        throw new Error('Failed to establish a valid expense account for this bill');
+      }
+      
+      console.log(`[APAgent] ✓ Selected expense account ID: ${expenseAccountResult.accountId} - ${expenseAccountResult.message}`);
+
       
       const expenseAccountId = expenseAccountResult.accountId;
       
