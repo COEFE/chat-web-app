@@ -613,6 +613,38 @@ export function BillForm({ bill, onClose }: BillFormProps) {
                 />
                 
                 {/* AP Account */}
+                {/* Payment Terms */}
+                <FormField
+                  control={form.control}
+                  name="terms"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Payment Terms</FormLabel>
+                      <Select 
+                        onValueChange={field.onChange} 
+                        defaultValue={field.value || ''}
+                        disabled={(bill?.amount_paid || 0) > 0}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select payment terms" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Net 15">Net 15</SelectItem>
+                          <SelectItem value="Net 30">Net 30</SelectItem>
+                          <SelectItem value="Net 45">Net 45</SelectItem>
+                          <SelectItem value="Net 60">Net 60</SelectItem>
+                          <SelectItem value="2/10 Net 30">2/10 Net 30</SelectItem>
+                          <SelectItem value="COD">COD (Cash on Delivery)</SelectItem>
+                          <SelectItem value="Due on Receipt">Due on Receipt</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <FormField
                   control={form.control}
                   name="ap_account_id"
