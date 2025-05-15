@@ -2547,19 +2547,10 @@ Use the following information to help answer the user's query about accounts pay
         dueDate = `${thirtyDaysLater.getFullYear()}-${(thirtyDaysLater.getMonth() + 1).toString().padStart(2, '0')}-${thirtyDaysLater.getDate().toString().padStart(2, '0')}`;
       }
 
-      // *** CRITICAL: Always use a validated AP account ***
-      // Using our strict AP account finder that ONLY returns liability accounts
-      console.log(`[APAgent] Finding a valid Accounts Payable account for bill creation`);
-      const apAccountId = await this.findStrictApAccount(context);
-      console.log(`[APAgent] Using strictly validated AP account ID: ${apAccountId}`);
-      
-      // Ensure we actually have a valid AP account ID (belt-and-suspenders check)
-      if (!apAccountId) {
-        throw new Error('Could not establish a valid Accounts Payable account for bill creation');
-      }
-      
-      // Explicit verification in logs that we're using the right account
-      console.log(`[APAgent] ✓ VERIFIED: Using Accounts Payable account ${apAccountId} for bill creation`);
+      // We no longer need to select an AP account here, as it will be defaulted in the UI
+      // When billInfo gets submitted through the form, it will already have the proper AP account
+      // This avoids duplication of effort and potential conflicts
+      console.log(`[APAgent] Skipping AP account selection - the UI form handles this by default`);
       
       // Determine payment terms from extracted data or default to Net 30
       let paymentTerms = 'Net 30';
@@ -2593,16 +2584,18 @@ Use the following information to help answer the user's query about accounts pay
       
       console.log(`[APAgent] Using payment terms: ${paymentTerms}`);
       
-      // Create bill object with Open status by default
+      // Create bill object with a placeholder AP account ID
+      // The UI form will override this with the user-selected default AP account
       const bill = {
-        vendor_id: vendorId,
         bill_number: billInfo.bill_number,
+        vendor_id: vendorId,
         bill_date: formattedDate,
         due_date: dueDate,
         total_amount: billInfo.amount,
         status: 'Open', // Set status to Open so journal entries are created
         memo: billInfo.description,
-        ap_account_id: apAccountId,
+        // Temporary placeholder - will be overridden by the form's default
+        ap_account_id: -1, // Placeholder ID that will be replaced by the UI
         terms: paymentTerms
       };
       
