@@ -76,7 +76,10 @@ const billFormSchema = z.object({
   }),
   terms: z.string().optional(),
   memo: z.string().optional(),
-  ap_account_id: z.string().min(1, "AP account is required"),
+  ap_account_id: z.string().min(1, "AP account is required")
+    .refine(val => val !== undefined && val !== "", {
+      message: "An Accounts Payable account is required"
+    }),
   status: z.string().nonempty(),
   lines: z.array(billLineSchema).min(1, "At least one line item is required"),
 });
@@ -310,8 +313,15 @@ export function BillForm({ bill, onClose }: BillFormProps) {
         // Set all accounts for line items (to allow all GL accounts to be selected)
         setAccounts(sortedAccounts);
         
-        // Make all GL accounts available for AP account selection
-        setApAccounts(sortedAccounts);
+        // CRITICAL: Filter AP accounts to ONLY include LIABILITY accounts
+        // This prevents selecting Current Assets accounts for Accounts Payable
+        const liabilityAccounts = sortedAccounts.filter((account: Account) => 
+          account.type?.toLowerCase() === 'liability'
+        );
+        
+        // Only make liability accounts available for AP account selection
+        console.log(`[BillForm] Filtered ${liabilityAccounts.length} LIABILITY accounts for AP dropdown from ${sortedAccounts.length} total accounts`);
+        setApAccounts(liabilityAccounts);
 
         // Find and set the default AP account using multiple matching strategies
         // This ensures we always select an Accounts Payable account for vendor bills
@@ -686,18 +696,27 @@ export function BillForm({ bill, onClose }: BillFormProps) {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {/* Only show liability accounts for AP */}
-                          {apAccounts
-                            .filter(account => 
-                              account.type?.toLowerCase() === 'liability' || 
-                              account.code.startsWith('2') || 
-                              account.name.toLowerCase().includes('payable')
-                            )
-                            .map((account) => (
-                              <SelectItem key={account.id} value={account.id.toString()}>
-                                {account.code} - {account.name}
+                          {/* STRICTLY only show liability accounts for AP */}
+                          {apAccounts.length > 0 ? (
+                            // We've already filtered apAccounts to only include liability accounts
+                            // This is an additional safety check
+                            apAccounts.map((account) => (
+                              <SelectItem 
+                                key={account.id} 
+                                value={account.id.toString()}
+                                className="py-2 border-b border-gray-100"
+                              >
+                                <div className="flex flex-col">
+                                  <span className="font-medium">{account.code} - {account.name}</span>
+                                  <span className="text-xs text-green-600">(Liability account)</span>
+                                </div>
                               </SelectItem>
-                          ))}
+                            ))
+                          ) : (
+                            <div className="p-3 text-center text-red-500 border border-red-200 rounded bg-red-50 my-2">
+                              No liability accounts found. Please create an Accounts Payable account first.
+                            </div>
+                          )}
                         </SelectContent>
                       </Select>
                       <div className="text-xs text-muted-foreground">
