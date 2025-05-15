@@ -323,41 +323,81 @@ export function BillForm({ bill, onClose }: BillFormProps) {
         console.log(`[BillForm] Filtered ${liabilityAccounts.length} LIABILITY accounts for AP dropdown from ${sortedAccounts.length} total accounts`);
         setApAccounts(liabilityAccounts);
 
-        // Find and set the default AP account using multiple matching strategies
-        // This ensures we always select an Accounts Payable account for vendor bills
+        // CRITICAL: Find and set the default AP account - MUST be a LIABILITY account
+        // This ensures we always select a proper Accounts Payable account for vendor bills
+        console.log(`[BillForm] Selecting from ${liabilityAccounts.length} liability accounts`);
+        
+        // If we have no liability accounts, we need to create one
+        if (liabilityAccounts.length === 0) {
+          console.error('[BillForm] CRITICAL ERROR: No liability accounts found in the system!');
+          toast({
+            title: "Missing Required Account",
+            description: "No liability accounts found. Please create an Accounts Payable account before creating bills.",
+            variant: "destructive",
+          });
+          return;
+        }
+        
+        // STRICT SELECTION ALGORITHM - Only considers LIABILITY accounts
         let apAccount = null;
         
         // Strategy 1: Find standard Accounts Payable account with code 2000
-        apAccount = sortedAccounts.find((account: Account) => 
+        apAccount = liabilityAccounts.find((account: Account) => 
           (account.code === '2000' || account.code === '2010') && 
           account.name.toLowerCase().includes('accounts payable')
         );
         
-        // Strategy 2: Find any account with Accounts Payable in the name
+        // Strategy 2: Find any liability account with Accounts Payable in the name
         if (!apAccount) {
-          apAccount = sortedAccounts.find((account: Account) => 
-            account.name.toLowerCase().includes('accounts payable')
+          apAccount = liabilityAccounts.find((account: Account) => 
+            account.name.toLowerCase().includes('accounts payable') || 
+            account.name.toLowerCase().includes('ap account')
           );
         }
         
         // Strategy 3: Find any liability account in the 2000-2999 range
         if (!apAccount) {
-          apAccount = sortedAccounts.find((account: Account) => 
-            account.type?.toLowerCase() === 'liability' && 
+          apAccount = liabilityAccounts.find((account: Account) => 
             account.code.startsWith('2')
           );
         }
         
+        // Strategy 4: Just take the first liability account as a last resort
+        if (!apAccount && liabilityAccounts.length > 0) {
+          apAccount = liabilityAccounts[0];
+          console.warn(`[BillForm] No specific AP account found. Using first liability account: ${apAccount.name}`);
+        }
+        
+        // CRITICAL: Verify the account is actually a liability type
+        if (apAccount && apAccount.type?.toLowerCase() !== 'liability') {
+          console.error(`[BillForm] VALIDATION ERROR: Selected account ${apAccount.name} is NOT a liability account!`);
+          
+          // Force select the first liability account instead
+          if (liabilityAccounts.length > 0) {
+            apAccount = liabilityAccounts[0];
+            console.warn(`[BillForm] Selecting first liability account instead: ${apAccount.name}`);
+          }
+        }
+        
         // If we found an AP account, set it as default and immediately apply it
         if (apAccount) {
-          console.log(`[BillForm] Found default AP account: ${apAccount.name} (${apAccount.code})`);
+          console.log(`[BillForm] Selected AP account: ${apAccount.name} (${apAccount.code}) - Type: ${apAccount.type}`);
           setDefaultApAccountId(apAccount.id.toString());
           
-          // Always set the AP account ID, even for existing bills
+          // ALWAYS force set the AP account ID, even for existing bills
           // This ensures all bills use a proper AP account
           form.setValue('ap_account_id', apAccount.id.toString());
+          
+          // Log the selection for debugging
+          console.log(`[BillForm] ✓ VERIFIED: Using AP account ${apAccount.id} (${apAccount.name}) for bill`);
         } else {
-          console.warn("[BillForm] No Accounts Payable account found. Please create one.");
+          // This should never happen since we check for liability accounts earlier
+          console.error("[BillForm] CRITICAL: No Accounts Payable account could be selected!");
+          toast({
+            title: "Account Selection Error",
+            description: "Could not select a valid Accounts Payable account. Please contact support.",
+            variant: "destructive",
+          });
         }
         
         // Cash & Bank accounts (for payment) - keeping this for reference
@@ -684,45 +724,43 @@ export function BillForm({ bill, onClose }: BillFormProps) {
                   name="ap_account_id"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="font-semibold text-blue-700">Accounts Payable*</FormLabel>
-                      <Select 
-                        onValueChange={field.onChange} 
-                        defaultValue={field.value}
-                        disabled={(bill?.amount_paid || 0) > 0}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="border-blue-500 bg-blue-50">
-                            <SelectValue placeholder="Select an AP account" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {/* STRICTLY only show liability accounts for AP */}
-                          {apAccounts.length > 0 ? (
-                            // We've already filtered apAccounts to only include liability accounts
-                            // This is an additional safety check
-                            apAccounts.map((account) => (
+                      <FormLabel className="font-semibold text-blue-700">Accounts Payable (Auto-Selected)</FormLabel>
+                      <div className="relative">
+                        <Select 
+                          onValueChange={field.onChange} 
+                          defaultValue={field.value}
+                          disabled={true} /* ALWAYS DISABLED - AP account is auto-selected */
+                        >
+                          <FormControl>
+                            <SelectTrigger className="border-blue-500 bg-gray-100">
+                              <SelectValue placeholder="Auto-selected AP account" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {/* Only one option is ever shown - the pre-selected liability account */}
+                            {apAccounts.length > 0 && (
                               <SelectItem 
-                                key={account.id} 
-                                value={account.id.toString()}
+                                key={field.value} 
+                                value={field.value}
                                 className="py-2 border-b border-gray-100"
                               >
                                 <div className="flex flex-col">
-                                  <span className="font-medium">{account.code} - {account.name}</span>
+                                  <span className="font-medium">
+                                    {apAccounts.find(a => a.id.toString() === field.value)?.code || ''} - 
+                                    {apAccounts.find(a => a.id.toString() === field.value)?.name || 'Accounts Payable'}
+                                  </span>
                                   <span className="text-xs text-green-600">(Liability account)</span>
                                 </div>
                               </SelectItem>
-                            ))
-                          ) : (
-                            <div className="p-3 text-center text-red-500 border border-red-200 rounded bg-red-50 my-2">
-                              No liability accounts found. Please create an Accounts Payable account first.
-                            </div>
-                          )}
-                        </SelectContent>
-                      </Select>
-                      <div className="text-xs text-muted-foreground">
-                        Vendor bills must use an Accounts Payable (liability) account
+                            )}
+                          </SelectContent>
+                        </Select>
+                        {/* Overlay to prevent any interaction */}
+                        <div className="absolute inset-0 bg-gray-50 opacity-50 pointer-events-none"></div>
                       </div>
-                      <FormMessage />
+                      <div className="text-xs text-blue-600 mt-1">
+                        ✓ Accounts Payable is automatically selected for proper accounting
+                      </div>
                     </FormItem>
                   )}
                 />
