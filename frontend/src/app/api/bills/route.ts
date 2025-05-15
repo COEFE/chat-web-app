@@ -459,59 +459,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'AP account ID is required' }, { status: 400 });
     }
     
-    // CRITICAL: Validate that the AP account is a LIABILITY account
-    // This is essential for proper accounting - AP accounts must be liabilities
-    try {
-      const apAccountCheck = await sql`
-        SELECT account_type FROM accounts 
-        WHERE id = ${bill.ap_account_id} AND user_id = ${userId}
-      `;
-      
-      if (apAccountCheck.rows.length === 0) {
-        return NextResponse.json({ 
-          error: 'Invalid AP account ID: Account not found' 
-        }, { status: 400 });
-      }
-      
-      const accountType = apAccountCheck.rows[0].account_type?.toLowerCase();
-      if (accountType !== 'liability') {
-        console.error(`[API] VALIDATION ERROR: Attempt to use non-liability account (${accountType}) for AP`);
-        
-        // Find a valid liability account to use instead
-        const liabilityAccount = await sql`
-          SELECT id FROM accounts 
-          WHERE user_id = ${userId} 
-          AND LOWER(account_type) = 'liability'
-          AND (LOWER(name) LIKE '%accounts payable%' OR code LIKE '2%')
-          ORDER BY 
-            CASE 
-              WHEN LOWER(name) = 'accounts payable' AND code = '2000' THEN 1
-              WHEN LOWER(name) LIKE '%accounts payable%' THEN 2
-              WHEN code = '2000' THEN 3
-              WHEN code LIKE '2%' THEN 4
-              ELSE 5
-            END ASC
-          LIMIT 1
-        `;
-        
-        if (liabilityAccount.rows.length > 0) {
-          // Auto-correct to a valid liability account
-          const correctAccountId = liabilityAccount.rows[0].id;
-          console.log(`[API] Auto-correcting AP account to liability account: ${correctAccountId}`);
-          bill.ap_account_id = correctAccountId;
-        } else {
-          return NextResponse.json({ 
-            error: 'AP account must be a LIABILITY account type. Please select a valid Accounts Payable account.' 
-          }, { status: 400 });
-        }
-      }
-    } catch (err) {
-      console.error('[API] Error validating AP account:', err);
-      return NextResponse.json({ 
-        error: 'Failed to validate AP account. Please ensure a valid liability account is selected.' 
-      }, { status: 500 });
-    }
-    
     if (!lines || !Array.isArray(lines) || lines.length === 0) {
       return NextResponse.json({ error: 'At least one bill line is required' }, { status: 400 });
     }

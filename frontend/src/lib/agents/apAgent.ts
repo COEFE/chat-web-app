@@ -380,6 +380,34 @@ Would you like me to create this vendor? Please confirm.`
         return this.processStatement(context, context.query);
       }
       
+      // Check if this is a request to list GL accounts
+      const isListAccountsRequest = (
+        (normalized.includes('list') || normalized.includes('show') || normalized.includes('get') || normalized.includes('what are')) && 
+        (normalized.includes('gl account') || normalized.includes('gl accounts') || normalized.includes('general ledger account') || 
+         normalized.includes('chart of accounts') || normalized.includes('coa') || normalized.includes('available account'))
+      );
+      
+      if (isListAccountsRequest) {
+        console.log('[APAgent] Handling request to list GL accounts');
+        
+        // Check for specific account type filters
+        let accountType: string | undefined;
+        
+        if (normalized.includes('expense') || normalized.includes('expenses')) {
+          accountType = 'expense';
+        } else if (normalized.includes('asset') || normalized.includes('assets')) {
+          accountType = 'asset';
+        } else if (normalized.includes('liability') || normalized.includes('liabilities')) {
+          accountType = 'liability';
+        } else if (normalized.includes('equity')) {
+          accountType = 'equity';
+        } else if (normalized.includes('revenue') || normalized.includes('income')) {
+          accountType = 'revenue';
+        }
+        
+        return this.listGLAccounts(context, accountType);
+      }
+      
       // Check if this is a confirmation to set starting balance
       if (confirmationResponses.includes(normalizedQuery) && 
           this.pendingStatementProcessing[context.userId]) {
@@ -2095,424 +2123,179 @@ Use the following information to help answer the user's query about accounts pay
   // The requestGLAccountCreation method has been merged with the implementation above
   
   /**
-   * Find an appropriate expense account for a bill based on vendor name and expense description
+   * Find an appropriate expense account for a bill based on description
    * If no suitable account is found, request creation of a new one
-   * Following accounting best practices, we should avoid using suspense accounts
-   * and instead use or create specific expense accounts based on the expense purpose
-   * 
    * @param context The agent context
    * @param description The expense description
-   * @param vendorName Optional vendor name to help determine expense type
    * @returns Promise with the account ID or null if not found
    */
   private async findOrRequestExpenseAccount(
     context: AgentContext,
-    description: string,
-    vendorName?: string
+    description: string
   ): Promise<{ accountId?: number; requestedCreation: boolean; message: string }> {
     try {
-      console.log(`[APAgent] Finding expense account for: "${description}" from vendor: ${vendorName || 'Unknown'}`);
+      console.log(`[APAgent] Finding expense account for: ${description}`);
       
-      // First step: Identify the expense category
-      let expenseCategory = 'General Expense';
-      let expenseCode = '5000'; // Default expense code
-      
+      // Determine the expense type based on the description
+      let expenseType = 'general';
       const lowerDesc = description?.toLowerCase() || '';
-      const lowerVendor = vendorName?.toLowerCase() || '';
       
-      // Smart category identification based on BOTH vendor name and description
-      // This tries to match common business expense categories
-      
-      // SOFTWARE AND TECHNOLOGY
-      if (
-        lowerDesc.includes('software') || lowerDesc.includes('subscription') || 
-        lowerDesc.includes('license') || lowerDesc.includes('hosting') ||
-        lowerDesc.includes('data analysis') || lowerDesc.includes('analytics') ||
-        lowerVendor.includes('adobe') || lowerVendor.includes('microsoft') ||
-        lowerVendor.includes('google') || lowerVendor.includes('aws') ||
-        lowerVendor.includes('data dynamics') || lowerVendor.includes('tech') ||
-        lowerVendor.includes('software') || lowerVendor.includes('cloud') ||
-        lowerVendor.includes('digital') || lowerVendor.includes('system') ||
-        lowerVendor.includes('tech') || lowerVendor.includes('it') ||
-        lowerVendor.includes('web') || lowerVendor.includes('app') ||
-        lowerVendor.includes('database')
-      ) {
-        expenseCategory = 'Software & Technology';
-        expenseCode = '5120';
+      if (lowerDesc.includes('office') || lowerDesc.includes('stationary') || lowerDesc.includes('supplies')) {
+        expenseType = 'office_supplies';
+      } else if (lowerDesc.includes('rent') || lowerDesc.includes('lease')) {
+        expenseType = 'rent';
+      } else if (lowerDesc.includes('utility') || lowerDesc.includes('electric') || lowerDesc.includes('water') || lowerDesc.includes('gas')) {
+        expenseType = 'utilities';
+      } else if (lowerDesc.includes('travel') || lowerDesc.includes('trip')) {
+        expenseType = 'travel';
+      } else if (lowerDesc.includes('meal') || lowerDesc.includes('food') || lowerDesc.includes('restaurant')) {
+        expenseType = 'meals';
       }
       
-      // OFFICE SUPPLIES
-      else if (
-        lowerDesc.includes('office') || lowerDesc.includes('supplies') ||
-        lowerDesc.includes('stationery') || lowerDesc.includes('paper') ||
-        lowerDesc.includes('printer') || lowerDesc.includes('ink') ||
-        lowerVendor.includes('staples') || lowerVendor.includes('office depot') ||
-        lowerVendor.includes('supplies') || lowerVendor.includes('paper')
-      ) {
-        expenseCategory = 'Office Supplies';
-        expenseCode = '5110';
+      // Build a query based on the expense type
+      let expenseQuery = '';
+      const queryParams: any[] = [];
+      
+      switch (expenseType) {
+        case 'office_supplies':
+          expenseQuery = `
+            SELECT id, name FROM accounts 
+            WHERE (LOWER(name) LIKE '%office supplies%' OR LOWER(name) LIKE '%office expense%')
+            AND LOWER(account_type) = 'expense'
+            LIMIT 1
+          `;
+          break;
+        case 'rent':
+          expenseQuery = `
+            SELECT id, name FROM accounts 
+            WHERE (LOWER(name) LIKE '%rent%' OR LOWER(name) LIKE '%lease%')
+            AND LOWER(account_type) = 'expense'
+            LIMIT 1
+          `;
+          break;
+        case 'utilities':
+          expenseQuery = `
+            SELECT id, name FROM accounts 
+            WHERE (LOWER(name) LIKE '%utility%' OR LOWER(name) LIKE '%utilities%')
+            AND LOWER(account_type) = 'expense'
+            LIMIT 1
+          `;
+          break;
+        case 'travel':
+          expenseQuery = `
+            SELECT id, name FROM accounts 
+            WHERE (LOWER(name) LIKE '%travel%' OR LOWER(name) LIKE '%transportation%')
+            AND LOWER(account_type) = 'expense'
+            LIMIT 1
+          `;
+          break;
+        case 'meals':
+          expenseQuery = `
+            SELECT id, name FROM accounts 
+            WHERE (LOWER(name) LIKE '%meal%' OR LOWER(name) LIKE '%food%' OR LOWER(name) LIKE '%entertainment%')
+            AND LOWER(account_type) = 'expense'
+            LIMIT 1
+          `;
+          break;
+        default:
+          // For other descriptions, try to find a matching expense account
+          if (description) {
+            // Try to match words from the description
+            const words = description.split(/\s+/).filter(word => word.length > 3);
+            if (words.length > 0) {
+              const likeConditions = words.map((_, i) => `LOWER(name) LIKE $${i + 1}`).join(' OR ');
+              expenseQuery = `
+                SELECT id, name FROM accounts 
+                WHERE (${likeConditions})
+                AND LOWER(account_type) = 'expense'
+                LIMIT 1
+              `;
+              queryParams.push(...words.map(word => `%${word.toLowerCase()}%`));
+            } else {
+              // Fallback to general expense
+              expenseQuery = `
+                SELECT id, name FROM accounts 
+                WHERE LOWER(name) LIKE '%expense%'
+                AND LOWER(account_type) = 'expense'
+                LIMIT 1
+              `;
+            }
+          } else {
+            // No description, use general expense
+            expenseQuery = `
+              SELECT id, name FROM accounts 
+              WHERE LOWER(name) LIKE '%expense%'
+              AND LOWER(account_type) = 'expense'
+              LIMIT 1
+            `;
+          }
       }
       
-      // RENT AND FACILITIES
-      else if (
-        lowerDesc.includes('rent') || lowerDesc.includes('lease') ||
-        lowerDesc.includes('facility') || lowerDesc.includes('property') ||
-        lowerDesc.includes('office space') || lowerDesc.includes('building')
-      ) {
-        expenseCategory = 'Rent & Facilities';
-        expenseCode = '5400';
-      }
+      // Execute the query
+      const expenseResult = queryParams.length > 0 
+        ? await sql.query(expenseQuery, queryParams)
+        : await sql.query(expenseQuery);
       
-      // UTILITIES
-      else if (
-        lowerDesc.includes('utility') || lowerDesc.includes('electric') ||
-        lowerDesc.includes('water') || lowerDesc.includes('gas') ||
-        lowerDesc.includes('internet') || lowerDesc.includes('phone') ||
-        lowerVendor.includes('electric') || lowerVendor.includes('utility') ||
-        lowerVendor.includes('water') || lowerVendor.includes('telecom') ||
-        lowerVendor.includes('at&t') || lowerVendor.includes('verizon')
-      ) {
-        expenseCategory = 'Utilities';
-        expenseCode = '5410';
-      }
-      
-      // TRAVEL AND TRANSPORTATION
-      else if (
-        lowerDesc.includes('travel') || lowerDesc.includes('trip') ||
-        lowerDesc.includes('hotel') || lowerDesc.includes('flight') ||
-        lowerDesc.includes('lodging') || lowerDesc.includes('transport') ||
-        lowerVendor.includes('airline') || lowerVendor.includes('hotel') ||
-        lowerVendor.includes('travel') || lowerVendor.includes('expedia')
-      ) {
-        expenseCategory = 'Travel & Transportation';
-        expenseCode = '5210';
-      }
-      
-      // MEALS AND ENTERTAINMENT
-      else if (
-        lowerDesc.includes('meal') || lowerDesc.includes('food') ||
-        lowerDesc.includes('restaurant') || lowerDesc.includes('catering') ||
-        lowerDesc.includes('lunch') || lowerDesc.includes('dinner') ||
-        lowerVendor.includes('restaurant') || lowerVendor.includes('cafe') ||
-        lowerVendor.includes('catering') || lowerVendor.includes('food')
-      ) {
-        expenseCategory = 'Meals & Entertainment';
-        expenseCode = '5230';
-      }
-      
-      // PROFESSIONAL SERVICES
-      else if (
-        lowerDesc.includes('consulting') || lowerDesc.includes('legal') ||
-        lowerDesc.includes('accounting') || lowerDesc.includes('service') ||
-        lowerDesc.includes('professional') || lowerDesc.includes('advisor') ||
-        lowerVendor.includes('consulting') || lowerVendor.includes('legal') ||
-        lowerVendor.includes('law firm') || lowerVendor.includes('cpa') ||
-        lowerVendor.includes('advisor') || lowerVendor.includes('accountant')
-      ) {
-        expenseCategory = 'Professional Services';
-        expenseCode = '5600';
-      }
-      
-      // MARKETING AND ADVERTISING
-      else if (
-        lowerDesc.includes('marketing') || lowerDesc.includes('advertising') ||
-        lowerDesc.includes('promotion') || lowerDesc.includes('campaign') ||
-        lowerDesc.includes('ad spend') || lowerDesc.includes('social media') ||
-        lowerVendor.includes('marketing') || lowerVendor.includes('ad agency') ||
-        lowerVendor.includes('media') || lowerVendor.includes('facebook') ||
-        lowerVendor.includes('google ads') || lowerVendor.includes('promotion')
-      ) {
-        expenseCategory = 'Marketing & Advertising';
-        expenseCode = '5300';
-      }
-
-      console.log(`[APAgent] Identified expense category: ${expenseCategory} (${expenseCode})`);
-      
-      // STEP 2: Try to find an existing account for this category
-      let expenseQuery = `
-        SELECT id, name, code FROM accounts 
-        WHERE user_id = ${context.userId || 'NULL'}
-        AND LOWER(account_type) = 'expense'
-        AND (
-          LOWER(name) LIKE $1 OR
-          code = $2
-        )
-        ORDER BY 
-          CASE
-            WHEN code = $2 THEN 1
-            WHEN LOWER(name) = LOWER($3) THEN 2
-            ELSE 3
-          END,
-          id ASC
-        LIMIT 1
-      `;
-      
-      // Search using category patterns
-      let searchCategory = `%${expenseCategory.toLowerCase().replace('&', '%')}%`;
-      let searchParams = [searchCategory, expenseCode, expenseCategory];
-      
-      console.log(`[APAgent] Searching for expense account with category: ${searchCategory} or code: ${expenseCode}`);
-      let result = await sql.query(expenseQuery, searchParams);
-      
-      // If we found a matching account, use it
-      if (result.rows.length > 0) {
-        const accountId = result.rows[0].id;
-        console.log(`[APAgent] Found matching expense account: ${result.rows[0].name} (${result.rows[0].code}), ID: ${accountId}`);
+      if (expenseResult.rows.length > 0) {
+        const account = expenseResult.rows[0];
+        console.log(`[APAgent] Found matching expense account: ${account.name} (ID: ${account.id})`);
         return {
-          accountId,
+          accountId: account.id,
           requestedCreation: false,
-          message: `Using existing expense account: ${result.rows[0].name}`
+          message: `Using expense account: ${account.name}`
         };
       }
       
-      // Try a broader search if specific category not found
-      console.log(`[APAgent] No exact category match found, trying broader search`);
-      
-      // Look for any expense account that might match description or vendor
-      const keyTerms = [
-        ...description?.split(/\s+/).filter(word => word.length > 3) || [],
-        ...vendorName?.split(/\s+/).filter(word => word.length > 3) || []
-      ];
-      
-      if (keyTerms.length > 0) {
-        const likeConditions = keyTerms.map((_, i) => `LOWER(name) LIKE $${i + 1}`).join(' OR ');
-        const broadQuery = `
-          SELECT id, name, code FROM accounts 
-          WHERE user_id = ${context.userId || 'NULL'}
-          AND LOWER(account_type) = 'expense'
-          AND (${likeConditions})
-          ORDER BY id ASC
-          LIMIT 1
-        `;
-        
-        const termParams = keyTerms.map(term => `%${term.toLowerCase()}%`);
-        result = await sql.query(broadQuery, termParams);
-        
-        if (result.rows.length > 0) {
-          const accountId = result.rows[0].id;
-          console.log(`[APAgent] Found related expense account: ${result.rows[0].name} (${result.rows[0].code}), ID: ${accountId}`);
-          return {
-            accountId,
-            requestedCreation: false,
-            message: `Using related expense account: ${result.rows[0].name}`
-          };
-        }
-      }
-      
-      // If no account found via category or term search, CREATE a new appropriate expense account
-      console.log(`[APAgent] No matching expense account found, will create a proper one`);
-      
-      // Create a properly named expense account based on our identified category
-      const createResult = await this.requestGLAccountCreation(
-        context,
-        expenseCategory,    // Use the identified category name
-        expenseCode,       // Use the identified category code
-        0,                 // No starting balance for expense accounts
-        undefined,         // No balance date needed
-        true               // This is an expense account
-      );
-      
-      if (createResult.success && createResult.accountId) {
-        console.log(`[APAgent] Successfully created expense account: ${expenseCategory} (${expenseCode}), ID: ${createResult.accountId}`);
-        return {
-          accountId: createResult.accountId,
-          requestedCreation: true,
-          message: `Created a new ${expenseCategory} account for this expense.`
-        };
-      }
-      
-      // If we failed to create the proper account, try a direct database insert as last resort
-      console.warn(`[APAgent] Failed to create expense account via GL agent, trying direct insertion`);
-      
-      try {
-        const insertResult = await sql.query(`
-          INSERT INTO accounts (user_id, name, code, account_type, description, is_active, created_at, updated_at)
-          VALUES (
-            ${context.userId || 'NULL'}, 
-            $1, 
-            $2, 
-            'expense', 
-            $3, 
-            true, 
-            NOW(), 
-            NOW()
-          )
-          RETURNING id, name, code
-        `, [
-          expenseCategory,
-          expenseCode,
-          `Expense account for ${description || 'general expenses'}`
-        ]);
-        
-        if (insertResult.rows.length > 0) {
-          const accountId = insertResult.rows[0].id;
-          console.log(`[APAgent] Created expense account via direct insert: ${insertResult.rows[0].name} (${insertResult.rows[0].code}), ID: ${accountId}`);
-          return {
-            accountId,
-            requestedCreation: true,
-            message: `Created a new ${expenseCategory} account for this expense.`
-          };
-        }
-      } catch (insertError) {
-        console.error('[APAgent] Failed to create expense account via direct insert:', insertError);
-      }
-      
-      // Absolute last resort - find ANY expense account that's not Suspense
-      console.warn(`[APAgent] All creation attempts failed, looking for ANY non-suspense expense account`);
-      const fallbackQuery = `
+      // If no specific account found, try a general expense account
+      const generalExpenseQuery = `
         SELECT id, name FROM accounts 
-        WHERE user_id = ${context.userId || 'NULL'} 
-        AND LOWER(account_type) = 'expense'
-        AND LOWER(name) NOT LIKE '%suspense%'
-        ORDER BY id ASC 
+        WHERE LOWER(account_type) = 'expense' 
         LIMIT 1
       `;
+      const generalExpenseResult = await sql.query(generalExpenseQuery);
       
-      const fallbackResult = await sql.query(fallbackQuery);
-      
-      if (fallbackResult.rows.length > 0) {
-        console.warn(`[APAgent] Using fallback expense account: ${fallbackResult.rows[0].name}`);
+      if (generalExpenseResult.rows.length > 0) {
+        const account = generalExpenseResult.rows[0];
+        console.log(`[APAgent] Using general expense account: ${account.name} (ID: ${account.id})`);
+        
+        // Request a more specific account for future use
+        const requestResult = await this.requestGLAccountCreation(context, description, expenseType);
+        
         return {
-          accountId: fallbackResult.rows[0].id,
-          requestedCreation: false,
-          message: `Using general expense account: ${fallbackResult.rows[0].name} (as a fallback)`
+          accountId: account.id,
+          requestedCreation: true,
+          message: `I couldn't find a specific expense account for "${description}", so I'm using a general expense account (${account.name}) for now. ${requestResult.message}`
         };
       }
       
-      // If we STILL can't find an expense account, attempt to create a General Expense account
-      try {
-        console.warn(`[APAgent] No expense accounts found, creating a General Expense account as last resort`);
-        const lastResortInsert = await sql.query(`
-          INSERT INTO accounts (user_id, name, code, account_type, description, is_active, created_at, updated_at)
-          VALUES (${context.userId || 'NULL'}, 'General Expense', '5000', 'expense', 'General expense account', true, NOW(), NOW())
-          RETURNING id
-        `);
-        
-        if (lastResortInsert.rows.length > 0) {
-          return {
-            accountId: lastResortInsert.rows[0].id,
-            requestedCreation: true,
-            message: `Created a General Expense account as none existed.`
-          };
-        }
-      } catch (finalError) {
-        console.error('[APAgent] Final attempt to create General Expense account failed:', finalError);
+      // If we still don't have an account, request one but use any account as fallback
+      const anyAccountQuery = `SELECT id, name FROM accounts LIMIT 1`;
+      const anyAccountResult = await sql.query(anyAccountQuery);
+      
+      if (anyAccountResult.rows.length === 0) {
+        throw new Error('No accounts found in the database');
       }
       
-      // Absolute final fallback if nothing else works
+      const account = anyAccountResult.rows[0];
+      console.log(`[APAgent] Using fallback account: ${account.name} (ID: ${account.id})`);
+      
+      // Request a proper expense account
+      const requestResult = await this.requestGLAccountCreation(context, description, expenseType);
+      
       return {
-        requestedCreation: false,
-        message: `Could not find or create any suitable expense accounts. Please create an expense account manually.`
+        accountId: account.id,
+        requestedCreation: true,
+        message: `I couldn't find any expense accounts, so I'm using ${account.name} as a temporary solution. ${requestResult.message}`
       };
     } catch (error) {
-      console.error('[APAgent] Error in expense account handling:', error);
+      console.error('[APAgent] Error finding expense account:', error);
       return {
         requestedCreation: false,
-        message: `Failed to find or create a suitable expense account: ${error instanceof Error ? error.message : 'Unknown error'}`
+        message: `Failed to find a suitable expense account: ${error instanceof Error ? error.message : 'Unknown error'}`
       };
     }
   }
 
-  /**
-   * STRICTLY find an Accounts Payable account - this will NEVER return a non-liability account
-   * 
-   * This is a safety mechanism that ensures we ONLY use proper liability-type
-   * Accounts Payable accounts for bills, following accounting standards
-   */
-  private async findStrictApAccount(context: AgentContext): Promise<number> {
-    console.log(`[APAgent] Starting STRICT search for proper Accounts Payable account`);
-
-    try {
-      // STEP 1: Try to find an existing standard Accounts Payable account
-      const accountTypes = ['liability'];
-      const accountCodes = ['2000', '2010', '2100'];
-      const accountNamePatterns = ['accounts payable', 'account payable', 'ap account', 'trade creditors'];
-      
-      // Build a comprehensive query that STRICTLY ensures we get a liability account
-      const strictApQuery = `
-        SELECT id, name, code, account_type 
-        FROM accounts 
-        WHERE user_id = ${context.userId || 'NULL'}
-        AND (
-          LOWER(account_type) = 'liability' OR 
-          account_type = 'Liability' OR 
-          account_type = 'LIABILITY'
-        )
-        AND (
-          ${accountCodes.map(code => `code = '${code}'`).join(' OR ')}
-          OR
-          ${accountNamePatterns.map(pattern => `LOWER(name) LIKE '%${pattern}%'`).join(' OR ')}
-          OR
-          code LIKE '2%'
-        )
-        ORDER BY 
-          CASE 
-            WHEN code = '2000' AND LOWER(name) LIKE '%accounts payable%' THEN 1
-            WHEN code = '2000' THEN 2
-            WHEN LOWER(name) = 'accounts payable' THEN 3
-            WHEN LOWER(name) LIKE '%payable%' THEN 4
-            WHEN code LIKE '2%' THEN 5
-            ELSE 6
-          END ASC,
-          id ASC
-        LIMIT 1
-      `;
-      
-      console.log(`[APAgent] Executing STRICT AP account query`);
-      const strictResult = await sql.query(strictApQuery);
-      
-      // If we found a standard AP account, use it
-      if (strictResult.rows.length > 0) {
-        const accountId = strictResult.rows[0].id;
-        const accountType = strictResult.rows[0].account_type;
-        const accountName = strictResult.rows[0].name;
-        const accountCode = strictResult.rows[0].code;
-        
-        // CRITICAL - Validate the account really is a liability account
-        // This prevents any possibility of using an asset account
-        if (accountType?.toLowerCase() !== 'liability') {
-          console.error(`[APAgent] ERROR - Retrieved non-liability account: ${accountName} (${accountCode}) type:${accountType}`);
-          throw new Error(`Retrieved non-liability account for Accounts Payable: ${accountName}`);
-        }
-        
-        console.log(`[APAgent] Found validated AP account: ${accountName} (${accountCode}), ID: ${accountId}`);
-        return accountId;
-      }
-      
-      // STEP 2: No AP account found - CREATE ONE IMMEDIATELY
-      console.warn(`[APAgent] No AP account found - creating a standard Accounts Payable account...`);
-      
-      // Create directly in database to ensure it works
-      const insertResult = await sql.query(`
-        INSERT INTO accounts (user_id, name, code, account_type, description, is_active, created_at, updated_at)
-        VALUES (
-          ${context.userId || 'NULL'}, 
-          'Accounts Payable', 
-          '2000', 
-          'liability', 
-          'Standard accounts payable - money owed to vendors and suppliers', 
-          true, 
-          NOW(), 
-          NOW()
-        )
-        RETURNING id
-      `);
-
-      if (insertResult.rows.length > 0) {
-        const newAccountId = insertResult.rows[0].id;
-        console.log(`[APAgent] Successfully created standard Accounts Payable account: ${newAccountId}`);
-        return newAccountId;
-      }
-      
-      // If we get here, something is very wrong - no accounts could be created or found
-      throw new Error('Failed to find or create any Accounts Payable account');
-      
-    } catch (error) {
-      console.error('[APAgent] Critical error in AP account handling:', error);
-      throw new Error('Could not establish a proper Accounts Payable account for bills');
-    }
-  }
-  
   private async createBillWithInfo(context: AgentContext): Promise<AgentResponse> {
     try {
       // Check if we have pending bill creation info
@@ -2546,11 +2329,67 @@ Use the following information to help answer the user's query about accounts pay
         thirtyDaysLater.setDate(today.getDate() + 30);
         dueDate = `${thirtyDaysLater.getFullYear()}-${(thirtyDaysLater.getMonth() + 1).toString().padStart(2, '0')}-${thirtyDaysLater.getDate().toString().padStart(2, '0')}`;
       }
-
-      // We no longer need to select an AP account here, as it will be defaulted in the UI
-      // When billInfo gets submitted through the form, it will already have the proper AP account
-      // This avoids duplication of effort and potential conflicts
-      console.log(`[APAgent] Skipping AP account selection - the UI form handles this by default`);
+      
+      // Get a valid AP account ID from database
+      let apAccountId;
+      try {
+        // Try multiple approaches to find the Accounts Payable account
+        // First try by account type and name pattern
+        const apQuery = `
+          SELECT id FROM accounts 
+          WHERE LOWER(account_type) = 'liability' AND LOWER(name) LIKE '%accounts payable%' 
+          AND user_id = ${context.userId || 'NULL'}
+          ORDER BY id ASC
+          LIMIT 1
+        `;
+        const apResult = await sql.query(apQuery);
+        
+        if (apResult.rows.length > 0) {
+          apAccountId = apResult.rows[0].id;
+          console.log(`[APAgent] Using Accounts Payable account ID: ${apAccountId}`);
+        } else {
+          // Try accounts with code 2000 (typical AP code)
+          const apCodeQuery = `
+            SELECT id FROM accounts 
+            WHERE code = '2000' AND user_id = ${context.userId || 'NULL'}
+            LIMIT 1
+          `;
+          const apCodeResult = await sql.query(apCodeQuery);
+          
+          if (apCodeResult.rows.length > 0) {
+            apAccountId = apCodeResult.rows[0].id;
+            console.log(`[APAgent] Using AP account with code 2000, ID: ${apAccountId}`);
+          } else {
+            // Try any liability account as fallback
+            const liabilityQuery = `
+              SELECT id FROM accounts 
+              WHERE LOWER(account_type) = 'liability' AND user_id = ${context.userId || 'NULL'}
+              ORDER BY id ASC
+              LIMIT 1
+            `;
+            const liabilityResult = await sql.query(liabilityQuery);
+            
+            if (liabilityResult.rows.length > 0) {
+              apAccountId = liabilityResult.rows[0].id;
+              console.log(`[APAgent] Using fallback liability account ID: ${apAccountId}`);
+            } else {
+              // Last resort - use any account
+              const anyAccountQuery = `SELECT id FROM accounts WHERE user_id = ${context.userId || 'NULL'} LIMIT 1`;
+              const anyAccountResult = await sql.query(anyAccountQuery);
+              
+              if (anyAccountResult.rows.length === 0) {
+                throw new Error('No accounts found in the database');
+              }
+              
+              apAccountId = anyAccountResult.rows[0].id;
+              console.log(`[APAgent] Using last resort fallback account ID: ${apAccountId}`);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[APAgent] Error finding AP account:', err);
+        throw new Error('Failed to find a valid account for AP');
+      }
       
       // Determine payment terms from extracted data or default to Net 30
       let paymentTerms = 'Net 30';
@@ -2584,86 +2423,25 @@ Use the following information to help answer the user's query about accounts pay
       
       console.log(`[APAgent] Using payment terms: ${paymentTerms}`);
       
-      // Create bill object with a placeholder AP account ID
-      // The UI form will override this with the user-selected default AP account
+      // Create bill object with Open status by default
       const bill = {
-        bill_number: billInfo.bill_number,
         vendor_id: vendorId,
+        bill_number: billInfo.bill_number,
         bill_date: formattedDate,
         due_date: dueDate,
         total_amount: billInfo.amount,
         status: 'Open', // Set status to Open so journal entries are created
         memo: billInfo.description,
-        // Temporary placeholder - will be overridden by the form's default
-        ap_account_id: -1, // Placeholder ID that will be replaced by the UI
+        ap_account_id: apAccountId,
         terms: paymentTerms
       };
       
-      // Get vendor information to help with expense account selection
-      let vendorName = '';
-      try {
-        // Get vendor details to help with intelligent expense selection
-        const vendorResult = await sql.query(
-          'SELECT name FROM vendors WHERE id = $1 AND user_id = $2',
-          [vendorId, context.userId || 'NULL']
-        );
-        
-        if (vendorResult.rows.length > 0) {
-          vendorName = vendorResult.rows[0].name;
-          console.log(`[APAgent] Using vendor name "${vendorName}" for intelligent expense category selection`);
-        }
-      } catch (vendorError) {
-        console.error('[APAgent] Error getting vendor details:', vendorError);
-        // Continue anyway, using just the description
-      }
+      // Find or request an appropriate expense account
+      const expenseAccountResult = await this.findOrRequestExpenseAccount(context, billInfo.description || 'General Expense');
       
-      // INTELLIGENT EXPENSE ACCOUNT SELECTION:
-      // Analyze both description and vendor to determine the best expense account
-      console.log(`[APAgent] Performing intelligent expense account selection based on vendor:"${vendorName}" and description:"${billInfo.description || 'General Expense'}"`);
-      
-      // Get expense account using our enhanced algorithm
-      let expenseAccountResult;
-      try {
-        // First, try to find a categorized expense account using our advanced matcher
-        expenseAccountResult = await this.findOrRequestExpenseAccount(
-          context, 
-          billInfo.description || 'General Expense',
-          vendorName // Pass vendor name to help with intelligent category selection
-        );
-        
-        // Verify the account is valid
-        if (!expenseAccountResult.accountId) {
-          console.warn(`[APAgent] First expense account selection attempt failed, creating default expense account`);
-          
-          // Direct database insertion as last resort - Create a general expense account
-          const directInsertResult = await sql.query(`
-            INSERT INTO accounts (user_id, name, code, account_type, description, is_active, created_at, updated_at)
-            VALUES (${context.userId || 'NULL'}, 'General Operating Expense', '5000', 'expense', 'General expenses', true, NOW(), NOW())
-            RETURNING id
-          `);
-          
-          if (directInsertResult.rows.length > 0) {
-            expenseAccountResult = {
-              accountId: directInsertResult.rows[0].id,
-              requestedCreation: true,
-              message: `Created a General Operating Expense account as none existed.`
-            };
-          } else {
-            throw new Error('Failed to create any expense account');
-          }
-        }
-      } catch (expenseError) {
-        console.error('[APAgent] Critical error in expense account selection:', expenseError);
-        throw new Error(`Failed to find a valid expense account: ${expenseError instanceof Error ? expenseError.message : 'Unknown error'}`);
-      }
-      
-      // Final verification that we have a valid expense account
       if (!expenseAccountResult.accountId) {
-        throw new Error('Failed to establish a valid expense account for this bill');
+        throw new Error('Failed to find a valid expense account: ' + expenseAccountResult.message);
       }
-      
-      console.log(`[APAgent] ✓ Selected expense account ID: ${expenseAccountResult.accountId} - ${expenseAccountResult.message}`);
-
       
       const expenseAccountId = expenseAccountResult.accountId;
       
@@ -2758,7 +2536,89 @@ Use the following information to help answer the user's query about accounts pay
    * Helper function to simplify vendor objects for returning in agent responses
    * Removes any sensitive or unnecessary information
    */
-  private simplifyVendor(vendor: any): any {
+  /**
+   * List available GL accounts with optional filtering
+   * @param context The agent context
+   * @param accountType Optional account type filter (e.g., 'expense', 'liability')
+   * @returns Promise with the list of accounts
+   */
+  private async listGLAccounts(context: AgentContext, accountType?: string): Promise<AgentResponse> {
+    try {
+      console.log(`[APAgent] Listing GL accounts${accountType ? ` of type ${accountType}` : ''}`);      
+      
+      // Build the query based on filters
+      let query = `
+        SELECT id, code, name, account_type, is_active, parent_id 
+        FROM accounts 
+        WHERE user_id = ${context.userId || 'NULL'}`;
+      
+      // Add account type filter if specified
+      if (accountType) {
+        query += `
+          AND LOWER(account_type) = LOWER('${accountType.replace(/'/g, "''")}')`;
+      }
+      
+      // Order by code for a logical presentation
+      query += `
+        ORDER BY code ASC`;
+      
+      const result = await sql.query(query);
+      
+      if (result.rows.length === 0) {
+        return {
+          success: true,
+          message: `No${accountType ? ` ${accountType}` : ''} GL accounts found. You may need to create some accounts first.`,
+          data: { accounts: [] }
+        };
+      }
+      
+      // Format accounts for display
+      const accounts = result.rows.map(account => ({
+        id: account.id,
+        code: account.code,
+        name: account.name,
+        type: account.account_type,
+        isActive: account.is_active
+      }));
+      
+      // Group accounts by type for better organization
+      const accountsByType: Record<string, typeof accounts> = {};
+      accounts.forEach(account => {
+        if (!accountsByType[account.type]) {
+          accountsByType[account.type] = [];
+        }
+        accountsByType[account.type].push(account);
+      });
+      
+      // Build a formatted message
+      let message = `Here are the available${accountType ? ` ${accountType}` : ''} GL accounts:\n\n`;
+      
+      Object.entries(accountsByType).forEach(([type, typeAccounts]) => {
+        message += `**${type} Accounts:**\n`;
+        typeAccounts.forEach(account => {
+          message += `- ${account.code}: ${account.name}${!account.isActive ? ' (Inactive)' : ''}\n`;
+        });
+        message += '\n';
+      });
+      
+      message += `Total: ${accounts.length} accounts found.`;
+      
+      return {
+        success: true,
+        message,
+        data: { accounts, accountsByType }
+      };
+    } catch (error) {
+      console.error('[APAgent] Error listing GL accounts:', error);
+      return {
+        success: false,
+        message: `I encountered an error while trying to list the GL accounts: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        data: { accounts: [] }
+      };
+    }
+  }
+  
+  private simplifyVendor(vendor: Vendor): Partial<Vendor> {
     return {
       id: vendor.id,
       name: vendor.name,
@@ -2768,4 +2628,5 @@ Use the following information to help answer the user's query about accounts pay
     };
   }
   
-} 
+  // This method has been merged with the implementation above
+}
