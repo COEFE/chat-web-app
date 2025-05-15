@@ -2363,6 +2363,38 @@ Use the following information to help answer the user's query about accounts pay
         throw new Error('Failed to find a valid account for AP');
       }
       
+      // Determine payment terms from extracted data or default to Net 30
+      let paymentTerms = 'Net 30';
+      if (billInfo.terms) {
+        paymentTerms = billInfo.terms;
+      } else if (billInfo.payment_terms) {
+        paymentTerms = billInfo.payment_terms;
+      } else {
+        // Try to infer payment terms from the due date if available
+        if (billInfo.due_date) {
+          // Calculate days between bill date and due date
+          const billDate = new Date(formattedDate);
+          const dueDateObj = new Date(dueDate);
+          const daysDiff = Math.round((dueDateObj.getTime() - billDate.getTime()) / (1000 * 60 * 60 * 24));
+          
+          if (daysDiff === 15) {
+            paymentTerms = 'Net 15';
+          } else if (daysDiff === 30) {
+            paymentTerms = 'Net 30';
+          } else if (daysDiff === 45) {
+            paymentTerms = 'Net 45';
+          } else if (daysDiff === 60) {
+            paymentTerms = 'Net 60';
+          } else if (daysDiff === 90) {
+            paymentTerms = 'Net 90';
+          } else {
+            paymentTerms = `Net ${daysDiff}`;
+          }
+        }
+      }
+      
+      console.log(`[APAgent] Using payment terms: ${paymentTerms}`);
+      
       // Create bill object with Open status by default
       const bill = {
         vendor_id: vendorId,
@@ -2373,7 +2405,7 @@ Use the following information to help answer the user's query about accounts pay
         status: 'Open', // Set status to Open so journal entries are created
         memo: billInfo.description,
         ap_account_id: apAccountId,
-        terms: 'Net 30'
+        terms: paymentTerms
       };
       
       // Find or request an appropriate expense account

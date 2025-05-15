@@ -9,6 +9,8 @@ export interface BillInfo {
   amount?: number;
   due_date?: string;
   description?: string;
+  terms?: string;
+  payment_terms?: string;
 }
 
 /**
@@ -46,6 +48,8 @@ export async function extractBillInfoWithAI(query: string): Promise<BillInfo> {
       - amount: The dollar amount of the bill (number only, no currency symbols)
       - due_date: The due date if mentioned (in YYYY-MM-DD format)
       - description: Brief description of what the bill is for
+      - terms: Payment terms if mentioned (e.g., "Net 30", "2/10 Net 30")
+      - payment_terms: Alternative field for payment terms if mentioned in a different format
       
       If a field is not present in the text, do not include it in your JSON.
       
@@ -54,7 +58,8 @@ export async function extractBillInfoWithAI(query: string): Promise<BillInfo> {
       {
         "vendor_name": "Amazon",
         "amount": 299.99,
-        "description": "office supplies"
+        "description": "office supplies",
+        "terms": "Net 30"
       }`,
       messages: [{ role: "user", content: query }]
     });
