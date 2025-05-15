@@ -2302,59 +2302,145 @@ Use the following information to help answer the user's query about accounts pay
         dueDate = `${thirtyDaysLater.getFullYear()}-${(thirtyDaysLater.getMonth() + 1).toString().padStart(2, '0')}-${thirtyDaysLater.getDate().toString().padStart(2, '0')}`;
       }
       
-      // Get a valid AP account ID from database
+      /**
+       * Get a valid Accounts Payable account ID from database
+       * 
+       * As a world-class accounting system, we must follow proper double-entry accounting
+       * principles. For vendor bills, we MUST use an Accounts Payable liability account
+       * (never an asset account) as this represents money we owe to vendors.
+       */
       let apAccountId;
       try {
-        // Try multiple approaches to find the Accounts Payable account
-        // First try by account type and name pattern
-        const apQuery = `
-          SELECT id FROM accounts 
-          WHERE LOWER(account_type) = 'liability' AND LOWER(name) LIKE '%accounts payable%' 
-          AND user_id = ${context.userId || 'NULL'}
-          ORDER BY id ASC
+        console.log(`[APAgent] Starting comprehensive search for proper Accounts Payable account`);
+        
+        // First try: Accounts that perfectly match accounting standards for AP
+        const standardApQuery = `
+          SELECT id, name, code, account_type 
+          FROM accounts 
+          WHERE user_id = ${context.userId || 'NULL'}
+          AND LOWER(account_type) = 'liability'
+          AND (
+            LOWER(name) = 'accounts payable' OR
+            LOWER(name) = 'account payable' OR
+            LOWER(name) = 'ap' OR
+            code = '2000' OR
+            code LIKE '2%0'
+          )
+          ORDER BY 
+            CASE 
+              WHEN LOWER(name) = 'accounts payable' THEN 1
+              WHEN code = '2000' THEN 2
+              ELSE 3
+            END ASC,
+            id ASC
           LIMIT 1
         `;
-        const apResult = await sql.query(apQuery);
         
-        if (apResult.rows.length > 0) {
-          apAccountId = apResult.rows[0].id;
-          console.log(`[APAgent] Using Accounts Payable account ID: ${apAccountId}`);
+        console.log(`[APAgent] Executing primary AP account query with accounting standards`);  
+        const standardResult = await sql.query(standardApQuery);
+        
+        if (standardResult.rows.length > 0) {
+          apAccountId = standardResult.rows[0].id;
+          console.log(`[APAgent] Found standard AP account: ${standardResult.rows[0].name} (${standardResult.rows[0].code}), ID: ${apAccountId}`);
         } else {
-          // Try accounts with code 2000 (typical AP code)
-          const apCodeQuery = `
-            SELECT id FROM accounts 
-            WHERE code = '2000' AND user_id = ${context.userId || 'NULL'}
+          // Second try: Accounts with AP-like patterns in name
+          const apPatternQuery = `
+            SELECT id, name, code, account_type 
+            FROM accounts 
+            WHERE user_id = ${context.userId || 'NULL'}
+            AND LOWER(account_type) = 'liability'
+            AND (
+              LOWER(name) LIKE '%accounts payable%' OR
+              LOWER(name) LIKE '%account payable%' OR
+              LOWER(name) LIKE '%payables%' OR
+              LOWER(name) LIKE '% ap %' OR
+              LOWER(name) LIKE 'ap %' OR
+              LOWER(name) LIKE '% ap'
+            )
+            ORDER BY id ASC
             LIMIT 1
           `;
-          const apCodeResult = await sql.query(apCodeQuery);
           
-          if (apCodeResult.rows.length > 0) {
-            apAccountId = apCodeResult.rows[0].id;
-            console.log(`[APAgent] Using AP account with code 2000, ID: ${apAccountId}`);
+          console.log(`[APAgent] Trying secondary AP pattern matching query`);  
+          const patternResult = await sql.query(apPatternQuery);
+          
+          if (patternResult.rows.length > 0) {
+            apAccountId = patternResult.rows[0].id;
+            console.log(`[APAgent] Found AP by pattern: ${patternResult.rows[0].name} (${patternResult.rows[0].code}), ID: ${apAccountId}`);
           } else {
-            // Try any liability account as fallback
-            const liabilityQuery = `
-              SELECT id FROM accounts 
-              WHERE LOWER(account_type) = 'liability' AND user_id = ${context.userId || 'NULL'}
-              ORDER BY id ASC
+            // Third try: Look for accounts in the standard AP code range (2000-2999)
+            const apCodeRangeQuery = `
+              SELECT id, name, code, account_type 
+              FROM accounts 
+              WHERE user_id = ${context.userId || 'NULL'}
+              AND LOWER(account_type) = 'liability'
+              AND (
+                code LIKE '2%' OR
+                (code >= '2000' AND code <= '2999')
+              )
+              ORDER BY code ASC
               LIMIT 1
             `;
-            const liabilityResult = await sql.query(liabilityQuery);
             
-            if (liabilityResult.rows.length > 0) {
-              apAccountId = liabilityResult.rows[0].id;
-              console.log(`[APAgent] Using fallback liability account ID: ${apAccountId}`);
+            console.log(`[APAgent] Trying AP code range query`);  
+            const codeRangeResult = await sql.query(apCodeRangeQuery);
+            
+            if (codeRangeResult.rows.length > 0) {
+              apAccountId = codeRangeResult.rows[0].id;
+              console.log(`[APAgent] Found AP by code range: ${codeRangeResult.rows[0].name} (${codeRangeResult.rows[0].code}), ID: ${apAccountId}`);
             } else {
-              // Last resort - use any account
-              const anyAccountQuery = `SELECT id FROM accounts WHERE user_id = ${context.userId || 'NULL'} LIMIT 1`;
-              const anyAccountResult = await sql.query(anyAccountQuery);
+              // Fourth try: ANY liability account (still better than an asset account)
+              const liabilityQuery = `
+                SELECT id, name, code, account_type 
+                FROM accounts 
+                WHERE user_id = ${context.userId || 'NULL'}
+                AND LOWER(account_type) = 'liability'
+                ORDER BY id ASC
+                LIMIT 1
+              `;
               
-              if (anyAccountResult.rows.length === 0) {
-                throw new Error('No accounts found in the database');
+              console.log(`[APAgent] Trying to find any liability account`);  
+              const liabilityResult = await sql.query(liabilityQuery);
+              
+              if (liabilityResult.rows.length > 0) {
+                apAccountId = liabilityResult.rows[0].id;
+                console.log(`[APAgent] Using liability account as fallback: ${liabilityResult.rows[0].name} (${liabilityResult.rows[0].code}), ID: ${apAccountId}`);
+                
+                // Log a warning that we're using a non-ideal account
+                console.warn(`[APAgent] WARNING: Using a non-standard AP account. Consider creating a proper 'Accounts Payable' account.`);
+              } else {
+                // Last resort (emergency only): Create a proper AP account
+                console.warn(`[APAgent] NO LIABILITY ACCOUNTS FOUND! Attempting to create an Accounts Payable account`);
+                
+                try {
+                  // Try to create an AP account via GL agent
+                  const glAccountResult = await this.requestGLAccountCreation(
+                    context,
+                    "Accounts Payable",
+                    "2000"
+                  );
+                  
+                  if (glAccountResult.success && glAccountResult.accountId) {
+                    apAccountId = glAccountResult.accountId;
+                    console.log(`[APAgent] Created new Accounts Payable account with ID: ${apAccountId}`);
+                  } else {
+                    throw new Error("Failed to create Accounts Payable account: " + glAccountResult.message);
+                  }
+                } catch (createError) {
+                  console.error('[APAgent] Error creating AP account:', createError);
+                  
+                  // Absolute last resort - any account (though this is incorrect accounting)
+                  const anyAccountQuery = `SELECT id, name, code, account_type FROM accounts WHERE user_id = ${context.userId || 'NULL'} LIMIT 1`;
+                  const anyAccountResult = await sql.query(anyAccountQuery);
+                  
+                  if (anyAccountResult.rows.length === 0) {
+                    throw new Error('No accounts found in the database');
+                  }
+                  
+                  apAccountId = anyAccountResult.rows[0].id;
+                  console.error(`[APAgent] CRITICAL ACCOUNTING ERROR: Forced to use non-liability account ${anyAccountResult.rows[0].name} (${anyAccountResult.rows[0].code}) for AP. This violates accounting principles.`);
+                }
               }
-              
-              apAccountId = anyAccountResult.rows[0].id;
-              console.log(`[APAgent] Using last resort fallback account ID: ${apAccountId}`);
             }
           }
         }
@@ -2508,7 +2594,7 @@ Use the following information to help answer the user's query about accounts pay
    * Helper function to simplify vendor objects for returning in agent responses
    * Removes any sensitive or unnecessary information
    */
-  private simplifyVendor(vendor: Vendor): Partial<Vendor> {
+  private simplifyVendor(vendor: any): any {
     return {
       id: vendor.id,
       name: vendor.name,
@@ -2518,5 +2604,4 @@ Use the following information to help answer the user's query about accounts pay
     };
   }
   
-  // This method has been merged with the implementation above
-}
+} 
