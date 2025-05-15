@@ -2305,10 +2305,13 @@ Use the following information to help answer the user's query about accounts pay
       // Get a valid AP account ID from database
       let apAccountId;
       try {
-        // First try to find an account with "Accounts Payable" in the name
+        // Try multiple approaches to find the Accounts Payable account
+        // First try by account type and name pattern
         const apQuery = `
           SELECT id FROM accounts 
-          WHERE LOWER(name) LIKE '%accounts payable%' 
+          WHERE LOWER(account_type) = 'liability' AND LOWER(name) LIKE '%accounts payable%' 
+          AND user_id = ${context.userId || 'NULL'}
+          ORDER BY id ASC
           LIMIT 1
         `;
         const apResult = await sql.query(apQuery);
@@ -2317,28 +2320,42 @@ Use the following information to help answer the user's query about accounts pay
           apAccountId = apResult.rows[0].id;
           console.log(`[APAgent] Using Accounts Payable account ID: ${apAccountId}`);
         } else {
-          // Fallback to first liability account
-          const liabilityQuery = `
+          // Try accounts with code 2000 (typical AP code)
+          const apCodeQuery = `
             SELECT id FROM accounts 
-            WHERE LOWER(account_type) = 'liability' 
+            WHERE code = '2000' AND user_id = ${context.userId || 'NULL'}
             LIMIT 1
           `;
-          const liabilityResult = await sql.query(liabilityQuery);
+          const apCodeResult = await sql.query(apCodeQuery);
           
-          if (liabilityResult.rows.length > 0) {
-            apAccountId = liabilityResult.rows[0].id;
-            console.log(`[APAgent] Using liability account ID: ${apAccountId}`);
+          if (apCodeResult.rows.length > 0) {
+            apAccountId = apCodeResult.rows[0].id;
+            console.log(`[APAgent] Using AP account with code 2000, ID: ${apAccountId}`);
           } else {
-            // Last resort - use any account
-            const anyAccountQuery = `SELECT id FROM accounts LIMIT 1`;
-            const anyAccountResult = await sql.query(anyAccountQuery);
+            // Try any liability account as fallback
+            const liabilityQuery = `
+              SELECT id FROM accounts 
+              WHERE LOWER(account_type) = 'liability' AND user_id = ${context.userId || 'NULL'}
+              ORDER BY id ASC
+              LIMIT 1
+            `;
+            const liabilityResult = await sql.query(liabilityQuery);
             
-            if (anyAccountResult.rows.length === 0) {
-              throw new Error('No accounts found in the database');
+            if (liabilityResult.rows.length > 0) {
+              apAccountId = liabilityResult.rows[0].id;
+              console.log(`[APAgent] Using fallback liability account ID: ${apAccountId}`);
+            } else {
+              // Last resort - use any account
+              const anyAccountQuery = `SELECT id FROM accounts WHERE user_id = ${context.userId || 'NULL'} LIMIT 1`;
+              const anyAccountResult = await sql.query(anyAccountQuery);
+              
+              if (anyAccountResult.rows.length === 0) {
+                throw new Error('No accounts found in the database');
+              }
+              
+              apAccountId = anyAccountResult.rows[0].id;
+              console.log(`[APAgent] Using last resort fallback account ID: ${apAccountId}`);
             }
-            
-            apAccountId = anyAccountResult.rows[0].id;
-            console.log(`[APAgent] Using fallback account ID: ${apAccountId}`);
           }
         }
       } catch (err) {
