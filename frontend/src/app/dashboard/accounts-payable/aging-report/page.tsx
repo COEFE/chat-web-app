@@ -332,7 +332,9 @@ export default function APAgingReportPage() {
                                   </thead>
                                   <tbody>
                                     {vendor.bills.map(bill => {
-                                      const remainingAmount = bill.total_amount - (bill.amount_paid || 0);
+                                      const totalAmount = parseFloat(bill.total_amount.toString());
+                                      const amountPaid = parseFloat((bill.amount_paid || 0).toString());
+                                      const remainingAmount = totalAmount - amountPaid;
                                       return (
                                         <tr 
                                           key={bill.id} 
@@ -345,9 +347,9 @@ export default function APAgingReportPage() {
                                           <td className="py-2 px-3">{bill.bill_number || `#${bill.id}`}</td>
                                           <td className="py-2 px-3">{format(parseISO(bill.bill_date), 'MMM d, yyyy')}</td>
                                           <td className="py-2 px-3">{format(parseISO(bill.due_date), 'MMM d, yyyy')}</td>
-                                          <td className="text-right py-2 px-3">${bill.total_amount.toFixed(2)}</td>
-                                          <td className="text-right py-2 px-3">${(bill.amount_paid || 0).toFixed(2)}</td>
-                                          <td className="text-right py-2 px-3 font-medium">${remainingAmount.toFixed(2)}</td>
+                                          <td className="text-right py-2 px-3">${parseFloat(bill.total_amount.toString()).toFixed(2)}</td>
+                                          <td className="text-right py-2 px-3">${(parseFloat((bill.amount_paid || 0).toString())).toFixed(2)}</td>
+                                          <td className="text-right py-2 px-3 font-medium">${parseFloat(remainingAmount.toString()).toFixed(2)}</td>
                                           <td className="py-2 px-3">
                                             <span className={`inline-block px-2 py-1 rounded-full text-xs ${
                                               bill.status === 'Paid' ? 'bg-green-100 text-green-800' :
