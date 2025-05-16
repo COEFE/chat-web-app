@@ -8,8 +8,11 @@ import {
   extractVendorInfoFromQuery,
   isBillCreationQuery,
   extractBillInfoFromQuery,
-  isBillStatusUpdateQuery
+  isBillStatusUpdateQuery,
+  isBillPaymentQuery,
+  isBillPaymentQueryWithAI
 } from "@/lib/apUtils";
+import { handleBillPayment, isApplicable as isBillPaymentApplicable } from "./handleBillPayment";
 import { 
   sendAgentMessage, 
   respondToAgentMessage, 
@@ -23,8 +26,7 @@ import { logAuditEvent } from "@/lib/auditLogger";
 import Anthropic from "@anthropic-ai/sdk";
 import { MessageParam } from "@anthropic-ai/sdk/resources/messages";
 import { Vendor } from "../accounting/vendorQueries";
-import { Bill, BillWithVendor } from "../accounting/billQueries";
-import { BillLine } from "../accounting/billQueries";
+import { Bill, BillWithVendor, BillLine } from "../accounting/accountingTypes";
 import { BillWithDetails, BillLineDetail } from "../accounting/apQueries";
 import { createVendor as createVendorRecord, getVendorByName, getVendors } from "@/lib/accounting/vendorQueries";
 import { createBill, updateBill, getBill } from "@/lib/accounting/billQueries";
@@ -66,6 +68,9 @@ export class APAgent implements Agent {
   // Track the pending bill creation to handle confirmations
   private pendingBillCreation: { userId: string, billInfo: any, vendorId?: number } | null = null;
   
+  // Track the pending bill payment to handle confirmations
+  private pendingBillPayment: { userId: string, paymentInfo: any, paymentAccountId?: number, billIds?: number[] } | null = null;
+  
   private anthropic: Anthropic;
 
   constructor() {
@@ -105,10 +110,17 @@ export class APAgent implements Agent {
   /**
    * Get counts of bills by status
    */
-  private async getBillsStatusCount(): Promise<Record<string, number>> {
+  private async getBillsStatusCount(userId?: string): Promise<Record<string, number>> {
     try {
       // Query the database to get counts of bills by status
-      const result = await sql`
+      const result = userId ? await sql`
+        SELECT status, COUNT(*) as count
+        FROM bills
+        WHERE is_deleted IS NOT TRUE
+        AND user_id = ${userId}
+        GROUP BY status
+        ORDER BY count DESC
+      ` : await sql`
         SELECT status, COUNT(*) as count
         FROM bills
         WHERE is_deleted IS NOT TRUE
@@ -126,6 +138,132 @@ export class APAgent implements Agent {
     } catch (error) {
       console.error('[APAgent] Error getting bill status counts:', error);
       return {};
+    }
+  }
+
+  /**
+   * Get a count of open bills for the user
+   */
+  async getOpenBillsCount(userId: string): Promise<string> {
+    console.log(`[APAgent] Getting open bills count for user: ${userId}`);
+    
+    try {
+      const { rows } = await sql`
+        SELECT COUNT(*) as open_count 
+        FROM bills 
+        WHERE user_id = ${userId} AND status = 'Open'
+      `;
+      
+      if (rows.length > 0) {
+        const openCount = rows[0].open_count;
+        console.log(`[APAgent] Open bills count: ${openCount}`);
+        return openCount;
+      }
+      
+      return '0';
+    } catch (error) {
+      console.error('[APAgent] Error getting open bills count:', error);
+      return '0';
+    }
+  }
+
+  /**
+   * Simplified check for bill status update requests without using AI
+   * This replaces the AI-powered isBillStatusUpdateQuery function
+   */
+  simplifiedBillStatusCheck(query: string): { isUpdateRequest: boolean; isBulkUpdate: boolean; limitToRecent?: number } {
+    const normalized = query.toLowerCase();
+    
+    // Check for common bill payment patterns
+    const paymentPatterns = [
+      /pay\s+(?:all|the|)\s*(?:open|outstanding|unpaid|)\s*(?:bill|bills|vendor\s+bill|vendor\s+bills)/i,
+      /record\s+(?:the\s+|a\s+|)payment\s+(?:for|of)\s+(?:all|the|)\s*(?:open|outstanding|unpaid|)\s*(?:bill|bills)/i,
+      /mark\s+(?:all|the|)\s*(?:open|outstanding|unpaid|)\s*(?:bill|bills)\s+(?:as\s+|)paid/i
+    ];
+    
+    // Check if any payment pattern matches
+    const isPaymentRequest = paymentPatterns.some(pattern => pattern.test(normalized));
+    
+    // Check if it's a bulk update (contains words like 'all' or multiple 'bills')
+    const isBulkUpdate = normalized.includes('all') || 
+                        (normalized.includes('bills') && !normalized.includes('bill number'));
+    
+    return {
+      isUpdateRequest: isPaymentRequest,
+      isBulkUpdate: isBulkUpdate,
+      limitToRecent: normalized.includes('recent') ? 5 : undefined
+    };
+  }
+
+  /**
+   * Select the best payment account using AI or rule-based fallback
+   * @param context The agent context
+   * @param accounts List of available accounts
+   * @param paymentDescription Description of the payment
+   * @param vendorName Optional vendor name
+   * @returns The selected account ID and a message explaining the selection
+   */
+  async selectPaymentAccountWithAI(
+    context: AgentContext,
+    accounts: any[],
+    paymentDescription: string,
+    vendorName?: string
+  ): Promise<{ accountId: number; message: string }> {
+    console.log(`[APAgent] Selecting payment account for: ${paymentDescription}, vendor: ${vendorName || 'unknown'}`);
+    
+    try {
+      // First, look for accounts with 'operating' in the name as these are typically used for payments
+      const operatingAccounts = accounts.filter(a => 
+        a.name.toLowerCase().includes('operating') || 
+        a.name.toLowerCase().includes('checking')
+      );
+      
+      if (operatingAccounts.length > 0) {
+        const account = operatingAccounts[0];
+        console.log(`[APAgent] Selected operating account: ${account.name} (ID: ${account.id})`);
+        return { 
+          accountId: account.id, 
+          message: `Selected operating account: ${account.name}` 
+        };
+      }
+      
+      // Next, look for cash accounts
+      const cashAccounts = accounts.filter(a => 
+        a.name.toLowerCase().includes('cash') || 
+        a.account_type?.toLowerCase().includes('cash')
+      );
+      
+      if (cashAccounts.length > 0) {
+        const account = cashAccounts[0];
+        console.log(`[APAgent] Selected cash account: ${account.name} (ID: ${account.id})`);
+        return { 
+          accountId: account.id, 
+          message: `Selected cash account: ${account.name}` 
+        };
+      }
+      
+      // Fallback to the first account if no better match is found
+      if (accounts.length > 0) {
+        const account = accounts[0];
+        console.log(`[APAgent] Falling back to first available account: ${account.name} (ID: ${account.id})`);
+        return { 
+          accountId: account.id, 
+          message: `Using account: ${account.name} (no better match found)` 
+        };
+      }
+      
+      // If no accounts are available, return a default ID (this should be handled by the caller)
+      console.warn('[APAgent] No payment accounts available, returning default ID 1000');
+      return { 
+        accountId: 1000, 
+        message: 'No payment accounts available, using default ID 1000' 
+      };
+    } catch (error) {
+      console.error('[APAgent] Error selecting payment account:', error);
+      return { 
+        accountId: 1000, 
+        message: 'Error selecting payment account, using default ID 1000' 
+      };
     }
   }
 
@@ -156,7 +294,7 @@ export class APAgent implements Agent {
   private async handleBillStatusCountQuery(context: AgentContext): Promise<AgentResponse> {
     try {
       // Get bill status counts
-      const statusCounts = await this.getBillsStatusCount();
+      const statusCounts = await this.getBillsStatusCount(context.userId);
       
       // Format for display
       const statusStrings = Object.entries(statusCounts)
@@ -274,6 +412,16 @@ export class APAgent implements Agent {
             message: 'Okay, I will not create the bill.'
           };
         }
+        
+        // Also check if we need to cancel a pending payment
+        if (this.pendingBillPayment?.userId === context.userId) {
+          // User chose not to proceed with payment; clear the pending state
+          this.pendingBillPayment = null;
+          return {
+            success: true,
+            message: 'Okay, I will not proceed with the bill payment.'
+          };
+        }
       }
       
       // If we have an outstanding duplicate warning, prompt the user until they confirm or cancel.
@@ -355,7 +503,8 @@ Would you like me to create this vendor? Please confirm.`
       // First check for bill status update request (post/open bill)
       // This needs to be checked before bill creation because some bill creation queries 
       // may also match bill status update patterns
-      const billStatusUpdate = isBillStatusUpdateQuery(context.query);
+      // Use a simplified approach to check for bill status updates instead of the AI-powered function
+      const billStatusUpdate = this.simplifiedBillStatusCheck(context.query);
       if (billStatusUpdate.isUpdateRequest) {
         console.log(`[APAgent] Detected bill status update request - isBulkUpdate: ${billStatusUpdate.isBulkUpdate}, limitToRecent: ${billStatusUpdate.limitToRecent || 'none'}`);
         return this.handleBillStatusUpdate(context, billStatusUpdate);
@@ -364,6 +513,35 @@ Would you like me to create this vendor? Please confirm.`
       // Only check for bill creation after confirming it's not a status update
       if (isBillCreationQuery(normalized)) {
         return this.handleBillCreation(context);
+      }
+      
+      // Check for bill payment requests using our AI-powered detection
+      try {
+        // Use our AI-powered detection to check if this is a payment request
+        const isPaymentRequest = await isBillPaymentApplicable(context.query);
+        
+        if (isPaymentRequest) {
+          console.log('[APAgent] AI detected bill payment intent, handling payment request');
+          
+          // If we have a pending payment in memory and this is a confirmation, use it
+          if (this.pendingBillPayment && this.pendingBillPayment.userId === userId &&
+              confirmationResponses.includes(normalizedQuery)) {
+            console.log('[APAgent] Processing confirmation for pending bill payment');
+            // Use the stored payment info and proceed with payment
+            // We'll delegate to the handleBillPayment function which tracks its own state
+          }
+          
+          // Process the payment using the handleBillPayment function
+          const result = await handleBillPayment(context.query, context, this.pendingBillPayment);
+          
+          // Store the pending payment state if needed for future interactions
+          this.pendingBillPayment = result.updatedPendingPayment;
+          
+          return result.response;
+        }
+      } catch (error) {
+        console.error('[APAgent] Error in bill payment handling:', error);
+        // Continue with other processing if payment handling fails
       }
       
       // Check if user is asking about bill counts or status
@@ -832,20 +1010,20 @@ Use the following information to help answer the user's query about accounts pay
    * Handle bill status update requests
    * This handles requests to change a bill's status (e.g., from Draft to Open)
    */
-  private async handleBillStatusUpdate(context: AgentContext, legacyUpdateInfo: ReturnType<typeof isBillStatusUpdateQuery>): Promise<AgentResponse> {
+  private async handleBillStatusUpdate(context: AgentContext, statusInfo: ReturnType<typeof this.simplifiedBillStatusCheck>): Promise<AgentResponse> {
     try {
       // First, use our AI-powered analyzer for more accurate detection
       const updateInfo = await analyzeBillStatusUpdateWithAI(context.query);
       console.log('[APAgent] AI analysis of bill status update:', updateInfo);
       
-      // Combine info from both analyzers (AI and legacy regex)
-      // The AI analyzer should take precedence, but we keep legacy info as fallback
+      // Combine info from both analyzers (AI and our simplified check)
+      // The AI analyzer should take precedence, but we keep simplified check info as fallback
       const combinedInfo = {
-        isUpdateRequest: updateInfo.isUpdateRequest || legacyUpdateInfo.isUpdateRequest,
-        isBulkUpdate: updateInfo.isBulkUpdate || legacyUpdateInfo.isBulkUpdate,
-        requestedStatus: updateInfo.requestedStatus || legacyUpdateInfo.requestedStatus,
-        billNumbers: updateInfo.billNumbers?.length ? updateInfo.billNumbers : (legacyUpdateInfo.billNumbers || []),
-        limitToRecent: updateInfo.limitToRecent || legacyUpdateInfo.limitToRecent,
+        isUpdateRequest: updateInfo.isUpdateRequest || statusInfo.isUpdateRequest,
+        isBulkUpdate: updateInfo.isBulkUpdate || statusInfo.isBulkUpdate,
+        requestedStatus: updateInfo.requestedStatus || 'Paid', // Default to 'Paid' for our simplified check
+        billNumbers: updateInfo.billNumbers?.length ? updateInfo.billNumbers : [],
+        limitToRecent: updateInfo.limitToRecent || statusInfo.limitToRecent,
         vendorName: updateInfo.vendorName
       };
       
@@ -873,7 +1051,7 @@ Use the following information to help answer the user's query about accounts pay
       
       // For single bill updates, we need a bill number
       // Use the first bill number from the combined info
-      const billNumber = combinedInfo.billNumbers?.[0] || legacyUpdateInfo.billNumber;
+      const billNumber = combinedInfo.billNumbers?.[0] || '';
       
       if (!billNumber) {
         return {

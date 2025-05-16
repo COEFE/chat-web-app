@@ -3,6 +3,15 @@ import Anthropic from "@anthropic-ai/sdk";
 import { MessageParam } from "@anthropic-ai/sdk/resources/messages";
 import { logAuditEvent } from "@/lib/auditLogger";
 import { classifyUserIntent } from "@/lib/intentClassifier";
+import { 
+  isBillCreationQuery, 
+  isBillCreationQueryWithAI,
+  BillCreationAnalysis,
+  isVendorCreationQuery, 
+  isBillPaymentQuery, 
+  isBillPaymentQueryWithAI,
+  BillPaymentAnalysis 
+} from "@/lib/apUtils";
 
 /**
  * AccountingOrchestrator handles routing user queries to specialized accounting agents
@@ -120,10 +129,103 @@ export class AccountingOrchestrator {
    * Determine which specialized agent should handle the query
    * Uses AI-based intent classification to route to the appropriate agent
    */
-  private async determineTargetAgent(query: string): Promise<Agent | undefined> {
-    console.log(`[Orchestrator] Determining target agent for query: "${query}"`);
+  /**
+   * Detect bill payment intent in the query using AI-powered analysis
+   */
+  private async detectBillPaymentIntent(query: string): Promise<boolean> {
+    // Check for bill payment intent using Claude AI
+    console.log(`[Orchestrator] Using AI to detect bill payment intent in: "${query}"`);
     
     try {
+      // Try AI-based detection first
+      const aiAnalysis = await isBillPaymentQueryWithAI(query);
+      
+      if (aiAnalysis.isPaymentQuery && aiAnalysis.confidence > 0.7) {
+        console.log(`[Orchestrator] AI detected bill payment intent with ${aiAnalysis.confidence.toFixed(2)} confidence. Reasoning: ${aiAnalysis.reasoning}`);
+        return true;
+      } else if (aiAnalysis.isPaymentQuery) {
+        console.log(`[Orchestrator] AI detected possible bill payment intent but with low confidence (${aiAnalysis.confidence.toFixed(2)}). Falling back to pattern matching.`);
+        // Fall back to pattern matching if AI is uncertain
+        return isBillPaymentQuery(query);
+      }
+      
+      // If AI says it's not a payment query but confidence is low, check patterns as backup
+      if (aiAnalysis.confidence < 0.7) {
+        const patternMatch = isBillPaymentQuery(query);
+        if (patternMatch) {
+          console.log('[Orchestrator] Pattern matching detected bill payment intent where AI did not');
+          return true;
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      // If AI detection fails, fall back to pattern matching
+      console.error(`[Orchestrator] Error in AI payment detection, falling back to patterns: ${error}`);
+      return isBillPaymentQuery(query);
+    }
+  }
+  
+  /**
+   * Detect bill creation intent in the query using AI-powered analysis
+   */
+  private async detectBillCreationIntent(query: string): Promise<boolean> {
+    // Check for bill creation intent using Claude AI
+    console.log(`[Orchestrator] Using AI to detect bill creation intent in: "${query}"`);
+    
+    try {
+      // Try AI-based detection first
+      const aiAnalysis = await isBillCreationQueryWithAI(query);
+      
+      if (aiAnalysis.isCreationQuery && aiAnalysis.confidence > 0.7) {
+        console.log(`[Orchestrator] AI detected bill creation intent with ${aiAnalysis.confidence.toFixed(2)} confidence. Reasoning: ${aiAnalysis.reasoning}`);
+        return true;
+      } else if (aiAnalysis.isCreationQuery) {
+        console.log(`[Orchestrator] AI detected possible bill creation intent but with low confidence (${aiAnalysis.confidence.toFixed(2)}). Falling back to pattern matching.`);
+        // Fall back to pattern matching if AI is uncertain
+        return isBillCreationQuery(query);
+      }
+      
+      // If AI says it's not a creation query but confidence is low, check patterns as backup
+      if (aiAnalysis.confidence < 0.7) {
+        const patternMatch = isBillCreationQuery(query);
+        if (patternMatch) {
+          console.log('[Orchestrator] Pattern matching detected bill creation intent where AI did not');
+          return true;
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      // If AI detection fails, fall back to pattern matching
+      console.error(`[Orchestrator] Error in AI bill creation detection, falling back to patterns: ${error}`);
+      return isBillCreationQuery(query);
+    }
+  }
+  
+  private async determineTargetAgent(query: string): Promise<Agent | undefined> {
+    try {
+      console.log(`[Orchestrator] Determining target agent for query: "${query}"`);
+      
+      // Check for bill payment patterns FIRST with AI
+      // This is prioritized because payment patterns can sometimes be mistaken for bill creation
+      if (await this.detectBillPaymentIntent(query)) {
+        console.log('[Orchestrator] Bill payment query detected, routing to AP agent');
+        return this.agents['ap-agent'];
+      }
+      
+      // Check for vendor creation patterns
+      if (isVendorCreationQuery(query)) {
+        console.log('[Orchestrator] Vendor creation query detected, routing to AP agent');
+        return this.agents['ap-agent'];
+      }
+      
+      // Check for bill creation patterns with AI
+      if (await this.detectBillCreationIntent(query)) {
+        console.log('[Orchestrator] Bill creation query detected with AI, routing to AP agent');
+        return this.agents['ap-agent'];
+      }
+      
       // Only proceed if we have registered agents
       if (Object.keys(this.agents).length === 0) {
         console.log(`[Orchestrator] No agents registered, cannot determine target agent.`);
@@ -139,7 +241,7 @@ export class AccountingOrchestrator {
       
       switch (classification.intent) {
         case 'ap_bill':
-          targetAgentId = 'ap_agent';
+          targetAgentId = 'ap_agent'; // Match the ID used in APAgent class
           break;
         case 'ar_invoice':
           targetAgentId = 'invoice-agent';

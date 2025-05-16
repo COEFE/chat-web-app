@@ -1,57 +1,489 @@
 import { Vendor } from "./accounting/vendorQueries";
-import { Bill, BillWithVendor } from "./accounting/billQueries";
+import { Bill, BillWithVendor } from "./accounting/accountingTypes";
 import { getVendors } from "./accounting/vendorQueries";
-import { getBills, getBillStatuses, updateBill, getBill } from "./accounting/billQueries";
-import { getBillsWithVendors, getLastPaidBill, getVendorsWithPaidBills, getRecentBillPayments, BillLineDetail, BillWithDetails } from "./accounting/apQueries";
+import {
+  getBills,
+  getBillStatuses,
+  updateBill,
+  getBill,
+} from "./accounting/billQueries";
+import {
+  getBillsWithVendors,
+  getLastPaidBill,
+  getVendorsWithPaidBills,
+  getRecentBillPayments,
+  BillLineDetail,
+  BillWithDetails,
+} from "./accounting/apQueries";
 import { logAuditEvent } from "./auditLogger";
 import { sql } from "@vercel/postgres";
+import { getAccounts } from "./accounting/accountQueries";
+import Anthropic from "@anthropic-ai/sdk"; // Added for AI call
 
 /**
- * Check if a query might be about accounts payable topics
- * Uses keyword detection and common AP phrases
+ * Interface for AI-powered bill payment analysis
  */
+export interface BillPaymentAnalysis {
+  isPaymentQuery: boolean;
+  confidence: number;
+  paymentType?: 'bill' | 'invoice' | 'vendor' | 'general';
+  reasoning?: string;
+}
+
 /**
- * Determine if a message is requesting to create a bill
+ * Determine if a message is requesting to record bill payments using Claude AI
+ */
+export async function isBillPaymentQueryWithAI(
+  message: string,
+  anthropicClient?: Anthropic
+): Promise<BillPaymentAnalysis> {
+  console.log(`[APUtils] Using AI to check for bill payment in: "${message}"`);
+  
+  // Create local Anthropic client if not provided
+  const anthropic = anthropicClient || new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY || '',
+    dangerouslyAllowBrowser: true
+  });
+  
+  // System prompt for payment detection
+  const systemPrompt = `You are an AI specialized in detecting payment intents in accounting systems.
+  
+  Analyze the given message and determine if it's requesting to record a payment for bills or invoices.
+  Consider various ways users might express payment intents, such as:
+  - Recording payments
+  - Paying bills or invoices
+  - Making payments to vendors
+  - Marking bills as paid
+  - Settling or clearing bills or invoices
+
+  NOTE: In this system, "bills" and "invoices" both refer to accounts payable items.
+  
+  Return a JSON object with:
+  - isPaymentQuery: true if the message is about making/recording a payment, false otherwise
+  - confidence: number between 0 and 1 indicating your confidence level
+  - paymentType: 'bill', 'invoice', 'vendor', or 'general' indicating what kind of payment
+  - reasoning: brief explanation of why you classified it this way
+
+  Return ONLY the JSON object with no additional text.`;
+
+  try {
+    // Call Claude API
+    const response = await anthropic.messages.create({
+      model: "claude-3-haiku-20240307",
+      max_tokens: 1000,
+      temperature: 0,
+      messages: [
+        { role: "user", content: `${systemPrompt}\n\nMessage to analyze: ${message}` }
+      ]
+    });
+
+    // Parse response
+    let responseText = '';
+    if (response.content[0].type === 'text') {
+      responseText = response.content[0].text;
+    }
+    
+    try {
+      const result = JSON.parse(responseText);
+      console.log(`[APUtils] AI payment detection result:`, result);
+      return result as BillPaymentAnalysis;
+    } catch (parseError) {
+      console.error(`[APUtils] Error parsing AI response: ${parseError}. Raw response: ${responseText}`);
+      // Fallback with default value
+      return {
+        isPaymentQuery: false,
+        confidence: 0,
+        reasoning: `Error parsing AI response: ${parseError}`
+      };
+    }
+  } catch (error) {
+    console.error(`[APUtils] Error calling AI for payment detection: ${error}`);
+    // Fallback with default value
+    return {
+      isPaymentQuery: false,
+      confidence: 0,
+      reasoning: `Error calling AI: ${error}`
+    };
+  }
+}
+
+/**
+ * Determine if a message is requesting to record bill payments (legacy pattern-based version)
+ * This function is kept for fallback if AI is unavailable
+ */
+export function isBillPaymentQuery(message: string): boolean {
+  const normalized = message.toLowerCase();
+  console.log(`[APUtils] Checking for bill payment in: "${normalized}"`);
+
+  // Payment recording patterns
+  const paymentPatterns = [
+    /record\s+.*\s*payment/i,
+    /pay\s+.*\s*bill/i,
+    /make\s+.*\s*payment/i,
+    /record\s+.*\s*bill\s+payment/i,
+    /pay\s+.*\s*invoice/i,
+    /record\s+.*\s*invoice\s+payment/i,
+    /payment\s+for\s+.*\s*invoice/i,
+    /mark\s+.*\s*bill\s+.*\s*paid/i,
+    /mark\s+.*\s*invoice\s+.*\s*paid/i,
+    /mark\s+.*\s*paid/i,
+    /pay\s+.*\s*vendor/i,
+    /payment\s+for\s+.*\s*bill/i,
+    /payment\s+to\s+.*\s*vendor/i,
+    /settle\s+.*\s*bill/i,
+    /settle\s+.*\s*invoice/i,
+    /clear\s+.*\s*bill/i,
+    /clear\s+.*\s*invoice/i,
+  ];
+
+  // Check if any pattern matches
+  for (const pattern of paymentPatterns) {
+    if (pattern.test(normalized)) {
+      console.log(`[APUtils] Bill payment pattern matched: ${pattern}`);
+      return true;
+    }
+  }
+
+  // Additional logging for debug
+  console.log(
+    `[APUtils] No bill payment patterns matched for: "${normalized}"`
+  );
+  return false;
+}
+
+/**
+ * Extract payment information from a bill payment query
+ */
+export function extractPaymentInfoFromQuery(message: string): {
+  vendor_name?: string;
+  bill_number?: string;
+  amount?: number;
+  payment_date?: string;
+  payment_account?: string;
+  payment_method?: string;
+  reference_number?: string;
+  all_bills?: boolean;
+} {
+  const normalized = message.toLowerCase();
+  console.log(`[APUtils] Extracting payment info from: "${normalized}"`);
+
+  const paymentInfo: {
+    vendor_name?: string;
+    bill_number?: string;
+    amount?: number;
+    payment_date?: string;
+    payment_account?: string;
+    payment_method?: string;
+    reference_number?: string;
+    all_bills?: boolean;
+  } = {};
+
+  // *** BILL/INVOICE DETECTION LOGIC - FOR ALL QUERIES WITH PAYMENT INTENT *** //
+  // If user wants to record a payment but doesn't specify which bill or invoice,
+  // assume they want to pay all open bills/invoices
+  const isRecordingPayment = (
+    normalized.includes('record') || 
+    normalized.includes('pay') || 
+    normalized.includes('process') ||
+    normalized.includes('settle') ||
+    normalized.includes('clear')
+  );
+  
+  const isSpecificBill = /bill\s+(?:number|#)\s*([A-Za-z0-9-]+)/i.test(normalized) || 
+                        /invoice\s+(?:number|#)\s*([A-Za-z0-9-]+)/i.test(normalized);
+                        
+  // Check if this is specifically about invoices
+  const isAboutInvoices = normalized.includes('invoice') || normalized.includes('invoices');
+  
+  // Special case for "record the payment of all open vendor bills/invoices" and similar phrases
+  if ((normalized.includes('open') && (normalized.includes('bill') || normalized.includes('invoice')))) {
+    console.log(`[APUtils] Detected 'open bills/invoices' phrase in: "${normalized}"`);
+    paymentInfo.all_bills = true;
+  } 
+  // Check for "all bills/invoices" phrasing
+  else if (normalized.includes('all') && (normalized.includes('bill') || normalized.includes('invoice'))) {
+    console.log(`[APUtils] Detected 'all bills/invoices' phrase in: "${normalized}"`);
+    paymentInfo.all_bills = true;
+  }
+  // Check for general terms like "these invoices"
+  else if (normalized.match(/these\s+invoices/i) || normalized.match(/the\s+invoices/i)) {
+    console.log(`[APUtils] Detected reference to 'these invoices' in: "${normalized}"`);
+    paymentInfo.all_bills = true;
+  }
+  // Default to all bills for general payment requests with no specific bill
+  else if (isRecordingPayment && !isSpecificBill) {
+    console.log(`[APUtils] Payment request without specific bill/invoice, defaulting to all bills: "${normalized}"`);
+    paymentInfo.all_bills = true;
+  }
+
+  // Extract vendor name patterns
+  const vendorPatterns = [
+    /(?:pay|payment|bill)\s+(?:for|to|from)\s+([A-Za-z0-9\s&.]+?)(?:\s+for|\s+in|\s+amount|\s+due|$)/i,
+    /from\s+([A-Za-z0-9\s&.]+?)(?:\s+for|\s+in|\s+amount|\s+due|$)/i,
+  ];
+
+  for (const pattern of vendorPatterns) {
+    const match = normalized.match(pattern);
+    if (match && match[1]) {
+      paymentInfo.vendor_name = match[1].trim();
+      break;
+    }
+  }
+
+  // Extract bill number patterns
+  const billNumberPatterns = [
+    /bill\s+(?:number|#)\s*([A-Za-z0-9-]+)/i,
+    /invoice\s+(?:number|#)\s*([A-Za-z0-9-]+)/i,
+    /bill\s+([A-Za-z0-9-]+)\s+from/i,
+    /invoice\s+([A-Za-z0-9-]+)\s+from/i,
+  ];
+
+  for (const pattern of billNumberPatterns) {
+    const match = normalized.match(pattern);
+    if (match && match[1]) {
+      paymentInfo.bill_number = match[1].trim();
+      break;
+    }
+  }
+
+  // Extract payment amount
+  const amountPatterns = [
+    /\$\s*(\d+(?:[.,]\d+)?)/i,
+    /(?:amount|pay|payment|total)\s+(?:of|is)?\s*\$?\s*(\d+(?:[.,]\d+)?)/i,
+    /(\d+(?:[.,]\d+)?)\s+(?:dollars|USD)/i,
+  ];
+
+  for (const pattern of amountPatterns) {
+    const match = normalized.match(pattern);
+    if (match && match[1]) {
+      const amountStr = match[1].replace(/,/g, "");
+      paymentInfo.amount = parseFloat(amountStr);
+      break;
+    }
+  }
+
+  // Extract payment account
+  const accountPatterns = [
+    /(?:using|from|with)\s+(?:the\s+)?([A-Za-z0-9\s&.]+?)\s+(?:account|acct)/i,
+    /(?:using|from|with)\s+(?:the\s+)?([A-Za-z0-9\s&.]+?)\s+(?:bank|checking|savings)/i,
+    /(?:account|acct)\s+([A-Za-z0-9\s&.]+)/i,
+  ];
+
+  for (const pattern of accountPatterns) {
+    const match = normalized.match(pattern);
+    if (match && match[1]) {
+      paymentInfo.payment_account = match[1].trim();
+      break;
+    }
+  }
+
+  // Extract payment method
+  if (normalized.includes("check")) {
+    paymentInfo.payment_method = "Check";
+  } else if (
+    normalized.includes("ach") ||
+    normalized.includes("wire") ||
+    normalized.includes("transfer")
+  ) {
+    paymentInfo.payment_method = "ACH/Wire";
+  } else if (
+    normalized.includes("credit card") ||
+    normalized.includes("card")
+  ) {
+    paymentInfo.payment_method = "Credit Card";
+  } else if (normalized.includes("cash")) {
+    paymentInfo.payment_method = "Cash";
+  }
+
+  // Extract reference number (check number, transaction ID, etc.)
+  const referencePatterns = [
+    /(?:reference|ref|check)\s+(?:number|#|no\.?)\s*([A-Za-z0-9-]+)/i,
+    /(?:transaction|confirmation)\s+(?:id|number|#)\s*([A-Za-z0-9-]+)/i,
+  ];
+
+  for (const pattern of referencePatterns) {
+    const match = normalized.match(pattern);
+    if (match && match[1]) {
+      paymentInfo.reference_number = match[1].trim();
+      break;
+    }
+  }
+
+  // Extract payment date
+  const datePatterns = [
+    /(?:on|dated|date)\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
+    /(?:on|dated|date)\s+([A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?(?:,)?\s+\d{2,4})/i,
+  ];
+
+  for (const pattern of datePatterns) {
+    const match = normalized.match(pattern);
+    if (match && match[1]) {
+      // Simple date parsing - in a real app, you'd want more robust date parsing
+      paymentInfo.payment_date = match[1].trim();
+      break;
+    }
+  }
+
+  // If no date specified, default to today
+  if (!paymentInfo.payment_date) {
+    const today = new Date();
+    paymentInfo.payment_date = today.toISOString().split("T")[0]; // YYYY-MM-DD format
+  }
+
+  console.log(`[APUtils] Extracted payment info:`, paymentInfo);
+  return paymentInfo;
+}
+/**
+ * Interface for AI-powered bill creation analysis
+ */
+export interface BillCreationAnalysis {
+  isCreationQuery: boolean;
+  confidence: number;
+  billType?: 'ap' | 'ar' | 'general';
+  reasoning?: string;
+}
+
+/**
+ * Determine if a message is requesting to create a bill using Claude AI
+ */
+export async function isBillCreationQueryWithAI(
+  message: string,
+  anthropicClient?: Anthropic
+): Promise<BillCreationAnalysis> {
+  console.log(`[APUtils] Using AI to check for bill creation in: "${message}"`);
+  
+  // Create local Anthropic client if not provided
+  const anthropic = anthropicClient || new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY || '',
+    dangerouslyAllowBrowser: true
+  });
+  
+  // System prompt for bill creation detection
+  const systemPrompt = `You are an AI specialized in detecting bill creation intents in accounting systems.
+  
+  Analyze the given message and determine if it's requesting to create or add a new bill in an accounts payable system.
+  Consider various ways users might express bill creation intents, such as:
+  - Creating a new bill or invoice
+  - Adding a bill for a vendor
+  - Recording an invoice from a supplier
+  - Entering a new bill
+  
+  IMPORTANT: Distinguish between bill creation and bill payment.
+  - Bill CREATION is about RECORDING a NEW bill in the system (example: "Create a bill for Amazon")
+  - Bill PAYMENT is about PAYING an EXISTING bill (example: "Pay the Amazon bill", "Record payment for bills")
+  
+  Requests about recording PAYMENTS should be classified as NOT bill creation.
+  
+  Return a JSON object with:
+  - isCreationQuery: true if the message is about creating/recording a new bill/invoice, false if it's about payment or something else
+  - confidence: number between 0 and 1 indicating your confidence level
+  - billType: 'ap' (accounts payable), 'ar' (accounts receivable), or 'general'
+  - reasoning: brief explanation of why you classified it this way
+
+  Return ONLY the JSON object with no additional text.`;
+
+  try {
+    // Call Claude API
+    const response = await anthropic.messages.create({
+      model: "claude-3-haiku-20240307",
+      max_tokens: 1000,
+      temperature: 0,
+      messages: [
+        { role: "user", content: `${systemPrompt}\n\nMessage to analyze: ${message}` }
+      ]
+    });
+
+    // Parse response
+    let responseText = '';
+    if (response.content[0].type === 'text') {
+      responseText = response.content[0].text;
+    }
+    
+    try {
+      const result = JSON.parse(responseText);
+      console.log(`[APUtils] AI bill creation detection result:`, result);
+      return result as BillCreationAnalysis;
+    } catch (parseError) {
+      console.error(`[APUtils] Error parsing AI response: ${parseError}. Raw response: ${responseText}`);
+      // Fallback with default value
+      return {
+        isCreationQuery: false,
+        confidence: 0,
+        reasoning: `Error parsing AI response: ${parseError}`
+      };
+    }
+  } catch (error) {
+    console.error(`[APUtils] Error calling AI for bill creation detection: ${error}`);
+    // Fallback with default value
+    return {
+      isCreationQuery: false,
+      confidence: 0,
+      reasoning: `Error calling AI: ${error}`
+    };
+  }
+}
+
+/**
+ * Determine if a message is requesting to create a bill (legacy pattern-based version)
+ * This function is kept for fallback if AI is unavailable
  */
 export function isBillCreationQuery(message: string): boolean {
   const normalized = message.toLowerCase();
   console.log(`[APUtils] Checking for bill creation in: "${normalized}"`);
-  
+
+  // IMPORTANT: Exclude payment-related queries
+  // Check if this might be a payment query first
+  if (
+    normalized.includes("payment") ||
+    normalized.includes(" pay ") ||
+    normalized.includes("paying") ||
+    (normalized.includes("open") && normalized.includes("bill")) ||
+    normalized.includes("operating account") // Common in payment requests
+  ) {
+    console.log(`[APUtils] Message contains payment terms, not considering as bill creation`);
+    return false;
+  }
+
   // First, use a simple but broad check for the keywords "bill" and "create"
   // This catches phrases like "I need to create an Amazon bill"
-  if (normalized.includes('bill') && 
-      (normalized.includes('create') || 
-       normalized.includes('add') || 
-       normalized.includes('enter') || 
-       normalized.includes('new'))) {
+  if (
+    normalized.includes("bill") &&
+    (normalized.includes("create") ||
+      normalized.includes("add") ||
+      normalized.includes("enter") ||
+      normalized.includes("new"))
+  ) {
     console.log(`[APUtils] Simple bill creation pattern matched with keywords`);
-    
+
     // Only consider it as AR invoice if explicitly mentions customer or AR
-    if (normalized.includes('customer') || 
-        normalized.includes('accounts receivable') || 
-        normalized.includes('ar ')) {
+    if (
+      normalized.includes("customer") ||
+      normalized.includes("accounts receivable") ||
+      normalized.includes("ar ")
+    ) {
       console.log(`[APUtils] Not AP bill - seems to be AR related`);
       return false;
     }
-    
+
     return true;
   }
-  
+
   // Detailed patterns for bill creation queries
   const billCreatePatterns = [
     // Basic patterns with very flexible matching
     /create\s+.*\s*bill/i,
     /add\s+.*\s*bill/i,
     /enter\s+.*\s*bill/i,
-    /record\s+.*\s*bill/i,
-    /need.*create.*bill/i,  // This should match "I need to create an Amazon bill"
-    
+    // Modified to exclude payment-related queries
+    /record\s+(?!.*payment)(?!.*pay).*\s*bill/i,
+    /need.*create.*bill/i, // This should match "I need to create an Amazon bill"
+
     // Want/Need patterns with flexible matching
     /want\s+.*create\s+.*bill/i,
     /need\s+.*create\s+.*bill/i,
     /would\s+like\s+.*create\s+.*bill/i,
     /need\s+.*add\s+.*bill/i,
-    
+
     // Vendor-specific bill creation
     /\b(amazon|vendor)\s+bill\b/i,
     /bill\s+(for|from)\s+/i,
@@ -66,16 +498,18 @@ export function isBillCreationQuery(message: string): boolean {
       return true;
     }
   }
-  
+
   // Additional logging for debug
-  console.log(`[APUtils] No bill creation patterns matched for: "${normalized}"`);
+  console.log(
+    `[APUtils] No bill creation patterns matched for: "${normalized}"`
+  );
   return false;
 }
 
 /**
  * Extract bill information from a bill creation query
  */
-export function extractBillInfoFromQuery(message: string): { 
+export function extractBillInfoFromQuery(message: string): {
   vendor_name?: string;
   bill_number?: string;
   amount?: number;
@@ -84,7 +518,7 @@ export function extractBillInfoFromQuery(message: string): {
 } {
   const normalized = message.toLowerCase();
   console.log(`[APUtils] Extracting bill info from: "${normalized}"`);
-  
+
   const billInfo: {
     vendor_name?: string;
     bill_number?: string;
@@ -92,7 +526,7 @@ export function extractBillInfoFromQuery(message: string): {
     due_date?: string;
     description?: string;
   } = {};
-  
+
   // Extract vendor name patterns
   const vendorPatterns = [
     // Standard patterns
@@ -101,9 +535,9 @@ export function extractBillInfoFromQuery(message: string): {
     // Additional patterns for more scenarios
     /new\s+bill\s+from\s+([A-Za-z0-9\s&.]+)/i,
     /enter\s+a\s+(?:new\s+)?(?:bill|invoice)\s+from\s+([A-Za-z0-9\s&.]+)/i,
-    /([A-Za-z0-9\s&.]+?)\s+(?:bill|invoice)\s+(?:for|of)\s+[$]?\d+/i
+    /([A-Za-z0-9\s&.]+?)\s+(?:bill|invoice)\s+(?:for|of)\s+[$]?\d+/i,
   ];
-  
+
   for (const pattern of vendorPatterns) {
     const match = message.match(pattern);
     if (match && match[1]) {
@@ -111,14 +545,15 @@ export function extractBillInfoFromQuery(message: string): {
       break;
     }
   }
-  
+
   // Extract bill/invoice number
-  const billNumberPattern = /(?:bill|invoice)\s+(?:number|#)\s*([A-Za-z0-9\-]+)/i;
+  const billNumberPattern =
+    /(?:bill|invoice)\s+(?:number|#)\s*([A-Za-z0-9\-]+)/i;
   const billNumberMatch = message.match(billNumberPattern);
   if (billNumberMatch && billNumberMatch[1]) {
     billInfo.bill_number = billNumberMatch[1].trim();
   }
-  
+
   // Extract amount - look for various patterns
   const amountPatterns = [
     // Amount following a keyword
@@ -128,9 +563,9 @@ export function extractBillInfoFromQuery(message: string): {
     // Amount followed by 'dollars'
     /(\d+(?:\.\d{1,2})?)\s*dollars/i,
     // Simple amount pattern at the end of phrases like "for $X"
-    /for\s+[$]?(\d+(?:\.\d{1,2})?)/i
+    /for\s+[$]?(\d+(?:\.\d{1,2})?)/i,
   ];
-  
+
   for (const pattern of amountPatterns) {
     const match = message.match(pattern);
     if (match && match[1]) {
@@ -138,14 +573,15 @@ export function extractBillInfoFromQuery(message: string): {
       break;
     }
   }
-  
+
   // Extract due date
-  const dueDatePattern = /(?:due|payment)\s+(?:date|on)\s*(?:of|:)?\s*(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{1,2}-\d{1,2})/i;
+  const dueDatePattern =
+    /(?:due|payment)\s+(?:date|on)\s*(?:of|:)?\s*(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{1,2}-\d{1,2})/i;
   const dueDateMatch = message.match(dueDatePattern);
   if (dueDateMatch && dueDateMatch[1]) {
     billInfo.due_date = dueDateMatch[1];
   }
-  
+
   // Extract description/memo
   const descriptionPatterns = [
     // Standard pattern
@@ -153,9 +589,9 @@ export function extractBillInfoFromQuery(message: string): {
     // Pattern for "X for Y" format
     /(?:[$]?\d+(?:\.\d{1,2})?)\s+for\s+([^.\n\r]+)(?:\.|$)/i,
     // Pattern for descriptions at the end of a sentence
-    /\bfor\s+([^.\n\r]+)(?:\.|$)/i
+    /\bfor\s+([^.\n\r]+)(?:\.|$)/i,
   ];
-  
+
   for (const pattern of descriptionPatterns) {
     const match = message.match(pattern);
     if (match && match[1]) {
@@ -163,8 +599,8 @@ export function extractBillInfoFromQuery(message: string): {
       break;
     }
   }
-  
-  console.log('[APUtils] Extracted bill info:', billInfo);
+
+  console.log("[APUtils] Extracted bill info:", billInfo);
   return billInfo;
 }
 
@@ -176,27 +612,31 @@ export function mightBeAboutAP(query: string): boolean {
   // First check if this is a bill creation request
   // This should take precedence over other checks
   if (isBillCreationQuery(query)) {
-    console.log(`[APUtils] Query detected as bill creation request: "${query}"`);
+    console.log(
+      `[APUtils] Query detected as bill creation request: "${query}"`
+    );
     return true;
   }
-  
+
   // Check if this is a vendor creation request
   if (isVendorCreationQuery(query)) {
-    console.log(`[APUtils] Query detected as vendor creation request: "${query}"`);
+    console.log(
+      `[APUtils] Query detected as vendor creation request: "${query}"`
+    );
     return true;
   }
 
   // Keywords or phrases that might indicate an AP-related query
   const apKeywords = [
     "accounts payable",
-    "vendor", 
+    "vendor",
     "vendors",
     "supplier",
     "suppliers",
     "ap ",
     "bills",
     "bill payment",
-    "bill from",  // Add pattern that's common in bill creation
+    "bill from", // Add pattern that's common in bill creation
     "due date",
     "invoice approval",
     "payment term",
@@ -206,18 +646,18 @@ export function mightBeAboutAP(query: string): boolean {
     "create vendor",
     "add vendor",
     "new vendor",
-    "new supplier"
+    "new supplier",
   ];
-  
+
   const normalizedQuery = query.toLowerCase();
-  
+
   // Special handling for vendor creation follow-up messages
   // Detect comma-separated lists with common vendor info patterns
-  if (query.includes(',')) {
+  if (query.includes(",")) {
     // Check if query contains patterns that look like contact info
-    const parts = query.split(',').map((p: string) => p.trim());
+    const parts = query.split(",").map((p: string) => p.trim());
     let infoCount = 0;
-    
+
     // Count how many parts look like vendor information
     for (const part of parts) {
       if (
@@ -226,166 +666,120 @@ export function mightBeAboutAP(query: string): boolean {
         // Phone number pattern
         /\d{3}[\s\-]?\d{3}[\s\-]?\d{4}/.test(part) ||
         // Address with number pattern
-        /^\d+\s+[\w\s]+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|place|pl)/i.test(part) ||
+        /^\d+\s+[\w\s]+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|place|pl)/i.test(
+          part
+        ) ||
         // Person name pattern (1-3 words, all alpha)
         /^[A-Za-z]+(?:\s+[A-Za-z]+){0,2}$/.test(part)
       ) {
         infoCount++;
       }
     }
-    
+
     // If at least 2 parts look like vendor info, this is likely a vendor-related message
     if (infoCount >= 2) {
-      console.log(`[APUtils] Detected vendor information in comma-separated format: ${infoCount} fields`); 
+      console.log(
+        `[APUtils] Detected vendor information in comma-separated format: ${infoCount} fields`
+      );
       return true;
     }
   }
-  
+
   // Check if any keyword is in the query
-  return apKeywords.some(keyword => normalizedQuery.includes(keyword.toLowerCase()));
+  return apKeywords.some((keyword) =>
+    query.toLowerCase().includes(keyword.toLowerCase())
+  );
 }
 
-/**
- * Determine if a message is requesting to update the status of bills
- * Detects requests to post, open, or change the status of bills
- * 
- * This is a legacy function that's kept for backward compatibility.
- * For new code, use analyzeBillStatusUpdateWithAI from aiExtraction.ts
- */
-export function isBillStatusUpdateQuery(message: string): { 
-  isUpdateRequest: boolean; 
-  billNumber?: string;
-  requestedStatus?: string;
-  isBulkUpdate: boolean;
-  limitToRecent?: number;
+// AI-Powered function to analyze if a message is about bill status updates or queries.
+export interface BillStatusAnalysis {
+  isStatusRelated: boolean;
+  isUpdateRequest: boolean;
+  targetStatus?: string; 
+  isQueryByStatus: boolean;
+  queriedStatus?: string;
   billNumbers?: string[];
-} {
-  const normalized = message.toLowerCase();
-  console.log(`[APUtils] Checking for bill status update in: "${normalized}"`);
-  
-  // Use the analyzeBillStatusUpdateWithAI function asynchronously if possible
-  // But return a valid result synchronously for backward compatibility
-  // This function gets called frequently so we'll dispatch the AI analysis asynchronously
-  // and improve future calls with its results
-  
-  // Dispatch AI analysis in the background, but don't wait for it
-  import('./aiExtraction').then(async ({ analyzeBillStatusUpdateWithAI }) => {
-    try {
-      // This runs asynchronously and doesn't affect the current result
-      // But it helps provide better training data and logging
-      const aiResult = await analyzeBillStatusUpdateWithAI(message);
-      console.log('[APUtils] AI analysis of bill status update complete:', aiResult);
-    } catch (error) {
-      console.error('[APUtils] Error in background AI analysis:', error);
+  isBulkUpdate?: boolean;
+  queryType?: 'count' | 'list' | 'specific_bill_info' | 'general_status_summary';
+  // Add other fields if extractable by AI, e.g., date constraints, vendor info related to status query
+}
+
+export async function isBillStatusUpdateQuery(
+  message: string,
+  anthropic: Anthropic,
+  userId?: string // Optional, for logging/context if needed
+): Promise<BillStatusAnalysis> {
+  const prompt = `Analyze the following user query related to vendor bills to determine if it's about updating bill statuses or querying bills by status. Provide a JSON response with the following structure:
+{
+  "isStatusRelated": boolean, // true if the query is about bill statuses in any way (update or query)
+  "isUpdateRequest": boolean, // true if the user wants to *change or set* a bill's status
+  "targetStatus": "string | null", // If isUpdateRequest is true, the status to set (e.g., "Paid", "Void", "Approved"). Normalize to common statuses.
+  "isQueryByStatus": boolean, // true if the user is *asking about* bills with a certain status (e.g., "how many open bills", "list paid bills")
+  "queriedStatus": "string | null", // If isQueryByStatus is true, the status category being queried (e.g., "Open", "Paid", "Draft", "Overdue"). Normalize to common categories.
+  "billNumbers": "string[] | null", // An array of specific bill numbers mentioned, if any.
+  "isBulkUpdate": boolean, // true if the request implies action on multiple bills (e.g. "pay all open bills", "post selected invoices"). False if about a single bill or a general query.
+  "queryType": "count | list | specific_bill_info | general_status_summary | null" // If isQueryByStatus, classify the type of query.
+}
+
+User Query: "${message}"
+
+JSON Response:`;
+
+  try {
+    if (userId) { 
+      console.log(`[APUtils.isBillStatusUpdateQuery] Processing for user: ${userId}, query: "${message}"`);
     }
-  }).catch(error => {
-    console.error('[APUtils] Failed to import or run AI analysis:', error);
-  });
-  
-  // Initialize result object
-  const result = {
-    isUpdateRequest: false,
-    billNumber: undefined as string | undefined,
-    requestedStatus: undefined as string | undefined,
-    isBulkUpdate: false,
-    limitToRecent: undefined as number | undefined,
-    billNumbers: [] as string[]
-  };
-  
-  // Bill number extraction patterns
-  const billNumberPatterns = [
-    /bill\s+#?([a-zA-Z0-9]+)/i,
-    /invoice\s+#?([a-zA-Z0-9]+)/i,
-    /#([a-zA-Z0-9]+)/i
-  ];
-  
-  // Single bill status patterns
-  const statusUpdatePatterns = [
-    { pattern: /post\s+.*(bill|invoice)/i, status: 'Open' },
-    { pattern: /open\s+.*(bill|invoice)/i, status: 'Open' },
-    { pattern: /mark\s+.*as\s+open/i, status: 'Open' },
-    { pattern: /change\s+.*status.*to\s+open/i, status: 'Open' },
-    { pattern: /set\s+.*status.*to\s+open/i, status: 'Open' },
-    { pattern: /make\s+.*(bill|invoice)\s+open/i, status: 'Open' },
-    { pattern: /post\/open/i, status: 'Open' }
-  ];
-  
-  // Bulk update patterns - these indicate requests to update multiple bills at once
-  const bulkUpdatePatterns = [
-    // Patterns for all bills
-    { pattern: /move\s+all\s+.*\s+from\s+draft\s+to\s+open/i, status: 'Open' },
-    { pattern: /change\s+all\s+.*\s+to\s+open/i, status: 'Open' },
-    { pattern: /update\s+all\s+.*\s+to\s+open/i, status: 'Open' },
-    { pattern: /post\s+all\s+.*\s+bills/i, status: 'Open' },
-    { pattern: /open\s+all\s+.*\s+bills/i, status: 'Open' },
-    { pattern: /mark\s+all\s+.*\s+as\s+open/i, status: 'Open' },
-    { pattern: /set\s+all\s+.*\s+to\s+open/i, status: 'Open' },
-    { pattern: /set\s+status\s+of\s+all\s+.*\s+to\s+open/i, status: 'Open' },
+    const response = await anthropic.messages.create({
+      model: "claude-3-haiku-20240307", // Using Haiku for potentially faster/cheaper responses
+      max_tokens: 400, 
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    let jsonResponseString = "";
+    if (response.content && response.content.length > 0 && response.content[0].type === 'text') {
+        jsonResponseString = response.content[0].text;
+    }
     
-    // Patterns for specific groups of bills
-    { pattern: /post\s+these\s+(bills|invoices)/i, status: 'Open' },
-    { pattern: /move\s+these\s+.*\s+from\s+draft\s+to\s+open/i, status: 'Open' },
-    { pattern: /update\s+status\s+of\s+these\s+/i, status: 'Open' },
-    { pattern: /update\s+these\s+to\s+open/i, status: 'Open' },
+    const cleanedJsonResponseString = jsonResponseString.replace(/```json\n?|\n?```/g, '').trim();
     
-    // Patterns for recent/latest bills
-    { pattern: /move\s+(?:the\s+)?last\s+(\d+)\s+.*bills.*\s+from\s+draft\s+to\s+open/i, status: 'Open', limitExtractor: (match: RegExpMatchArray) => parseInt(match[1], 10) },
-    { pattern: /move\s+(?:the\s+)?recent\s+.*bills.*\s+from\s+draft\s+to\s+open/i, status: 'Open' },
-    { pattern: /open\s+(?:the\s+)?last\s+(\d+)\s+.*bills/i, status: 'Open', limitExtractor: (match: RegExpMatchArray) => parseInt(match[1], 10) },
-    { pattern: /update\s+(?:the\s+)?latest\s+.*bills\s+to\s+open/i, status: 'Open' },
-    { pattern: /change\s+(?:the\s+)?recent\s+.*bills\s+to\s+open/i, status: 'Open' },
+    if (!cleanedJsonResponseString) {
+        console.error('[APUtils.isBillStatusUpdateQuery] AI response was empty after cleaning.');
+        return {
+            isStatusRelated: false, 
+            isUpdateRequest: false,
+            isQueryByStatus: false,
+            billNumbers: [],
+            isBulkUpdate: false,
+        };
+    }
+
+    const analysisResult = JSON.parse(cleanedJsonResponseString) as BillStatusAnalysis;
     
-    // Catch-all for moving bills from draft to open
-    { pattern: /move.*bills.*from\s+draft\s+to\s+open/i, status: 'Open' }
-  ];
-  
-  // Check for bulk update patterns first
-  for (const patternObj of bulkUpdatePatterns) {
-    const match = normalized.match(patternObj.pattern);
-    if (match) {
-      result.isUpdateRequest = true;
-      result.requestedStatus = patternObj.status;
-      result.isBulkUpdate = true;
-      
-      // Extract limit for recent bills if available
-      if (patternObj.limitExtractor && typeof patternObj.limitExtractor === 'function') {
-        result.limitToRecent = patternObj.limitExtractor(match);
-      }
-      
-      console.log(`[APUtils] Bulk bill status update pattern matched: ${patternObj.pattern} → ${patternObj.status}`);
-      if (result.limitToRecent) {
-        console.log(`[APUtils] Detected request for ${result.limitToRecent} most recent bills`);
-      }
-      return result; // Early return for bulk update
+    if (typeof analysisResult.isStatusRelated !== 'boolean' ||
+        typeof analysisResult.isUpdateRequest !== 'boolean' ||
+        typeof analysisResult.isQueryByStatus !== 'boolean') {
+        console.error('[APUtils.isBillStatusUpdateQuery] AI response does not match expected structure:', analysisResult);
+        return {
+            isStatusRelated: false,
+            isUpdateRequest: false,
+            isQueryByStatus: false,
+            billNumbers: [],
+            isBulkUpdate: false,
+        };
     }
+    
+    return analysisResult;
+
+  } catch (error) {
+    console.error('[APUtils.isBillStatusUpdateQuery] Error calling Anthropic or parsing response:', error);
+    return {
+      isStatusRelated: false, 
+      isUpdateRequest: false,
+      isQueryByStatus: false,
+      billNumbers: [],
+      isBulkUpdate: false,
+    };
   }
-  
-  // Check for single bill update patterns
-  for (const { pattern, status } of statusUpdatePatterns) {
-    if (pattern.test(normalized)) {
-      result.isUpdateRequest = true;
-      result.requestedStatus = status;
-      console.log(`[APUtils] Single bill status update pattern matched: ${pattern} → ${status}`);
-      break;
-    }
-  }
-  
-  // If it's a status update request for a single bill, extract the bill number
-  if (result.isUpdateRequest && !result.isBulkUpdate) {
-    for (const pattern of billNumberPatterns) {
-      const match = normalized.match(pattern);
-      if (match && match[1]) {
-        result.billNumber = match[1];
-        result.billNumbers?.push(match[1]);
-        console.log(`[APUtils] Extracted bill number: ${result.billNumber}`);
-        break;
-      }
-    }
-  } else if (!result.isUpdateRequest) {
-    console.log(`[APUtils] No bill status update patterns matched`);
-  }
-  
-  return result;
 }
 
 /**
@@ -394,7 +788,7 @@ export function isBillStatusUpdateQuery(message: string): {
 export function isVendorCreationQuery(message: string): boolean {
   const normalized = message.toLowerCase();
   console.log(`[APUtils] Checking for vendor creation in: "${normalized}"`);
-  
+
   // Patterns for vendor creation queries
   const vendorCreatePatterns = [
     // Basic patterns
@@ -402,29 +796,29 @@ export function isVendorCreationQuery(message: string): boolean {
     /add\s+(new\s+)?(vendor|supplier)/i,
     /set\s+up\s+(new\s+)?(vendor|supplier)/i,
     /new\s+(vendor|supplier)/i,
-    
+
     // Want/Need patterns
-    /want\s+(to\s+)?create\s+(a\s*)?(new\s*)?(vendor|supplier)/i,  // Handles "want create"
+    /want\s+(to\s+)?create\s+(a\s*)?(new\s*)?(vendor|supplier)/i, // Handles "want create"
     /need\s+(to\s+)?create\s+(a\s*)?(new\s*)?(vendor|supplier)/i,
     /would\s+like\s+(to\s+)?create\s+(a\s*)?(new\s*)?(vendor|supplier)/i,
-    /want\s+(a\s*)?(new\s*)?(vendor|supplier)/i,  // Handles "want a new vendor"
-    /i\s+want\s+(to\s+)?create\s+(a\s*)?(new\s*)?(vendor|supplier)/i,  // Explicitly match "I want"
-    
+    /want\s+(a\s*)?(new\s*)?(vendor|supplier)/i, // Handles "want a new vendor"
+    /i\s+want\s+(to\s+)?create\s+(a\s*)?(new\s*)?(vendor|supplier)/i, // Explicitly match "I want"
+
     // More specific patterns
     /create\s+(a|an)\s+(new\s+)?(vendor|supplier)\s+(called|named|with|for)/i,
     /add\s+(a|an)\s+(new\s+)?(vendor|supplier)\s+(called|named|with|for)/i,
-    
+
     // Specific vendor creation with name
     /create\s+(a|an)\s+(new\s+)?(vendor|supplier)\s+(account|record)?\s+for\s+([^,\.]+)/i,
-    
+
     // General pattern
     /new\s+(vendor|supplier)\s+(called|named|for)/i,
 
     // Allow vendor name between the action and the word vendor/supplier
     /create\s+(?:a\s+)?(?:new\s+)?[\w&.'\-]+(?:\s+[\w&.'\-]+)*\s+(vendor|supplier)/i,
-    /(?:i\s+)?want\s+(?:to\s+)?create\s+(?:a\s+)?(?:new\s+)?[\w&.'\-]+(?:\s+[\w&.'\-]+)*\s+(vendor|supplier)/i
+    /(?:i\s+)?want\s+(?:to\s+)?create\s+(?:a\s+)?(?:new\s+)?[\w&.'\-]+(?:\s+[\w&.'\-]+)*\s+(vendor|supplier)/i,
   ];
-  
+
   // Check each pattern and log which one matches
   for (const pattern of vendorCreatePatterns) {
     if (pattern.test(normalized)) {
@@ -433,7 +827,7 @@ export function isVendorCreationQuery(message: string): boolean {
       return true;
     }
   }
-  
+
   console.log(`[APUtils] Is vendor creation query: false`);
   return false;
 }
@@ -450,9 +844,10 @@ export async function findRelevantVendors(
   try {
     // Check if query might be about vendors that were paid
     const normalizedQuery = query.toLowerCase();
-    const isPaidQuery = normalizedQuery.includes('paid') || 
-                       normalizedQuery.includes('payment') ||
-                       normalizedQuery.includes('which vendor');
+    const isPaidQuery =
+      normalizedQuery.includes("paid") ||
+      normalizedQuery.includes("payment") ||
+      normalizedQuery.includes("which vendor");
 
     // If asking about paid vendors, use specialized query
     if (isPaidQuery) {
@@ -461,24 +856,25 @@ export async function findRelevantVendors(
         return paidVendors;
       }
     }
-    
+
     // Extract potential vendor names or keywords from the query
     const searchTerms = extractVendorSearchTerms(query);
     let allVendors: Vendor[] = [];
-    
+
     // Search for each term individually to improve matches
     for (const term of searchTerms) {
       if (term.length < 3) continue; // Skip very short terms
-      
+
       const { vendors } = await getVendors(1, limit, term);
       allVendors = [...allVendors, ...vendors];
     }
-    
+
     // Deduplicate vendors by ID
-    const uniqueVendors = allVendors.filter((vendor, index, self) =>
-      index === self.findIndex(v => v.id === vendor.id)
+    const uniqueVendors = allVendors.filter(
+      (vendor, index, self) =>
+        index === self.findIndex((v) => v.id === vendor.id)
     );
-    
+
     // Limit the number of results
     return uniqueVendors.slice(0, limit);
   } catch (error) {
@@ -500,27 +896,30 @@ export async function findRelevantBills(
   try {
     // Check if query might be about recent or paid bills
     const normalizedQuery = query.toLowerCase();
-    const isPaidQuery = normalizedQuery.includes('paid') || 
-                       normalizedQuery.includes('payment') ||
-                       normalizedQuery.includes('last bill');
+    const isPaidQuery =
+      normalizedQuery.includes("paid") ||
+      normalizedQuery.includes("payment") ||
+      normalizedQuery.includes("last bill");
 
     // If asking about paid bills, use specialized query
     if (isPaidQuery) {
       // Get the last paid bill if asking specifically about the last payment
-      if (normalizedQuery.includes('last paid') || 
-          normalizedQuery.includes('most recent payment') || 
-          normalizedQuery.includes('latest payment')) {
+      if (
+        normalizedQuery.includes("last paid") ||
+        normalizedQuery.includes("most recent payment") ||
+        normalizedQuery.includes("latest payment")
+      ) {
         const lastPaidBill = await getLastPaidBill();
         return lastPaidBill ? [lastPaidBill] : [];
       }
-      
+
       // Otherwise get bills with paid status
-      return await getBillsWithVendors(limit, 'Paid', vendorId);
+      return await getBillsWithVendors(limit, "Paid", vendorId);
     }
-    
+
     // Try to determine if the query is about a specific status
     const status = await extractBillStatus(query);
-    
+
     // Use enhanced query that includes vendor information
     return await getBillsWithVendors(limit, status, vendorId);
   } catch (error) {
@@ -535,33 +934,51 @@ export async function findRelevantBills(
  */
 function extractVendorSearchTerms(query: string): string[] {
   // Clean and normalize the query
-  const normalizedQuery = query.toLowerCase()
-    .replace(/[^\w\s]/g, ' ')  // Replace punctuation with spaces
-    .replace(/\s+/g, ' ')      // Normalize spaces
+  const normalizedQuery = query
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ") // Replace punctuation with spaces
+    .replace(/\s+/g, " ") // Normalize spaces
     .trim();
-  
+
   // Remove common stopwords that might interfere with vendor name extraction
-  const stopwords = ["the", "and", "of", "for", "from", "with", "about", "who", "what", "when", "where", "why", "how"];
-  const filteredWords = normalizedQuery.split(' ')
-    .filter(word => !stopwords.includes(word) && word.length > 2);
-  
+  const stopwords = [
+    "the",
+    "and",
+    "of",
+    "for",
+    "from",
+    "with",
+    "about",
+    "who",
+    "what",
+    "when",
+    "where",
+    "why",
+    "how",
+  ];
+  const filteredWords = normalizedQuery
+    .split(" ")
+    .filter((word) => !stopwords.includes(word) && word.length > 2);
+
   // Get word combinations that might represent vendor names
   // For example "bills from acme corp" -> try "acme", "corp", "acme corp"
   const terms: string[] = [];
-  
+
   // Add individual words
   terms.push(...filteredWords);
-  
+
   // Add adjacent word pairs (potential multi-word vendor names)
   for (let i = 0; i < filteredWords.length - 1; i++) {
     terms.push(`${filteredWords[i]} ${filteredWords[i + 1]}`);
   }
-  
+
   // Add triplets for longer vendor names
   for (let i = 0; i < filteredWords.length - 2; i++) {
-    terms.push(`${filteredWords[i]} ${filteredWords[i + 1]} ${filteredWords[i + 2]}`);
+    terms.push(
+      `${filteredWords[i]} ${filteredWords[i + 1]} ${filteredWords[i + 2]}`
+    );
   }
-  
+
   return terms;
 }
 
@@ -573,28 +990,34 @@ async function extractBillStatus(query: string): Promise<string | undefined> {
   try {
     // Get the list of valid bill statuses from the database
     const validStatuses = await getBillStatuses();
-    
+
     // Normalize the query
     const normalizedQuery = query.toLowerCase();
-    
+
     // Check if any status is mentioned in the query
     for (const status of validStatuses) {
       if (normalizedQuery.includes(status.toLowerCase())) {
         return status;
       }
     }
-    
+
     // Special cases for common terms
-    if (normalizedQuery.includes("unpaid") || normalizedQuery.includes("outstanding")) {
+    if (
+      normalizedQuery.includes("unpaid") ||
+      normalizedQuery.includes("outstanding")
+    ) {
       return "Unpaid";
     }
-    if (normalizedQuery.includes("overdue") || normalizedQuery.includes("late")) {
+    if (
+      normalizedQuery.includes("overdue") ||
+      normalizedQuery.includes("late")
+    ) {
       return "Overdue";
     }
     if (normalizedQuery.includes("paid")) {
       return "Paid";
     }
-    
+
     return undefined;
   } catch (error) {
     console.error("[APUtils] Error extracting bill status:", error);
@@ -605,46 +1028,45 @@ async function extractBillStatus(query: string): Promise<string | undefined> {
 /**
  * Extract vendor information from a vendor creation query
  */
-export function extractVendorInfoFromQuery(message: string): { 
-  name?: string; 
+export function extractVendorInfoFromQuery(message: string): {
+  name?: string;
   contact_person?: string;
   email?: string;
   phone?: string;
   address?: string;
 } {
-  const result: { 
-    name?: string; 
+  const result: {
+    name?: string;
     contact_person?: string;
     email?: string;
     phone?: string;
     address?: string;
   } = {};
-  
+
   const normalized = message.toLowerCase();
   console.log(`[APUtils] Extracting vendor info from: "${normalized}"`);
-  
+
   // Extract vendor name
   const namePatterns = [
     // Direct name specification
     /(?:vendor|supplier)\s+(?:name|called|named)\s*[:=]?\s*["']?([^"',.d][^,."']*?)["']?/i,
     /(?:name|call|called)\s+["']?([^"',.d][^,."']*?)["']?/i,
-    
+
     // "for [name]" pattern
     /(?:vendor|supplier)\s+(?:account|record)?\s+for\s+["']?([^"',.d][^,."']*?)["']?/i,
     /for\s+["']?([^"',.d][^,."']*?)["']?/i,
-    
+
     // "new [name] vendor" pattern - catches "new Apple vendor"
     /new\s+([^"',.d][^,."'s]*?)\s+(?:vendor|supplier)(?:\s|$)/i,
-    
+
     // "want create a new [name] vendor" pattern
     /want\s+(?:to\s+)?create\s+(?:a\s+)?(?:new\s+)?([^"',.d][^,."'s]*?)\s+(?:vendor|supplier)(?:\s|$)/i,
     /i\s+want\s+(?:to\s+)?create\s+(?:a\s+)?(?:new\s+)?([^"',.d][^,."'s]*?)\s+(?:vendor|supplier)(?:\s|$)/i,
-    
-    // More general patterns as fallback
-    /create\s+(?:a|an)\s+(?:new\s+)?(?:vendor|supplier)\s+([^"',.d][^,."']*?)(?:\s|$)/i
 
+    // More general patterns as fallback
+    /create\s+(?:a|an)\s+(?:new\s+)?(?:vendor|supplier)\s+([^"',.d][^,."']*?)(?:\s|$)/i,
   ];
-  
+
   for (const pattern of namePatterns) {
     const match = message.match(pattern);
     if (match && match[1]) {
@@ -653,14 +1075,14 @@ export function extractVendorInfoFromQuery(message: string): {
       break;
     }
   }
-  
+
   // Extract contact person
   const contactPatterns = [
     /contact\s*(?:person|name)?\s*[:=]?\s*["']?([^"',]+)["']?/i,
     /person\s*[:=]?\s*["']?([^"',]+)["']?/i,
     /(?:contact|attention)\s+is\s+["']?([^"',]+)["']?/i,
   ];
-  
+
   for (const pattern of contactPatterns) {
     const match = message.match(pattern);
     if (match && match[1]) {
@@ -669,15 +1091,15 @@ export function extractVendorInfoFromQuery(message: string): {
       break;
     }
   }
-  
+
   // Extract email
   const emailPatterns = [
     // Labeled email
     /(?:email|e-mail)\s*[:=]?\s*[\"\'']?([\w\.-]+@[\w\.-]+\.[a-z]{2,})[\"\'']?/i,
     // Email anywhere in input
-    /([\w\.-]+@[\w\.-]+\.[a-z]{2,})/i
+    /([\w\.-]+@[\w\.-]+\.[a-z]{2,})/i,
   ];
-  
+
   for (const pattern of emailPatterns) {
     const match = message.match(pattern);
     if (match && match[1]) {
@@ -686,15 +1108,15 @@ export function extractVendorInfoFromQuery(message: string): {
       break;
     }
   }
-  
+
   // Extract phone
   const phonePatterns = [
     /(?:phone|telephone|cell|mobile)\s*(?:number)?\s*[:=]?\s*[\"\'']?([\d\s\+\-\(\)\.]{7,})[\"\'']?/i,
     /(?:phone|telephone|cell|mobile)\s+is\s+[\"\'']?([\d\s\+\-\(\)\.]{7,})[\"\'']?/i,
     // Phone numbers in standard formats without label
-    /\b((?:\+?1[-\s]?)?(?:\(?\d{3}\)?[-\s]?)?\d{3}[-\s]?\d{4})\b/
+    /\b((?:\+?1[-\s]?)?(?:\(?\d{3}\)?[-\s]?)?\d{3}[-\s]?\d{4})\b/,
   ];
-  
+
   for (const pattern of phonePatterns) {
     const match = message.match(pattern);
     if (match && match[1]) {
@@ -703,16 +1125,16 @@ export function extractVendorInfoFromQuery(message: string): {
       break;
     }
   }
-  
+
   // Extract address
   const addressPatterns = [
     /address\s*[:=]?\s*[\"\'']?([^\"\''].{5,})[\"\'']?(?:\.|$)/i,
     /located\s+at\s+[\"\'']?([^\"\''].{5,})[\"\'']?(?:\.|$)/i,
     /location\s*[:=]?\s*[\"\'']?([^\"\''].{5,})[\"\'']?(?:\.|$)/i,
     // Common address format with number, street name, and "Street/Ave/Road/etc."
-    /\b(\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Place|Pl|Court|Ct|Way|Boulevard|Blvd))\b/i
+    /\b(\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Place|Pl|Court|Ct|Way|Boulevard|Blvd))\b/i,
   ];
-  
+
   for (const pattern of addressPatterns) {
     const match = message.match(pattern);
     if (match && match[1]) {
@@ -721,94 +1143,111 @@ export function extractVendorInfoFromQuery(message: string): {
       break;
     }
   }
-  
+
   // Handle comma-separated values
-  if (message.includes(',')) {
-    const parts = message.split(',').map(part => part.trim());
-    
+  if (message.includes(",")) {
+    const parts = message.split(",").map((part) => part.trim());
+
     // Try to identify parts by content patterns if not already extracted
     for (const part of parts) {
       // If looks like an address but we don't have one yet
-      if (!result.address && 
-          (/^\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Place|Pl|Court|Ct|Way|Boulevard|Blvd)/i.test(part) || 
-           part.split(' ').length >= 3)) {
+      if (
+        !result.address &&
+        (/^\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Place|Pl|Court|Ct|Way|Boulevard|Blvd)/i.test(
+          part
+        ) ||
+          part.split(" ").length >= 3)
+      ) {
         result.address = part;
-        console.log(`[APUtils] Found address from comma-separated format: ${result.address}`);
+        console.log(
+          `[APUtils] Found address from comma-separated format: ${result.address}`
+        );
       }
       // If looks like email but we don't have one yet
       else if (!result.email && /[\w\.-]+@[\w\.-]+\.[a-z]{2,}/i.test(part)) {
         result.email = part;
-        console.log(`[APUtils] Found email from comma-separated format: ${result.email}`);
+        console.log(
+          `[APUtils] Found email from comma-separated format: ${result.email}`
+        );
       }
       // If looks like phone but we don't have one yet
-      else if (!result.phone && /[\d\s\+\-\(\)\.]{7,}/.test(part) && /\d{3}/.test(part)) {
+      else if (
+        !result.phone &&
+        /[\d\s\+\-\(\)\.]{7,}/.test(part) &&
+        /\d{3}/.test(part)
+      ) {
         result.phone = part;
-        console.log(`[APUtils] Found phone from comma-separated format: ${result.phone}`);
+        console.log(
+          `[APUtils] Found phone from comma-separated format: ${result.phone}`
+        );
       }
       // If looks like a name (1-3 words) and we don't have contact yet
-      else if (!result.contact_person && /^[A-Za-z\s]{2,}$/.test(part) && part.split(' ').length <= 3) {
+      else if (
+        !result.contact_person &&
+        /^[A-Za-z\s]{2,}$/.test(part) &&
+        part.split(" ").length <= 3
+      ) {
         result.contact_person = part;
-        console.log(`[APUtils] Found contact person from comma-separated format: ${result.contact_person}`);
+        console.log(
+          `[APUtils] Found contact person from comma-separated format: ${result.contact_person}`
+        );
       }
     }
   }
-  
+
   return result;
 }
 
 /**
  * Create a new vendor in the system
  */
-export async function createVendor(
-  vendorData: {
-    name: string;
-    contact_person?: string;
-    email?: string;
-    phone?: string;
-    address?: string;
-  }
-): Promise<{ success: boolean; message: string; vendor?: any }> {
+export async function createVendor(vendorData: {
+  name: string;
+  contact_person?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+}): Promise<{ success: boolean; message: string; vendor?: any }> {
   try {
     console.log(`[APUtils] Creating vendor: ${vendorData.name}`);
-    
+
     if (!vendorData.name) {
-      return { success: false, message: 'Vendor name is required.' };
+      return { success: false, message: "Vendor name is required." };
     }
-    
+
     // Call the API to create the vendor
-    const response = await fetch('/api/vendors', {
-      method: 'POST',
+    const response = await fetch("/api/vendors", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        vendor: vendorData
+        vendor: vendorData,
       }),
     });
-    
+
     const result = await response.json();
-    
+
     if (!response.ok) {
-      return { 
-        success: false, 
-        message: result.error || `Failed to create vendor ${vendorData.name}.` 
+      return {
+        success: false,
+        message: result.error || `Failed to create vendor ${vendorData.name}.`,
       };
     }
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       message: `Vendor ${vendorData.name} has been created successfully.`,
-      vendor: result
+      vendor: result,
     };
-    
   } catch (error) {
-    console.error('[APUtils] Error creating vendor:', error);
-    let errorMessage = 'An unknown error occurred while creating the vendor.';
-    
+    console.error("[APUtils] Error creating vendor:", error);
+    let errorMessage = "An unknown error occurred while creating the vendor.";
+
     if (error instanceof Error) {
       errorMessage = `Error creating vendor: ${error.message}`;
     }
-    
+
     return { success: false, message: errorMessage };
   }
 }
@@ -819,14 +1258,20 @@ export async function createVendor(
  */
 export async function getBillStatusCounts(): Promise<Record<string, number>> {
   try {
-    const response = await fetch('/api/bills/status-count');
+    const response = await fetch("/api/bills/status-count");
     if (!response.ok) {
       throw new Error(`Error: ${response.status}`);
     }
     const data = await response.json();
     return data.success ? data.statusCounts : {};
   } catch (error) {
-    console.error('Error fetching bill status counts:', error);
+    console.error("Error fetching bill status counts:", error);
     return {};
   }
 }
+
+export {
+  getVendors,
+  getBills,
+  getAccounts
+};
