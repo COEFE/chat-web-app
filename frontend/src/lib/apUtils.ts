@@ -222,12 +222,25 @@ export function extractPaymentInfoFromQuery(message: string): {
     /from\s+([A-Za-z0-9\s&.]+?)(?:\s+for|\s+in|\s+amount|\s+due|$)/i,
   ];
 
+  // First check for a vendor name match
+  let possibleVendorName = null;
   for (const pattern of vendorPatterns) {
     const match = normalized.match(pattern);
     if (match && match[1]) {
-      paymentInfo.vendor_name = match[1].trim();
+      possibleVendorName = match[1].trim();
       break;
     }
+  }
+  
+  // Don't use generic terms like "these bills" or "the bills" as vendor names
+  const invalidVendorTerms = [
+    'these bills', 'the bills', 'all bills',
+    'these invoices', 'the invoices', 'all invoices',
+    'bills', 'invoices'
+  ];
+  
+  if (possibleVendorName && !invalidVendorTerms.includes(possibleVendorName.toLowerCase())) {
+    paymentInfo.vendor_name = possibleVendorName;
   }
 
   // Extract bill number patterns
