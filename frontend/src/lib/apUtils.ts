@@ -492,6 +492,111 @@ export async function extractPaymentInfoWithAI(
 }
 
 /**
+ * Interface for AI-powered bill status update analysis
+ */
+export interface BillStatusUpdateAnalysis {
+  isUpdateRequest: boolean;
+  confidence: number;
+  isBulkUpdate: boolean;
+  updateType?: 'mark_paid' | 'mark_open' | 'mark_void' | 'post' | 'general';
+  limitToRecent?: number;
+  reasoning?: string;
+}
+
+/**
+ * Determine if a message is requesting a bill status update using Claude AI
+ * This replaces the pattern-based simplifiedBillStatusCheck function
+ */
+export async function detectBillStatusUpdateWithAI(
+  message: string,
+  anthropicClient?: Anthropic
+): Promise<BillStatusUpdateAnalysis> {
+  console.log(`[APUtils] Using AI to detect bill status update in: "${message}"`);
+  
+  // Use the provided anthropic client or create a new one
+  const client = anthropicClient || new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY || '',
+    dangerouslyAllowBrowser: true
+  });
+
+  const systemPrompt = `You are an AI specialized in analyzing payment and bill management requests in an accounting system.
+  
+  Analyze the given message and determine if it's requesting to update the status of one or more bills (such as marking bills as paid, posting bills, etc.).
+  
+  Focus on these key aspects:
+  - Is this a request to change the status of bills? (e.g., marking as paid, posting, etc.)
+  - Does it apply to multiple bills (bulk update) or a specific bill?
+  - Is there any mention of limiting to recent bills?
+  
+  Common bill status update patterns include:
+  - Requests to pay bills ("pay all open bills")
+  - Requests to record payments ("record payment for these bills")
+  - Requests to mark bills as paid or posted ("mark these bills as paid")
+  - Requests to change bill status ("change bill status to paid")
+  
+  Format your response as JSON with these fields:
+  - isUpdateRequest: Boolean indicating if this is a bill status update request
+  - confidence: Number between 0-1 indicating how confident you are
+  - isBulkUpdate: Boolean indicating if this applies to multiple bills
+  - updateType: Optional string, one of: 'mark_paid', 'mark_open', 'mark_void', 'post', 'general'
+  - limitToRecent: Optional number indicating a limit to recent bills (if specified)
+  - reasoning: Brief explanation of your analysis
+  
+  Only include fields in your JSON that are relevant to the message.`;
+
+  try {
+    const response = await client.messages.create({
+      model: "claude-3-haiku-20240307",
+      max_tokens: 1000,
+      system: systemPrompt,
+      messages: [{
+        role: "user",
+        content: message
+      }]
+    });
+
+    // Parse the AI response
+    if (!response.content || response.content.length === 0) {
+      console.log('[APUtils] Empty response from Claude when detecting bill status update');
+      return {
+        isUpdateRequest: false,
+        confidence: 0.1,
+        isBulkUpdate: false,
+        reasoning: "AI returned empty response"
+      };
+    }
+
+    // Get the content as text
+    const responseText = response.content[0].type === 'text' ? response.content[0].text : '';
+    
+    // Try to parse JSON from the response
+    try {
+      const analysisData = extractJsonFromString(responseText);
+      console.log('[APUtils] AI bill status update detection result:', analysisData);
+      return analysisData;
+    } catch (jsonError) {
+      console.error('[APUtils] Error parsing AI bill status update JSON:', jsonError);
+      // Fallback to a default response
+      return {
+        isUpdateRequest: false,
+        confidence: 0.2,
+        isBulkUpdate: false,
+        reasoning: "Failed to parse AI response JSON"
+      };
+    }
+  } catch (error) {
+    console.error('[APUtils] Error in AI bill status update detection:', error);
+    // Return a default response on error
+    return {
+      isUpdateRequest: false,
+      confidence: 0.1,
+      isBulkUpdate: false,
+      reasoning: "AI request failed"
+    };
+  }
+}
+
+/**
  * Interface for AI-powered bill creation analysis
  */
 export interface BillCreationAnalysis {

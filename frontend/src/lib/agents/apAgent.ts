@@ -10,7 +10,9 @@ import {
   extractBillInfoFromQuery,
   isBillStatusUpdateQuery,
   isBillPaymentQuery,
-  isBillPaymentQueryWithAI
+  isBillPaymentQueryWithAI,
+  detectBillStatusUpdateWithAI,
+  BillStatusUpdateAnalysis
 } from "@/lib/apUtils";
 import { handleBillPayment, isApplicable as isBillPaymentApplicable } from "./handleBillPayment";
 import { 
@@ -168,10 +170,51 @@ export class APAgent implements Agent {
   }
 
   /**
-   * Simplified check for bill status update requests without using AI
-   * This replaces the AI-powered isBillStatusUpdateQuery function
+   * Check for bill status update requests using AI
+   * This uses Claude AI to intelligently detect bill status update requests
    */
-  simplifiedBillStatusCheck(query: string): { isUpdateRequest: boolean; isBulkUpdate: boolean; limitToRecent?: number } {
+  async billStatusCheck(query: string): Promise<{ isUpdateRequest: boolean; isBulkUpdate: boolean; limitToRecent?: number; updateType?: string }> {
+    console.log(`[APAgent] Using AI to detect bill status update in: "${query}"`);
+    
+    try {
+      // Use AI-powered detection for better understanding of natural language
+      const aiAnalysis = await detectBillStatusUpdateWithAI(query, this.anthropic);
+      
+      if (aiAnalysis.isUpdateRequest && aiAnalysis.confidence > 0.7) {
+        console.log(`[APAgent] AI detected bill status update with ${aiAnalysis.confidence.toFixed(2)} confidence. Reasoning: ${aiAnalysis.reasoning}`);
+        return {
+          isUpdateRequest: true,
+          isBulkUpdate: aiAnalysis.isBulkUpdate,
+          limitToRecent: aiAnalysis.limitToRecent,
+          updateType: aiAnalysis.updateType
+        };
+      } else if (aiAnalysis.isUpdateRequest) {
+        console.log(`[APAgent] AI detected possible bill status update but with low confidence (${aiAnalysis.confidence.toFixed(2)}). Falling back to pattern matching.`);
+        // Fall back to pattern matching if AI is uncertain
+        return this.fallbackBillStatusCheck(query);
+      }
+      
+      // If AI says it's not a status update with high confidence, trust it
+      if (aiAnalysis.confidence > 0.7) {
+        return {
+          isUpdateRequest: false,
+          isBulkUpdate: false
+        };
+      }
+      
+      // Otherwise fall back to pattern matching
+      return this.fallbackBillStatusCheck(query);
+    } catch (error) {
+      console.error(`[APAgent] Error in AI bill status detection, falling back to pattern matching: ${error}`);
+      return this.fallbackBillStatusCheck(query);
+    }
+  }
+  
+  /**
+   * Fallback pattern-based check for bill status update requests
+   * Used when AI detection is unavailable or low confidence
+   */
+  fallbackBillStatusCheck(query: string): { isUpdateRequest: boolean; isBulkUpdate: boolean; limitToRecent?: number } {
     const normalized = query.toLowerCase();
     
     // Check for common bill payment patterns
@@ -503,10 +546,10 @@ Would you like me to create this vendor? Please confirm.`
       // First check for bill status update request (post/open bill)
       // This needs to be checked before bill creation because some bill creation queries 
       // may also match bill status update patterns
-      // Use a simplified approach to check for bill status updates instead of the AI-powered function
-      const billStatusUpdate = this.simplifiedBillStatusCheck(context.query);
+      // Use AI-powered detection for better natural language understanding
+      const billStatusUpdate = await this.billStatusCheck(context.query);
       if (billStatusUpdate.isUpdateRequest) {
-        console.log(`[APAgent] Detected bill status update request - isBulkUpdate: ${billStatusUpdate.isBulkUpdate}, limitToRecent: ${billStatusUpdate.limitToRecent || 'none'}`);
+        console.log(`[APAgent] AI detected bill status update request - isBulkUpdate: ${billStatusUpdate.isBulkUpdate}, limitToRecent: ${billStatusUpdate.limitToRecent || 'none'}, updateType: ${billStatusUpdate.updateType || 'general'}`);
         return this.handleBillStatusUpdate(context, billStatusUpdate);
       }
       
@@ -1010,7 +1053,7 @@ Use the following information to help answer the user's query about accounts pay
    * Handle bill status update requests
    * This handles requests to change a bill's status (e.g., from Draft to Open)
    */
-  private async handleBillStatusUpdate(context: AgentContext, statusInfo: ReturnType<typeof this.simplifiedBillStatusCheck>): Promise<AgentResponse> {
+  private async handleBillStatusUpdate(context: AgentContext, statusInfo: { isUpdateRequest: boolean; isBulkUpdate: boolean; limitToRecent?: number; updateType?: string }): Promise<AgentResponse> {
     try {
       // First, use our AI-powered analyzer for more accurate detection
       const updateInfo = await analyzeBillStatusUpdateWithAI(context.query);
