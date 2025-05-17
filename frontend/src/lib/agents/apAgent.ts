@@ -82,6 +82,136 @@ export class APAgent implements Agent {
   }
 
   /**
+   * Creates a bill payment journal entry through the GL agent instead of directly
+   * This maintains better separation of concerns between AP and GL functions
+   */
+  async createBillPaymentJournalViaGLAgent({
+    billId,
+    billNumber,
+    vendorName,
+    paymentDate,
+    amount,
+    apAccountId,
+    paymentAccountId,
+    referenceNumber,
+    userId
+  }: {
+    billId: number,
+    billNumber: string,
+    vendorName: string,
+    paymentDate: string,
+    amount: number,
+    apAccountId: number,
+    paymentAccountId: number,
+    referenceNumber?: string,
+    userId: string
+  }): Promise<{success: boolean, journalId?: number, message: string}> {
+    try {
+      console.log(`[APAgent] Creating bill payment journal via GL agent for bill ${billId}`);
+      
+      // Get account code/name information needed for the journal entry
+      const accountsQuery = `
+        SELECT id, name, code, account_type 
+        FROM accounts 
+        WHERE id IN ($1, $2) AND user_id = $3
+      `;
+      
+      const accountsResult = await sql.query(accountsQuery, [apAccountId, paymentAccountId, userId]);
+      
+      if (accountsResult.rows.length !== 2) {
+        return {
+          success: false,
+          message: `Could not find required AP or payment accounts for bill payment journal`
+        };
+      }
+      
+      // Find the AP and payment accounts from the results
+      const apAccount = accountsResult.rows.find(a => a.id === apAccountId);
+      const paymentAccount = accountsResult.rows.find(a => a.id === paymentAccountId);
+      
+      if (!apAccount || !paymentAccount) {
+        return {
+          success: false,
+          message: `Missing required accounts for journal entry creation`
+        };
+      }
+      
+      // Format a journal entry in the AI format expected by the GL agent
+      const journalEntry = {
+        memo: `Payment for Bill ${billNumber} to ${vendorName}`,
+        transaction_date: paymentDate,
+        journal_type: 'BP', // BP = Bill Payment
+        reference_number: referenceNumber || `AUTO-PAY-${billId}-${Date.now()}`,
+        lines: [
+          {
+            account_code_or_name: apAccount.code || apAccount.name,
+            description: `Payment to ${vendorName} for bill #${billNumber}`,
+            debit: amount,
+            credit: 0,
+            vendor: vendorName
+          },
+          {
+            account_code_or_name: paymentAccount.code || paymentAccount.name,
+            description: referenceNumber ? `Ref: ${referenceNumber}` : `Payment for Bill ${billNumber}`,
+            debit: 0,
+            credit: amount
+          }
+        ]
+      };
+      
+      // Get the base URL for API calls
+      const host = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || 'localhost:3000';
+      const protocol = host.includes('localhost') ? 'http' : 'https';
+      const baseUrl = host.startsWith('http') ? host : `${protocol}://${host}`;
+      
+      // Call the GL agent via internal API to create the journal entry
+      const response = await fetch(`${baseUrl}/api/agent-routing/gl_agent/journal`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${userId}`
+        },
+        body: JSON.stringify({
+          journalEntry,
+          userId
+        })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[APAgent] Error from GL agent when creating journal: ${response.status} - ${errorText}`);
+        return {
+          success: false,
+          message: `Failed to create journal entry through GL agent: ${errorText}`
+        };
+      }
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        return {
+          success: false,
+          message: result.message || 'Unknown error from GL agent'
+        };
+      }
+      
+      console.log(`[APAgent] Successfully created journal entry ${result.journalId} via GL agent for bill ${billId}`);
+      
+      return {
+        success: true,
+        journalId: result.journalId,
+        message: `Journal entry created via GL agent with ID: ${result.journalId}`
+      };
+    } catch (error) {
+      console.error('[APAgent] Error creating bill payment journal via GL agent:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Unknown error creating journal via GL agent'
+      };
+    }
+  }
+
+  /**
    * Determine if this agent can handle the given query
    */
   async canHandle(query: string): Promise<boolean> {

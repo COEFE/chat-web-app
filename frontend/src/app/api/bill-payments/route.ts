@@ -95,104 +95,108 @@ export async function POST(req: NextRequest) {
       `Ref: ${payment.reference_number}` : 
       `Payment for Bill ${bill.bill_number || bill.id}`;
 
-    // Create journal entry directly using SQL to avoid trigger issues
+    // Create journal entry via GL agent instead of directly
+    // This routes the GL posting for paid invoices to the GL agent as requested
     let journalId: number;
     try {
-      console.log('Creating journal entry with direct SQL...');
+      console.log(`[Bill Payments] Creating journal entry via GL agent for bill ${billId} with amount ${amountPaidNum}...`);
       
-      // Use a client from the pool for transaction
-      const client = await sql.connect();
+      // Route the journal creation to the GL agent via the API
+      const host = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || 'localhost:3000';
+      const protocol = host.includes('localhost') ? 'http' : 'https';
+      const baseUrl = host.startsWith('http') ? host : `${protocol}://${host}`;
       
-      try {
-        // Start transaction
-        await client.query('BEGIN');
-        
-        // Check which date column exists in the journals table
-        const schemaCheck = await client.query(`
-          SELECT 
-            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transaction_date') as has_transaction_date,
-            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'date') as has_date
-        `);
-        
-        const schema = schemaCheck.rows[0];
-        console.log('Journal table schema check:', schema);
-        
-        // Use the appropriate date column based on schema
-        let dateColumnName = schema.has_transaction_date ? 'transaction_date' : 'date';
-        
-        // Insert journal header with dynamic column name
-        const journalResult = await client.query(
-          `INSERT INTO journals 
-            (${dateColumnName}, memo, source, journal_type, is_posted, created_by, user_id) 
-          VALUES 
-            ($1, $2, $3, $4, $5, $6, $7) 
-          RETURNING id`,
-          [payment.payment_date, journalMemo, 'AP', 'BP', true, userId, userId]
-        );
-        
-        journalId = journalResult.rows[0].id;
-        console.log(`Journal created with ID: ${journalId}`);
-        
-        // Check if journal_lines table has line_number column
-        const lineNumberCheck = await client.query(`
-          SELECT EXISTS (
-            SELECT 1 FROM information_schema.columns 
-            WHERE table_name = 'journal_lines' AND column_name = 'line_number'
-          ) as has_line_number
-        `);
-        
-        const hasLineNumber = lineNumberCheck.rows[0].has_line_number;
-        console.log('Journal lines has line_number column:', hasLineNumber);
-        
-        // Insert both journal lines at once to avoid trigger validation issues
-        let query, lineValues;
-        
-        if (hasLineNumber) {
-          // If line_number column exists, use it
-          lineValues = [
-            journalId, 1, bill.ap_account_id, debitDescription, amountPaidNum, 0, null, null, null, null, userId,
-            journalId, 2, payment.payment_account_id, creditDescription, 0, amountPaidNum, null, null, null, null, userId
-          ];
-          
-          query = `
-            INSERT INTO journal_lines 
-              (journal_id, line_number, account_id, description, debit, credit, category, location, vendor, funder, user_id) 
-            VALUES 
-              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11),
-              ($12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-          `;
-        } else {
-          // If line_number column doesn't exist, omit it
-          lineValues = [
-            journalId, bill.ap_account_id, debitDescription, amountPaidNum, 0, null, null, null, null, userId,
-            journalId, payment.payment_account_id, creditDescription, 0, amountPaidNum, null, null, null, null, userId
-          ];
-          
-          query = `
-            INSERT INTO journal_lines 
-              (journal_id, account_id, description, debit, credit, category, location, vendor, funder, user_id) 
-            VALUES 
-              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10),
-              ($11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-          `;
-        }
-        
-        // Insert both lines using a single query with multiple value sets
-        await client.query(query, lineValues);
-        
-        console.log('Journal lines inserted successfully');
-        
-        // Commit the transaction
-        await client.query('COMMIT');
-      } catch (err) {
-        // Rollback on error
-        await client.query('ROLLBACK');
-        console.error('Error in journal creation transaction:', err);
-        throw err;
-      } finally {
-        // Release the client back to the pool
-        client.release();
+      // Prepare the journal entry data in AI format expected by GL agent
+      // Use proper typing for the journal entry lines
+      type JournalEntryLine = {
+        account_code_or_name?: string;
+        account_id?: number;
+        description: string;
+        debit: number;
+        credit: number;
+        vendor?: string;
+      };
+
+      const journalEntry = {
+        memo: journalMemo,
+        transaction_date: payment.payment_date,
+        journal_type: 'BP', // BP = Bill Payment
+        reference_number: payment.reference_number || `AUTO-PAY-${billId}-${Date.now()}`,
+        lines: [
+          {
+            // For GL agent, we need to fetch the account code/name
+            account_id: bill.ap_account_id,
+            description: debitDescription,
+            debit: amountPaidNum,
+            credit: 0,
+            vendor: vendorName
+          } as JournalEntryLine,
+          {
+            // For GL agent, we need to fetch the account code/name
+            account_id: payment.payment_account_id,
+            description: creditDescription,
+            debit: 0,
+            credit: amountPaidNum
+          } as JournalEntryLine
+        ]
+      };
+      
+      // We need to fetch account codes/names for the GL agent
+      const accountsQuery = `
+        SELECT id, name, code 
+        FROM accounts 
+        WHERE id IN ($1, $2) AND user_id = $3
+      `;
+      
+      const accountsResult = await sql.query(accountsQuery, [bill.ap_account_id, payment.payment_account_id, userId]);
+      
+      if (accountsResult.rows.length !== 2) {
+        throw new Error('Failed to find required accounts for journal entry');
       }
+      
+      // Find the AP and payment accounts
+      const apAccount = accountsResult.rows.find(a => a.id === bill.ap_account_id);
+      const paymentAccount = accountsResult.rows.find(a => a.id === payment.payment_account_id);
+      
+      if (!apAccount || !paymentAccount) {
+        throw new Error('Missing required account information for journal entry');
+      }
+      
+      // Update the journal entry with account codes/names
+      journalEntry.lines[0].account_code_or_name = apAccount.code || apAccount.name;
+      delete journalEntry.lines[0].account_id;
+      
+      journalEntry.lines[1].account_code_or_name = paymentAccount.code || paymentAccount.name;
+      delete journalEntry.lines[1].account_id;
+      
+      // Call the GL agent journal API
+      const response = await fetch(`${baseUrl}/api/gl-agent/journal`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${userId}`
+        },
+        body: JSON.stringify({
+          journalEntry,
+          userId,
+          originator: 'AP_BILL_PAYMENT'
+        })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[Bill Payments] Error from GL agent when creating journal: ${response.status} - ${errorText}`);
+        throw new Error(`Failed to create journal entry through GL agent: ${errorText}`);
+      }
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.message || 'Unknown error from GL agent');
+      }
+      
+      journalId = result.journalId;
+      console.log(`[Bill Payments] Successfully created journal entry ${journalId} via GL agent for bill ${billId}`);
     } catch (err) {
       console.error('Error creating journal with direct SQL:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
