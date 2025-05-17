@@ -1,5 +1,5 @@
 import { AgentContext, AgentResponse } from "@/types/agents";
-import { isBillPaymentQuery, isBillPaymentQueryWithAI, extractPaymentInfoFromQuery } from "@/lib/apUtils";
+import { isBillPaymentQuery, isBillPaymentQueryWithAI, extractPaymentInfoFromQuery, extractPaymentInfoWithAI } from "@/lib/apUtils";
 import Anthropic from "@anthropic-ai/sdk";
 import { MessageParam } from "@anthropic-ai/sdk/resources/messages";
 import { 
@@ -159,18 +159,49 @@ async function analyzePaymentIntentWithAI(
         shouldExecuteImmediately: result['Execute only if clearly instructed'] === true
       };
     } catch (parseError) {
-      console.error('[handleBillPayment] Error parsing Claude response, falling back to pattern matching:', parseError);
+      console.error('[handleBillPayment] Error parsing Claude response, using AI-powered payment info extraction:', parseError);
+      // Use the dedicated AI-powered payment info extraction instead of pattern matching
+      const extractedInfo = await extractPaymentInfoWithAI(query, anthropic);
+      return {
+        paymentInfo: {
+          vendor_name: extractedInfo.vendor_name,
+          bill_number: extractedInfo.bill_number,
+          amount: extractedInfo.amount,
+          payment_date: extractedInfo.payment_date,
+          payment_account: extractedInfo.payment_account,
+          payment_method: extractedInfo.payment_method,
+          reference_number: extractedInfo.reference_number,
+          all_bills: extractedInfo.all_bills
+        },
+        shouldExecuteImmediately: query.toLowerCase().includes('record') || query.toLowerCase().includes('pay')
+      };
+    }
+  } catch (error) {
+    console.error('[handleBillPayment] Error calling Claude API intent analyzer, using dedicated payment info extraction:', error);
+    try {
+      // Even if the intent analysis failed, try the dedicated payment info extraction
+      const extractedInfo = await extractPaymentInfoWithAI(query);
+      return {
+        paymentInfo: {
+          vendor_name: extractedInfo.vendor_name,
+          bill_number: extractedInfo.bill_number,
+          amount: extractedInfo.amount,
+          payment_date: extractedInfo.payment_date,
+          payment_account: extractedInfo.payment_account,
+          payment_method: extractedInfo.payment_method,
+          reference_number: extractedInfo.reference_number,
+          all_bills: extractedInfo.all_bills
+        },
+        shouldExecuteImmediately: query.toLowerCase().includes('record') || query.toLowerCase().includes('pay')
+      };
+    } catch (extractionError) {
+      // Last resort fallback to pattern matching if both AI approaches fail
+      console.error('[handleBillPayment] AI extraction also failed, falling back to pattern matching:', extractionError);
       return {
         paymentInfo: extractPaymentInfoFromQuery(query),
         shouldExecuteImmediately: query.toLowerCase().includes('record') || query.toLowerCase().includes('pay')
       };
     }
-  } catch (error) {
-    console.error('[handleBillPayment] Error calling Claude API, falling back to pattern matching:', error);
-    return {
-      paymentInfo: extractPaymentInfoFromQuery(query),
-      shouldExecuteImmediately: query.toLowerCase().includes('record') || query.toLowerCase().includes('pay')
-    };
   }
 }
 
@@ -334,24 +365,46 @@ export async function handleBillPayment(
     };
   }
   
-  // Check if this is a bill payment query using AI
-  const isPaymentQuery = await isApplicable(query);
-  if (!isPaymentQuery) {
+  // Check again if this is a payment request since context may have changed
+  const isPaymentRequest = await isApplicable(query);
+  if (!isPaymentRequest) {
     return {
       response: {
         success: false,
-        message: "I'm not sure if you're trying to make a bill payment. Please provide more details about which bills or invoices you want to pay."
+        message: "I don't understand your payment request. Please provide details about which bills you'd like to pay."
       },
       updatedPendingPayment: null
     };
   }
-  
-  // This is a new payment request
+
+  // Extract payment info using AI for better understanding of natural language
+  console.log('[handleBillPayment] Using AI-powered extraction for payment information');
+  let extractedInfo;
   try {
-    // Extract payment information from the query
-    const paymentInfo = extractPaymentInfoFromQuery(query);
-    console.log('[APAgent] Extracted payment info:', paymentInfo);
-    
+    // First try with AI-powered extraction for better accuracy
+    extractedInfo = await extractPaymentInfoWithAI(query);
+    console.log('[handleBillPayment] AI-powered extraction result:', extractedInfo);
+  } catch (error) {
+    // Fall back to pattern matching if AI fails
+    console.error('[handleBillPayment] AI extraction failed, falling back to pattern matching:', error);
+    extractedInfo = extractPaymentInfoFromQuery(query);
+  }
+  
+  // Convert to the expected format
+  const paymentInfo = {
+    vendor_name: extractedInfo.vendor_name,
+    bill_number: extractedInfo.bill_number,
+    amount: extractedInfo.amount,
+    payment_date: extractedInfo.payment_date || new Date().toISOString().split('T')[0],
+    payment_account: extractedInfo.payment_account,
+    payment_method: extractedInfo.payment_method,
+    reference_number: extractedInfo.reference_number,
+    all_bills: extractedInfo.all_bills
+  };
+  
+  console.log('[APAgent] Extracted payment info:', paymentInfo);
+  
+  try {
     // Find relevant bills based on the query
     let billsToProcess: any[] = [];
     

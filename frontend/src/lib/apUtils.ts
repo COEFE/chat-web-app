@@ -21,6 +21,32 @@ import { getAccounts } from "./accounting/accountQueries";
 import Anthropic from "@anthropic-ai/sdk"; // Added for AI call
 
 /**
+ * Extract JSON from a string, even if it's surrounded by other text
+ * Used to parse Claude AI responses that may contain text before/after the JSON
+ */
+function extractJsonFromString(text: string): any {
+  // Look for JSON-like patterns in the string
+  const jsonPattern = /\{[\s\S]*\}/g;
+  const matches = text.match(jsonPattern);
+  
+  if (!matches || matches.length === 0) {
+    throw new Error('No JSON object found in the string');
+  }
+  
+  // Try to parse each match as JSON, return the first valid one
+  for (const match of matches) {
+    try {
+      return JSON.parse(match);
+    } catch (e) {
+      // Continue to the next match if this one isn't valid JSON
+      continue;
+    }
+  }
+  
+  throw new Error('Could not parse any valid JSON from the string');
+}
+
+/**
  * Interface for AI-powered bill payment analysis
  */
 export interface BillPaymentAnalysis {
@@ -346,6 +372,125 @@ export function extractPaymentInfoFromQuery(message: string): {
   console.log(`[APUtils] Extracted payment info:`, paymentInfo);
   return paymentInfo;
 }
+/**
+ * Interface for AI-powered payment extraction response
+ */
+export interface PaymentInfoExtraction {
+  vendor_name?: string;
+  bill_number?: string;
+  amount?: number;
+  payment_date?: string;
+  payment_account?: string;
+  payment_method?: string;
+  reference_number?: string;
+  all_bills?: boolean;
+  confidence: number;
+  reasoning?: string;
+}
+
+/**
+ * Extract payment information from a message using Claude AI
+ * This is the AI-powered version of extractPaymentInfoFromQuery
+ */
+export async function extractPaymentInfoWithAI(
+  message: string,
+  anthropicClient?: Anthropic
+): Promise<PaymentInfoExtraction> {
+  console.log(`[APUtils] Using AI to extract payment info from: "${message}"`); 
+  
+  // Use the provided anthropic client or create a new one
+  const client = anthropicClient || new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY || '',
+    dangerouslyAllowBrowser: true
+  });
+
+  const systemPrompt = `You are an AI specialized in extracting payment information from user messages in an accounting system.
+  
+  Analyze the given message and extract structured information about a payment request. 
+  The user's query may be asking to record a payment for bills or invoices, and you need to extract relevant details.
+  
+  Keys to extract (all are optional - only extract what's explicitly mentioned):
+  - vendor_name: Name of the vendor being paid (if mentioned)
+  - bill_number: Specific bill or invoice number (if mentioned)
+  - amount: Payment amount (if mentioned)
+  - payment_date: When the payment is/was made (if mentioned, otherwise use today's date)
+  - payment_account: Account used for the payment (if mentioned)
+  - payment_method: Method of payment, such as Check, ACH/Wire, Credit Card, Cash (if mentioned)
+  - reference_number: Any reference or confirmation number (if mentioned)
+  - all_bills: Boolean true if the request is to pay all bills or if no specific bill is mentioned
+  
+  Be careful NOT to interpret general terms like "these bills", "the bills", or "all bills" as vendor names.
+  Be careful not to include any text about bills or invoices in the vendor name, unless it's clearly part of the vendor name.
+  
+  Format your response as JSON with these fields, plus:
+  - confidence: Number between 0-1 indicating how confident you are in this extraction
+  - reasoning: Brief explanation of your extraction decisions
+  
+  Only include fields in your response that can be confidently extracted from the message.`;
+
+  try {
+    const response = await client.messages.create({
+      model: "claude-3-haiku-20240307",
+      max_tokens: 1000,
+      system: systemPrompt,
+      messages: [{
+        role: "user",
+        content: message
+      }]
+    });
+
+    // Parse the AI response to extract the result
+    if (!response.content || response.content.length === 0) {
+      console.log('[APUtils] Empty response from Claude when extracting payment info');
+      return {
+        all_bills: true,  // Default to all bills for empty responses
+        payment_date: new Date().toISOString().split("T")[0], // Default to today
+        confidence: 0.1,
+        reasoning: "AI returned empty response, defaulting to minimal info"
+      };
+    }
+
+    // Get the content as text
+    const responseText = response.content[0].type === 'text' ? response.content[0].text : '';
+    
+    // Try to parse JSON from the response
+    try {
+      const extractedData = extractJsonFromString(responseText);
+      console.log('[APUtils] AI payment extraction result:', extractedData);
+      
+      // Ensure all_bills is true if no specific bill info is provided
+      if (!extractedData.bill_number && !extractedData.vendor_name) {
+        extractedData.all_bills = true;
+      }
+      
+      // Default payment date to today if not provided
+      if (!extractedData.payment_date) {
+        extractedData.payment_date = new Date().toISOString().split("T")[0];
+      }
+      
+      return extractedData;
+    } catch (jsonError) {
+      console.error('[APUtils] Error parsing AI payment extraction JSON:', jsonError);
+      // Fallback to pattern extraction
+      const fallbackData = extractPaymentInfoFromQuery(message);
+      return {
+        ...fallbackData,
+        confidence: 0.3,
+        reasoning: "AI response parsing failed, used fallback pattern matching"
+      };
+    }
+  } catch (error) {
+    console.error('[APUtils] Error in AI payment extraction:', error);
+    // Fallback to the regex-based approach
+    const fallbackData = extractPaymentInfoFromQuery(message);
+    return {
+      ...fallbackData,
+      confidence: 0.3,
+      reasoning: "AI request failed, used fallback pattern matching"
+    };
+  }
+}
+
 /**
  * Interface for AI-powered bill creation analysis
  */
