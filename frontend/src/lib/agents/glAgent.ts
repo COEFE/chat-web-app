@@ -32,7 +32,7 @@ import FormData from "form-data";
  * It leverages existing GL functionality to provide accurate GL information
  */
 export class GLAgent implements Agent {
-  id = "gl_agent";
+  id = "gl-agent";
   name = "General Ledger Agent";
   description = "Handles queries about GL codes, journal entries, and ledger information";
   

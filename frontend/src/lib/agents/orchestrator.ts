@@ -247,7 +247,7 @@ export class AccountingOrchestrator {
           targetAgentId = 'invoice-agent';
           break;
         case 'gl_query':
-          targetAgentId = 'gl_agent';
+          targetAgentId = 'gl-agent';
           break;
         case 'reconciliation':
           targetAgentId = 'reconciliation_agent';
