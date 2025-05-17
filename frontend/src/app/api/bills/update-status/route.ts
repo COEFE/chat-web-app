@@ -23,12 +23,24 @@ export async function POST(request: Request) {
     
     console.log('[Bills API] Authenticated user:', userId);
 
-    const { billIds, newStatus } = await request.json();
+    const { billIds: rawBillIds, newStatus } = await request.json();
+    
+    // Convert bill IDs to integers to ensure correct typing for PostgreSQL
+    let billIds: number[] = [];
+    
+    if (rawBillIds && Array.isArray(rawBillIds)) {
+      // Ensure all IDs are valid integers
+      billIds = rawBillIds
+        .map(id => parseInt(id, 10))
+        .filter(id => !isNaN(id));
+      
+      console.log(`[Bills API] Converted bill IDs to integers:`, billIds);
+    }
 
     // Validate input
-    if (!billIds || !Array.isArray(billIds) || billIds.length === 0) {
+    if (billIds.length === 0) {
       return NextResponse.json(
-        { success: false, message: 'No bill IDs provided' },
+        { success: false, message: 'No valid bill IDs provided' },
         { status: 400 }
       );
     }
@@ -199,8 +211,16 @@ export async function POST(request: Request) {
         WHERE id IN (${placeholders})
       `;
       
-      // Only pass billIds as parameters since the query doesn't use status
-      const billDetailsResult = await sql.query(billDetailsQuery, [...billIds]);
+      // Rebuild placeholders for the new query with proper parameters
+      const detailsPlaceholders = billIds.map((_, idx) => `$${idx + 1}`).join(',');
+      const detailsQuery = `
+        SELECT id, total_amount, amount_paid
+        FROM bills
+        WHERE id IN (${detailsPlaceholders})
+      `;
+      
+      console.log(`[Bills API] Executing bill details query with IDs:`, billIds);
+      const billDetailsResult = await sql.query(detailsQuery, billIds);
       const billDetails = billDetailsResult.rows;
       
       // For each bill, create a payment record
