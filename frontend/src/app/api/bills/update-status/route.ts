@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
+import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/authenticateRequest';
 import { logAuditEvent } from '@/lib/auditLogger';
 import { createBillPayment } from '@/lib/accounting/billQueries';
@@ -199,7 +200,8 @@ export async function POST(request: Request) {
         WHERE id IN (${placeholders})
       `;
       
-      const billDetailsResult = await sql.query(billDetailsQuery, [newStatus.toLowerCase(), ...billIds]);
+      // Only pass billIds as parameters since the query doesn't use status
+      const billDetailsResult = await sql.query(billDetailsQuery, [...billIds]);
       const billDetails = billDetailsResult.rows;
       
       // For each bill, create a payment record
