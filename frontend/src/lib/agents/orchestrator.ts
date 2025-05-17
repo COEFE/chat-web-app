@@ -211,19 +211,19 @@ export class AccountingOrchestrator {
       // This is prioritized because payment patterns can sometimes be mistaken for bill creation
       if (await this.detectBillPaymentIntent(query)) {
         console.log('[Orchestrator] Bill payment query detected, routing to AP agent');
-        return this.agents['ap-agent'];
+        return this.agents['ap_agent'];
       }
       
       // Check for vendor creation patterns
       if (isVendorCreationQuery(query)) {
         console.log('[Orchestrator] Vendor creation query detected, routing to AP agent');
-        return this.agents['ap-agent'];
+        return this.agents['ap_agent'];
       }
       
       // Check for bill creation patterns with AI
       if (await this.detectBillCreationIntent(query)) {
         console.log('[Orchestrator] Bill creation query detected with AI, routing to AP agent');
-        return this.agents['ap-agent'];
+        return this.agents['ap_agent'];
       }
       
       // Only proceed if we have registered agents
