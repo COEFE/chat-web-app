@@ -260,9 +260,9 @@ export async function POST(request: Request) {
           
           const billDetail = billDetailResult.rows[0];
           
-          // Call the bill payment API to create the payment record
+          // Call the bill payment API to create the payment record AND journal entries
           const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `http://localhost:3000`;
-          console.log(`[Bills API] Creating payment record for bill ${bill.id} with amount ${remainingAmount}`);
+          console.log(`[Bills API] Creating payment record and journal entry for bill ${bill.id} with amount ${remainingAmount}`);
           
           const response = await fetch(`${baseUrl}/api/bill-payments`, {
             method: 'POST',

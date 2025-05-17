@@ -1,0 +1,1 @@
+SELECT id, name, account_type, user_id FROM accounts WHERE account_type IN ('Bank', 'Cash') OR LOWER(account_type) LIKE '%bank%' OR LOWER(account_type) LIKE '%cash%' ORDER BY user_id NULLS FIRST, name;

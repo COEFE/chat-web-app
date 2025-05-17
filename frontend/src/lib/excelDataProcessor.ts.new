@@ -1,0 +1,210 @@
+export async function identifyExpenseAccountWithAI(params: {
+  accountName?: string | null;
+  accountCode?: string | null;
+  memo: string;
+  amount?: string | number | null;
+  vendorId: number;
+  userId?: string;
+  authToken?: string;
+}): Promise<number | null> {
+  const { accountName, accountCode, memo, amount, vendorId, userId, authToken } = params;
+  
+  console.log('[ExcelDataProcessor] Starting expense account identification with AI');
+  
+  // Add timeout protection for the whole operation
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+    console.log('[ExcelDataProcessor] Expense account identification timed out - using fallback');
+  }, 5000); // 5 second timeout
+  
+  try {
+    // Step 1: Get accounts from database
+    let accounts = [];
+    
+    try {
+      const apiUrl = getApiUrl('/api/accounts');
+      const accountsResponse = await fetch(`${apiUrl}?type=expense`, {
+        headers: {
+          ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
+        },
+        signal: controller.signal
+      });
+      
+      if (accountsResponse.ok) {
+        const result = await accountsResponse.json();
+        if (result && Array.isArray(result) && result.length > 0) {
+          accounts = result;
+          console.log(`[ExcelDataProcessor] Found ${accounts.length} expense accounts in database`);
+        } else {
+          console.log('[ExcelDataProcessor] No expense accounts found in database, using fallback');
+          clearTimeout(timeoutId);
+          return findValidExpenseAccount(userId, authToken);
+        }
+      } else {
+        console.error(`[ExcelDataProcessor] Failed to fetch expense accounts: ${accountsResponse.statusText}`);
+        clearTimeout(timeoutId);
+        return findValidExpenseAccount(userId, authToken);
+      }
+    } catch (error) {
+      console.error('[ExcelDataProcessor] Error fetching accounts:', error);
+      clearTimeout(timeoutId);
+      return findValidExpenseAccount(userId, authToken);
+    }
+    
+    // Step 2: Try direct matching if account name or code is provided (fastest approach)
+    if (accountName || accountCode) {
+      const directMatch = accounts.find(acc => 
+        (accountName && acc.name.toLowerCase() === accountName.toLowerCase()) ||
+        (accountCode && acc.code && acc.code.toLowerCase() === accountCode.toLowerCase())
+      );
+      
+      if (directMatch) {
+        console.log(`[ExcelDataProcessor] Found direct account match: ${directMatch.name}`);
+        clearTimeout(timeoutId);
+        return directMatch.id;
+      }
+    }
+    
+    // Step 3: Try keyword matching based on memo (quick local approach)
+    if (memo) {
+      const lowerMemo = memo.toLowerCase();
+      
+      // Define common expense categories and associated keywords
+      const expenseCategories = [
+        { keywords: ['office', 'supplies', 'paper', 'stationery'], name: 'Office Supplies' },
+        { keywords: ['rent', 'lease', 'property'], name: 'Rent' },
+        { keywords: ['utility', 'utilities', 'electric', 'water', 'gas', 'power'], name: 'Utilities' },
+        { keywords: ['travel', 'airfare', 'hotel', 'lodging', 'flight'], name: 'Travel' },
+        { keywords: ['meal', 'food', 'restaurant', 'catering'], name: 'Meals' },
+        { keywords: ['phone', 'mobile', 'telecom', 'internet', 'broadband'], name: 'Telecommunications' },
+        { keywords: ['software', 'license', 'subscription', 'saas'], name: 'Software' },
+        { keywords: ['repair', 'maintenance', 'service'], name: 'Repairs & Maintenance' },
+        { keywords: ['insurance', 'policy', 'coverage'], name: 'Insurance' },
+        { keywords: ['legal', 'attorney', 'lawyer'], name: 'Legal' },
+        { keywords: ['accounting', 'bookkeeping', 'tax', 'cpa'], name: 'Accounting' },
+        { keywords: ['advertising', 'marketing', 'promotion'], name: 'Advertising' },
+        { keywords: ['salary', 'wage', 'payroll', 'compensation'], name: 'Payroll' },
+        { keywords: ['equipment', 'furniture', 'computer', 'hardware'], name: 'Equipment' }
+      ];
+      
+      // Find matching category based on memo
+      const matchingCategory = expenseCategories.find(category => 
+        category.keywords.some(keyword => lowerMemo.includes(keyword))
+      );
+      
+      if (matchingCategory) {
+        console.log(`[ExcelDataProcessor] Memo matches expense category: ${matchingCategory.name}`);
+        
+        // Find account that matches the category name
+        const categoryMatch = accounts.find(acc => 
+          acc.name.toLowerCase().includes(matchingCategory.name.toLowerCase())
+        );
+        
+        if (categoryMatch) {
+          console.log(`[ExcelDataProcessor] Found category match: ${categoryMatch.name}`);
+          clearTimeout(timeoutId);
+          return categoryMatch.id;
+        }
+      }
+    }
+    
+    // Step 4: Try AI-powered account selection with a timeout
+    try {
+      // Create a promise race between the API call and a timeout
+      const aiSelectionPromise = (async () => {
+        console.log('[ExcelDataProcessor] Attempting AI-powered account selection');
+      
+        // Get vendor name for better context
+        let vendorName = '';
+        try {
+          const vendorResponse = await fetch(`${getApiUrl('/api/vendors')}/${vendorId}`, {
+            headers: {
+              ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
+            },
+            signal: controller.signal
+          });
+          
+          if (vendorResponse.ok) {
+            const vendor = await vendorResponse.json();
+            vendorName = vendor.name || '';
+          }
+        } catch (vendorError) {
+          console.warn('[ExcelDataProcessor] Could not fetch vendor name:', vendorError);
+        }
+        
+        // Try the determine-expense-account API with a shorter timeout
+        const formattedAmount = amount ? String(amount) : '';
+        const response = await fetch(getApiUrl('/api/ai/determine-expense-account'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
+          },
+          body: JSON.stringify({
+            description: memo,
+            vendorName,
+            amount: formattedAmount,
+            accountName: accountName || '',
+            accountCode: accountCode || '',
+            userId,
+            accounts
+          }),
+          signal: controller.signal
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.accountId) {
+            console.log(`[ExcelDataProcessor] AI selected expense account ID: ${data.accountId} (${data.message})`);
+            return data.accountId;
+          }
+        }
+        
+        // If we get here, AI failed to determine an account
+        throw new Error('AI could not determine a suitable expense account');
+      })();
+      
+      // Race the AI selection against the timeout
+      const aiResult = await aiSelectionPromise;
+      clearTimeout(timeoutId);
+      return aiResult;
+    } catch (aiError) {
+      console.log('[ExcelDataProcessor] AI-powered selection failed or timed out:', aiError.message);
+      // Continue to fallbacks
+    }
+    
+    // Step 5: General expense account fallback
+    const generalExpense = accounts.find(acc => 
+      acc.name.toLowerCase().includes('general') || 
+      acc.name.toLowerCase().includes('expense') ||
+      acc.name.toLowerCase().includes('other')
+    );
+    
+    if (generalExpense) {
+      console.log(`[ExcelDataProcessor] Using general expense account: ${generalExpense.name}`);
+      clearTimeout(timeoutId);
+      return generalExpense.id;
+    }
+    
+    // Step 6: Last resort - first available account
+    if (accounts.length > 0) {
+      console.log(`[ExcelDataProcessor] Using first available expense account: ${accounts[0].name}`);
+      clearTimeout(timeoutId);
+      return accounts[0].id;
+    }
+    
+    // If no accounts found at all, fall back to the findValidExpenseAccount function
+    console.log('[ExcelDataProcessor] No suitable expense accounts found, using fallback');
+    return findValidExpenseAccount(userId, authToken);
+    
+  } catch (error) {
+    console.error('[ExcelDataProcessor] Error in expense account identification:', error);
+  } finally {
+    // Always clear the timeout to prevent memory leaks
+    clearTimeout(timeoutId);
+  }
+  
+  // Final fallback if everything else fails
+  return findValidExpenseAccount(userId, authToken);
+}
