@@ -164,8 +164,8 @@ export class APAgent implements Agent {
       const protocol = host.includes('localhost') ? 'http' : 'https';
       const baseUrl = host.startsWith('http') ? host : `${protocol}://${host}`;
       
-      // Call the GL agent via internal API to create the journal entry
-      const response = await fetch(`${baseUrl}/api/gl-agent/journal`, {
+      // Call the GL agent via direct API endpoint to create the journal entry
+      const response = await fetch(`${baseUrl}/api/gl_agent/journal`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

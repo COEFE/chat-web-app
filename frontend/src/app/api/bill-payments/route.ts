@@ -170,7 +170,7 @@ export async function POST(req: NextRequest) {
       delete journalEntry.lines[1].account_id;
       
       // Call the GL agent journal API
-      const response = await fetch(`${baseUrl}/api/gl-agent/journal`, {
+      const response = await fetch(`${baseUrl}/api/gl_agent/journal`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
