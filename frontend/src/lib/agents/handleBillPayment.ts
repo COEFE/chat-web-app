@@ -653,10 +653,15 @@ export async function handleBillPayment(
         
         // Return result message
         if (result.success) {
+          // Safely format the total paid amount, ensuring it's a number first
+          const formattedTotal = typeof result.totalPaid === 'number' 
+            ? result.totalPaid.toFixed(2) 
+            : parseFloat(String(result.totalPaid)).toFixed(2);
+          
           return {
             response: {
               success: true,
-              message: `✅ Successfully recorded ${result.successCount} ${result.successCount === 1 ? 'payment' : 'payments'} totaling $${result.totalPaid.toFixed(2)} using the ${accountName} account.\n\nEach payment has a journal entry that debits Accounts Payable and credits your ${accountName}.`
+              message: `✅ Successfully recorded ${result.successCount} ${result.successCount === 1 ? 'payment' : 'payments'} totaling $${formattedTotal} using the ${accountName} account.\n\nEach payment has a journal entry that debits Accounts Payable and credits your ${accountName}.`
             },
             updatedPendingPayment: null // Clear pending payment since we executed it
           };
