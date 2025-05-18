@@ -242,7 +242,7 @@ export async function identifyExpenseAccountWithAI(params: {
       try {
         // Step 1: Get all expense accounts from the database
         const accountsResult = await sql`
-          SELECT id, name, code, description 
+          SELECT id, name, code, account_type 
           FROM accounts 
           WHERE account_type = 'expense' OR account_type LIKE '%expense%'
         `;
@@ -274,7 +274,7 @@ export async function identifyExpenseAccountWithAI(params: {
         
         // Format account options for Claude
         const accountOptions = accounts.map(acc => {
-          return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Description: ${acc.description || 'N/A'}`;
+          return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Type: ${acc.account_type || 'N/A'}`;
         }).join('\n');
         
         // Create prompt for Claude
@@ -369,7 +369,7 @@ export async function identifyApAccountWithAI(params: {
       try {
         // Step 1: Get all AP accounts from the database
         const accountsResult = await sql`
-          SELECT id, name, code, description 
+          SELECT id, name, code, account_type 
           FROM accounts 
           WHERE account_type = 'accounts_payable' OR account_type = 'ap' OR account_type LIKE '%payable%'
         `;
@@ -405,7 +405,7 @@ export async function identifyApAccountWithAI(params: {
         
         // Format account options for Claude
         const accountOptions = accounts.map(acc => {
-          return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Description: ${acc.description || 'N/A'}`;
+          return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Type: ${acc.account_type || 'N/A'}`;
         }).join('\n');
         
         // Create prompt for Claude
