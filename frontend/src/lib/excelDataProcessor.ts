@@ -365,11 +365,11 @@ export async function identifyApAccountWithAI(params: {
   console.log('[ExcelDataProcessor] Starting AP account identification with AI');
   
   try {
-    // Step 1: Get all AP accounts from the database
+    // Step 1: Get ALL accounts from the database so AI can review them
+    // This approach is more flexible as it doesn't rely on specific naming patterns
     const accountsResult = await sql`
       SELECT id, name, code, account_type 
-      FROM accounts 
-      WHERE account_type = 'accounts_payable' OR account_type = 'ap' OR account_type LIKE '%payable%'
+      FROM accounts
     `;
     
     if (!accountsResult.rows || accountsResult.rows.length === 0) {
@@ -401,60 +401,30 @@ export async function identifyApAccountWithAI(params: {
     // Step 3: Use Claude AI to select the most appropriate AP account
     console.log('[ExcelDataProcessor] Attempting AI-powered AP account selection');
     
-    // Define the account interface for TypeScript
-    interface AccountWithScore extends Record<string, any> {
-      id: number;
-      name?: string;
-      code?: string;
-      account_type?: string;
-      score: number;
-    }
-    
-    // Implement intelligent pre-filtering to find the most relevant AP accounts
-    const getRelevantApAccounts = (accounts: any[], vendorName: string): AccountWithScore[] => {
-      // Convert inputs to lowercase for case-insensitive matching
-      const vendorLower = vendorName.toLowerCase();
-      
-      // Score each account based on relevance to the vendor
-      const scoredAccounts = accounts.map((acc: any) => {
-        let score = 0;
-        const nameLower = (acc.name || '').toLowerCase();
-        const codeLower = (acc.code || '').toLowerCase();
-        const typeLower = (acc.account_type || '').toLowerCase();
-        
-        // Prioritize accounts that are explicitly marked as AP
-        if (typeLower === 'accounts_payable' || typeLower === 'ap') score += 10;
-        if (typeLower.includes('payable')) score += 5;
-        
-        // Check for vendor-specific AP accounts
-        if (nameLower.includes(vendorLower) || vendorLower.includes(nameLower)) score += 8;
-        
-        // Common AP account names
-        if (nameLower.includes('vendor') || nameLower.includes('supplier')) score += 3;
-        if (nameLower.includes('trade') || nameLower.includes('payable')) score += 3;
-        
-        return { ...acc, score };
-      });
-      
-      // Sort by score (highest first) and take top 5
-      return scoredAccounts.sort((a: AccountWithScore, b: AccountWithScore) => b.score - a.score).slice(0, 5);
-    };
-    
-    // Get the most relevant AP accounts for this vendor
-    const relevantAccounts = getRelevantApAccounts(accounts, vendorName);
-    const accountOptions = relevantAccounts.map((acc: AccountWithScore) => {
+    // Format all accounts for Claude to review
+    const accountOptions = accounts.map(acc => {
       return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Type: ${acc.account_type || 'N/A'}`;
     }).join('\n');
     
-    // Create a more concise prompt for Claude
-    const prompt = `Select the best Accounts Payable account for this vendor:
+    // Create a comprehensive prompt for Claude to identify the AP account
+    const prompt = `You are an accounting AI expert. I need you to identify the Accounts Payable (AP) account from the list below.
+
+Accounts Payable (AP) accounts are used to track money a company owes to vendors or suppliers. 
+They are typically liability accounts and may have names containing terms like:
+- "Accounts Payable", "AP", or "A/P"
+- "Trade Payables"
+- "Vendor Liabilities"
+- "Current Liabilities"
+
+AP accounts often have account codes starting with 2 in standard accounting charts.
 
 Vendor: ${vendorName}
 
-Accounts:
+Available Accounts:
 ${accountOptions}
 
-Respond with ONLY the account ID number.`;
+Based on accounting best practices, identify the account that is most likely the Accounts Payable account.
+Respond with ONLY the account ID number of the best AP account. For example: "1234"`;
     
     // Call Claude API with optimized settings for faster responses
     const aiResponse = await anthropic.messages.create({
@@ -504,17 +474,72 @@ Respond with ONLY the account ID number.`;
  */
 async function getApAccountId(): Promise<number> {
   try {
-    // Directly query the accounts table which is the correct table name
+    // Get all accounts to analyze with AI
     try {
       const accountsResult = await sql`
-        SELECT id FROM accounts
-        WHERE account_type = 'accounts_payable' OR account_type = 'ap'
-        LIMIT 1
+        SELECT id, name, code, account_type FROM accounts
       `;
       
       if (accountsResult.rows && accountsResult.rows.length > 0) {
-        console.log(`[ExcelDataProcessor] Found AP account ID from accounts table: ${accountsResult.rows[0].id}`);
-        return parseInt(accountsResult.rows[0].id);
+        const accounts = accountsResult.rows;
+        console.log(`[ExcelDataProcessor] Found ${accounts.length} accounts in database for AI analysis`);
+        
+        // Format accounts for Claude to review
+        const accountOptions = accounts.map(acc => {
+          return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Type: ${acc.account_type || 'N/A'}`;
+        }).join('\n');
+        
+        // Create a comprehensive prompt for Claude to identify the AP account
+        const prompt = `You are an accounting AI expert. I need you to identify the Accounts Payable (AP) account from the list below.
+
+Accounts Payable (AP) accounts are used to track money a company owes to vendors or suppliers. 
+They are typically liability accounts and may have names containing terms like:
+- "Accounts Payable", "AP", or "A/P"
+- "Trade Payables"
+- "Vendor Liabilities"
+- "Current Liabilities"
+
+AP accounts often have account codes starting with 2 in standard accounting charts.
+
+Available Accounts:
+${accountOptions}
+
+Based on accounting best practices, identify the account that is most likely the Accounts Payable account.
+Respond with ONLY the account ID number of the best AP account. For example: "1234"`;
+        
+        try {
+          // Call Claude API with optimized settings for faster responses
+          const aiResponse = await anthropic.messages.create({
+            model: 'claude-3-haiku-20240307', // Using the fastest Claude model
+            max_tokens: 20, // Minimal token count for faster responses
+            temperature: 0, // Zero temperature for deterministic responses
+            system: 'You are an accounting AI. Respond ONLY with the account ID number.',
+            messages: [{ role: 'user', content: prompt }]
+          });
+          
+          // Extract text from the response
+          const contentBlock = aiResponse.content[0];
+          const aiText = 'text' in contentBlock ? contentBlock.text : '';
+          
+          // Extract account ID from response
+          const idMatch = aiText.match(/(\d+)/);
+          if (idMatch) {
+            const accountId = parseInt(idMatch[1]);
+            
+            // Verify the account exists in our options
+            const accountExists = accounts.some(acc => acc.id === accountId);
+            if (accountExists) {
+              console.log(`[ExcelDataProcessor] AI selected AP account ID: ${accountId}`);
+              return accountId;
+            }
+          }
+        } catch (aiError) {
+          console.log('[ExcelDataProcessor] AI-powered AP account selection failed in fallback:', aiError);
+        }
+        
+        // If AI selection fails, return the first account ID as a fallback
+        console.log(`[ExcelDataProcessor] Using first account as fallback: ${accounts[0].id}`);
+        return parseInt(accounts[0].id);
       }
     } catch (accountsError) {
       console.log(`[ExcelDataProcessor] Could not find AP accounts in accounts table, trying alternative...`);
