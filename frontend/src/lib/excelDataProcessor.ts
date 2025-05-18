@@ -80,23 +80,23 @@ export async function getExpenseAccountId(): Promise<string> {
   // Define the actual database query logic
   const dbQueryPromise = (async (): Promise<string> => {
     try {
-      // Try to get an expense account from gl_accounts
+      // Try to find a valid expense account ID from the database
       try {
+        // Directly query the accounts table which is the correct table name
         const result = await sql`
-          SELECT id FROM gl_accounts
+          SELECT id FROM accounts
           WHERE account_type = 'expense'
-          OR account_type LIKE '%expense%'
           LIMIT 1
         `;
         
         if (result.rows && result.rows.length > 0) {
-          console.log(`[ExcelDataProcessor] Found expense account ID: ${result.rows[0].id}`);
+          console.log(`[ExcelDataProcessor] Found expense account ID from accounts table: ${result.rows[0].id}`);
           return result.rows[0].id;
         }
-      } catch (glError) {
-        console.log(`[ExcelDataProcessor] No gl_accounts table found, trying alternative...`);
+      } catch (accountsError) {
+        console.log(`[ExcelDataProcessor] Could not find expense accounts in accounts table, trying alternative...`);
       }
-    
+      
       // Check existing bill_lines for a valid expense_account_id
       try {
         const billLinesResult = await sql`
@@ -264,20 +264,20 @@ export async function identifyExpenseAccountWithAI(params: {
  */
 async function getApAccountId(): Promise<number> {
   try {
-    // First, check if the accounts_payable table exists
+    // Directly query the accounts table which is the correct table name
     try {
-      // Try to query from accounts_payable table if it exists
-      const apResult = await sql`
-        SELECT id FROM accounts_payable
+      const accountsResult = await sql`
+        SELECT id FROM accounts
+        WHERE account_type = 'accounts_payable' OR account_type = 'ap'
         LIMIT 1
       `;
       
-      if (apResult.rows && apResult.rows.length > 0) {
-        console.log(`[ExcelDataProcessor] Found AP account ID from accounts_payable table: ${apResult.rows[0].id}`);
-        return parseInt(apResult.rows[0].id);
+      if (accountsResult.rows && accountsResult.rows.length > 0) {
+        console.log(`[ExcelDataProcessor] Found AP account ID from accounts table: ${accountsResult.rows[0].id}`);
+        return parseInt(accountsResult.rows[0].id);
       }
-    } catch (apError) {
-      console.log(`[ExcelDataProcessor] No accounts_payable table found, trying alternative tables...`);
+    } catch (accountsError) {
+      console.log(`[ExcelDataProcessor] Could not find AP accounts in accounts table, trying alternative...`);
     }
     
     // Check if the bills table exists and get the AP account ID from a valid bill
@@ -294,22 +294,6 @@ async function getApAccountId(): Promise<number> {
       }
     } catch (billError) {
       console.log(`[ExcelDataProcessor] Could not get AP account ID from bills table, trying next option...`);
-    }
-    
-    // Try the general ledger accounts if available
-    try {
-      const glResult = await sql`
-        SELECT id FROM gl_accounts
-        WHERE account_type = 'accounts_payable'
-        LIMIT 1
-      `;
-      
-      if (glResult.rows && glResult.rows.length > 0) {
-        console.log(`[ExcelDataProcessor] Found AP account ID from gl_accounts: ${glResult.rows[0].id}`);
-        return parseInt(glResult.rows[0].id);
-      }
-    } catch (glError) {
-      console.log(`[ExcelDataProcessor] No gl_accounts table found, trying alternative...`);
     }
     
     // If still no result, try to determine what accounts table exists and query from there
