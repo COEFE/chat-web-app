@@ -355,14 +355,17 @@ Respond with ONLY the account ID number.`;
 }
 
 /**
- * Identify AP account with AI
+ * Identify liability account with AI
+ * @param accountType - The type of liability account to identify ('ap' for Accounts Payable or 'cc' for Credit Card)
  */
-export async function identifyApAccountWithAI(params: {
+export async function identifyLiabilityAccountWithAI(params: {
   vendorId?: number;
   vendorName?: string;
   userId?: string;
+  accountType?: 'ap' | 'cc'; // 'ap' for Accounts Payable, 'cc' for Credit Card
 }): Promise<number | null> {
-  console.log('[ExcelDataProcessor] Starting AP account identification with AI');
+  const accountType = params.accountType || 'ap'; // Default to AP if not specified
+  console.log(`[ExcelDataProcessor] Starting ${accountType === 'ap' ? 'AP' : 'Credit Card'} account identification with AI`);
   
   try {
     // Step 1: Get ALL accounts from the database so AI can review them
@@ -373,12 +376,12 @@ export async function identifyApAccountWithAI(params: {
     `;
     
     if (!accountsResult.rows || accountsResult.rows.length === 0) {
-      console.log('[ExcelDataProcessor] No AP accounts found in database');
+      console.log(`[ExcelDataProcessor] No accounts found in database`);
       return null;
     }
     
     const accounts = accountsResult.rows;
-    console.log(`[ExcelDataProcessor] Found ${accounts.length} AP accounts in database`);
+    console.log(`[ExcelDataProcessor] Found ${accounts.length} accounts in database`);
     
     // Step 2: Get vendor information for context if not provided
     let vendorName = params.vendorName || 'Unknown Vendor';
@@ -398,33 +401,51 @@ export async function identifyApAccountWithAI(params: {
       }
     }
     
-    // Step 3: Use Claude AI to select the most appropriate AP account
-    console.log('[ExcelDataProcessor] Attempting AI-powered AP account selection');
+    // Step 3: Use Claude AI to select the most appropriate account
+    console.log(`[ExcelDataProcessor] Attempting AI-powered ${accountType === 'ap' ? 'AP' : 'Credit Card'} account selection`);
     
     // Format all accounts for Claude to review
     const accountOptions = accounts.map(acc => {
       return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Type: ${acc.account_type || 'N/A'}`;
     }).join('\n');
     
-    // Create a comprehensive prompt for Claude to identify the AP account
-    const prompt = `You are an accounting AI expert. I need you to identify the Accounts Payable (AP) account from the list below.
+    // Create a comprehensive prompt for Claude to identify the appropriate account
+    let accountDescription, accountTerms;
+    
+    if (accountType === 'ap') {
+      accountDescription = "Accounts Payable (AP) accounts are used to track money a company owes to vendors or suppliers.";
+      accountTerms = [
+        '"Accounts Payable", "AP", or "A/P"',
+        '"Trade Payables"',
+        '"Vendor Liabilities"',
+        '"Current Liabilities"'
+      ];
+    } else { // Credit Card
+      accountDescription = "Credit Card liability accounts are used to track money a company owes to credit card companies.";
+      accountTerms = [
+        '"Credit Card", "CC", or "Credit Card Payable"',
+        '"Credit Card Liability"',
+        '"Corporate Card"',
+        '"Company Card"',
+        '"Visa", "Mastercard", "Amex", or other card brand names'
+      ];
+    }
+    
+    const prompt = `You are an accounting AI expert. I need you to identify the ${accountType === 'ap' ? 'Accounts Payable (AP)' : 'Credit Card liability'} account from the list below.
 
-Accounts Payable (AP) accounts are used to track money a company owes to vendors or suppliers. 
+${accountDescription}
 They are typically liability accounts and may have names containing terms like:
-- "Accounts Payable", "AP", or "A/P"
-- "Trade Payables"
-- "Vendor Liabilities"
-- "Current Liabilities"
+${accountTerms.map(term => `- ${term}`).join('\n')}
 
-AP accounts often have account codes starting with 2 in standard accounting charts.
+${accountType === 'ap' ? 'AP accounts' : 'Credit Card accounts'} often have account codes starting with 2 in standard accounting charts.
 
 Vendor: ${vendorName}
 
 Available Accounts:
 ${accountOptions}
 
-Based on accounting best practices, identify the account that is most likely the Accounts Payable account.
-Respond with ONLY the account ID number of the best AP account. For example: "1234"`;
+Based on accounting best practices, identify the account that is most likely the ${accountType === 'ap' ? 'Accounts Payable' : 'Credit Card liability'} account.
+Respond with ONLY the account ID number of the best ${accountType === 'ap' ? 'AP' : 'Credit Card'} account. For example: "1234"`;
     
     // Call Claude API with optimized settings for faster responses
     const aiResponse = await anthropic.messages.create({
@@ -447,26 +468,70 @@ Respond with ONLY the account ID number of the best AP account. For example: "12
       // Verify the account exists in our options
       const accountExists = accounts.some(acc => acc.id === accountId);
       if (accountExists) {
-        console.log(`[ExcelDataProcessor] AI selected AP account ID: ${accountId}`);
+        console.log(`[ExcelDataProcessor] AI selected ${accountType === 'ap' ? 'AP' : 'Credit Card'} account ID: ${accountId}`);
         return accountId;
       } else {
         console.log(`[ExcelDataProcessor] AI selected account ID ${accountId} but it's not in our list`);
-        // Find the first AP account as fallback
-        const firstApAccount = accounts.find(acc => 
-          acc.account_type === 'accounts_payable' || acc.account_type === 'ap');
-        return firstApAccount ? firstApAccount.id : null;
+        // Find the first appropriate account as fallback
+        const firstAccount = accounts.find(acc => {
+          const name = (acc.name || '').toLowerCase();
+          const type = (acc.account_type || '').toLowerCase();
+          if (accountType === 'ap') {
+            return type.includes('payable') || name.includes('payable') || name.includes('ap');
+          } else {
+            return name.includes('credit card') || name.includes('cc') || name.includes('visa') || 
+                  name.includes('mastercard') || name.includes('amex');
+          }
+        });
+        return firstAccount ? firstAccount.id : null;
       }
     } else {
-      console.log(`[ExcelDataProcessor] AI couldn't determine AP account ID from response: ${aiText}`);
-      // Find the first AP account as fallback
-      const firstApAccount = accounts.find(acc => 
-        acc.account_type === 'accounts_payable' || acc.account_type === 'ap');
-      return firstApAccount ? firstApAccount.id : null;
+      console.log(`[ExcelDataProcessor] AI couldn't determine ${accountType === 'ap' ? 'AP' : 'Credit Card'} account ID from response: ${aiText}`);
+      // Find the first appropriate account as fallback
+      const firstAccount = accounts.find(acc => {
+        const name = (acc.name || '').toLowerCase();
+        const type = (acc.account_type || '').toLowerCase();
+        if (accountType === 'ap') {
+          return type.includes('payable') || name.includes('payable') || name.includes('ap');
+        } else {
+          return name.includes('credit card') || name.includes('cc') || name.includes('visa') || 
+                name.includes('mastercard') || name.includes('amex');
+        }
+      });
+      return firstAccount ? firstAccount.id : null;
     }
   } catch (error) {
-    console.error('[ExcelDataProcessor] Error in identifyApAccountWithAI:', error);
+    console.error(`[ExcelDataProcessor] Error in identify${accountType === 'ap' ? 'AP' : 'CreditCard'}AccountWithAI:`, error);
     return null; // Return null to let the caller handle the fallback
   }
+}
+
+/**
+ * Legacy function for backward compatibility - uses the new generic function
+ */
+export async function identifyApAccountWithAI(params: {
+  vendorId?: number;
+  vendorName?: string;
+  userId?: string;
+}): Promise<number | null> {
+  return identifyLiabilityAccountWithAI({
+    ...params,
+    accountType: 'ap'
+  });
+}
+
+/**
+ * Identify Credit Card account with AI
+ */
+export async function identifyCreditCardAccountWithAI(params: {
+  vendorId?: number;
+  vendorName?: string;
+  userId?: string;
+}): Promise<number | null> {
+  return identifyLiabilityAccountWithAI({
+    ...params,
+    accountType: 'cc'
+  });
 }
 
 /**
