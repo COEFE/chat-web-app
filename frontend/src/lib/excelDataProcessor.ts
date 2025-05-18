@@ -235,7 +235,7 @@ export async function identifyExpenseAccountWithAI(params: {
       setTimeout(() => {
         console.log('[ExcelDataProcessor] Expense account identification timed out - using default value');
         resolve(null);
-      }, 15000); // Increased timeout for AI processing
+      }, 8000); // Reduced timeout for better performance
     });
     
     const aiSelectionPromise = (async () => {
@@ -277,24 +277,24 @@ export async function identifyExpenseAccountWithAI(params: {
           return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Type: ${acc.account_type || 'N/A'}`;
         }).join('\n');
         
-        // Create prompt for Claude
-        const prompt = `You are an accounting AI assistant. Based on the following information, select the most appropriate expense account for this transaction.
+        // Create a more concise prompt for Claude
+        const prompt = `Select the best expense account for this transaction:
 
 Vendor: ${vendorName}
 Description: ${params.memo}
 Amount: ${params.amount || 'Unknown'}
 
-Available expense accounts:
+Accounts:
 ${accountOptions}
 
-Please respond with ONLY the account ID number of the most appropriate account. For example: "12345". If you cannot determine the appropriate account, respond with "DEFAULT".`;
+Respond with ONLY the account ID number.`;
         
-        // Call Claude API
+        // Call Claude API with optimized settings for faster responses
         const aiResponse = await anthropic.messages.create({
-          model: 'claude-3-haiku-20240307',
-          max_tokens: 100,
-          temperature: 0,
-          system: 'You are an accounting AI that helps categorize expenses to the correct account. Respond with ONLY the account ID number.',
+          model: 'claude-3-haiku-20240307', // Using the fastest Claude model
+          max_tokens: 50, // Reduced token count for faster responses
+          temperature: 0, // Zero temperature for deterministic responses
+          system: 'You are an accounting AI. Respond ONLY with the account ID number that best matches the transaction.',
           messages: [{ role: 'user', content: prompt }]
         });
         
@@ -362,7 +362,7 @@ export async function identifyApAccountWithAI(params: {
       setTimeout(() => {
         console.log('[ExcelDataProcessor] AP account identification timed out - using default value');
         resolve(null);
-      }, 15000); // Increased timeout for AI processing
+      }, 8000); // Reduced timeout for better performance
     });
     
     const aiSelectionPromise = (async () => {
@@ -408,22 +408,22 @@ export async function identifyApAccountWithAI(params: {
           return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Type: ${acc.account_type || 'N/A'}`;
         }).join('\n');
         
-        // Create prompt for Claude
-        const prompt = `You are an accounting AI assistant. Based on the following information, select the most appropriate Accounts Payable (AP) account for this vendor.
+        // Create a more concise prompt for Claude
+        const prompt = `Select the best Accounts Payable account for this vendor:
 
 Vendor: ${vendorName}
 
-Available AP accounts:
+Accounts:
 ${accountOptions}
 
-Please respond with ONLY the account ID number of the most appropriate AP account. For example: "12345". If you cannot determine the appropriate account, respond with "DEFAULT".`;
+Respond with ONLY the account ID number.`;
         
-        // Call Claude API
+        // Call Claude API with optimized settings for faster responses
         const aiResponse = await anthropic.messages.create({
-          model: 'claude-3-haiku-20240307',
-          max_tokens: 100,
-          temperature: 0,
-          system: 'You are an accounting AI that helps select the appropriate AP account for vendors. Respond with ONLY the account ID number.',
+          model: 'claude-3-haiku-20240307', // Using the fastest Claude model
+          max_tokens: 50, // Reduced token count for faster responses
+          temperature: 0, // Zero temperature for deterministic responses
+          system: 'You are an accounting AI. Respond ONLY with the account ID number of the best AP account for this vendor.',
           messages: [{ role: 'user', content: prompt }]
         });
         
