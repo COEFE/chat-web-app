@@ -256,9 +256,48 @@ export async function identifyExpenseAccountWithAI(params: { vendorId: number; m
     // Step 3: Use Claude AI to select the most appropriate account
     console.log('[ExcelDataProcessor] Attempting AI-powered account selection');
     
-    // Format account options for Claude - limit to 10 most likely accounts to reduce prompt size
-    const relevantAccounts = accounts.slice(0, 10);
-    const accountOptions = relevantAccounts.map(acc => {
+    // Define the account interface for TypeScript
+    interface AccountWithScore extends Record<string, any> {
+      id: number;
+      name?: string;
+      code?: string;
+      account_type?: string;
+      score: number;
+    }
+    
+    // Implement intelligent pre-filtering to find the most relevant accounts
+    // This helps Claude by providing a more targeted set of options
+    const getRelevantAccounts = (accounts: any[], vendorName: string, memo: string): AccountWithScore[] => {
+      // Convert inputs to lowercase for case-insensitive matching
+      const vendorLower = vendorName.toLowerCase();
+      const memoLower = memo ? memo.toLowerCase() : '';
+      
+      // Score each account based on relevance to the transaction
+      const scoredAccounts = accounts.map((acc: any) => {
+        let score = 0;
+        const nameLower = (acc.name || '').toLowerCase();
+        const codeLower = (acc.code || '').toLowerCase();
+        
+        // Check for exact or partial matches in account name
+        if (nameLower.includes(vendorLower) || vendorLower.includes(nameLower)) score += 5;
+        if (memoLower && nameLower.includes(memoLower)) score += 3;
+        
+        // Check for keywords in the memo that might match account purpose
+        const keywords = ['marketing', 'advertising', 'rent', 'salary', 'travel', 'office', 'supplies', 'utilities'];
+        keywords.forEach(keyword => {
+          if (nameLower.includes(keyword) && memoLower.includes(keyword)) score += 4;
+        });
+        
+        return { ...acc, score };
+      });
+      
+      // Sort by score (highest first) and take top 5
+      return scoredAccounts.sort((a: AccountWithScore, b: AccountWithScore) => b.score - a.score).slice(0, 5);
+    };
+    
+    // Get the most relevant accounts for this transaction
+    const relevantAccounts = getRelevantAccounts(accounts, vendorName, params.memo);
+    const accountOptions = relevantAccounts.map((acc: AccountWithScore) => {
       return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Type: ${acc.account_type || 'N/A'}`;
     }).join('\n');
     
@@ -362,9 +401,48 @@ export async function identifyApAccountWithAI(params: {
     // Step 3: Use Claude AI to select the most appropriate AP account
     console.log('[ExcelDataProcessor] Attempting AI-powered AP account selection');
     
-    // Format account options for Claude - limit to 5 most likely accounts to reduce prompt size
-    const relevantAccounts = accounts.slice(0, 5);
-    const accountOptions = relevantAccounts.map(acc => {
+    // Define the account interface for TypeScript
+    interface AccountWithScore extends Record<string, any> {
+      id: number;
+      name?: string;
+      code?: string;
+      account_type?: string;
+      score: number;
+    }
+    
+    // Implement intelligent pre-filtering to find the most relevant AP accounts
+    const getRelevantApAccounts = (accounts: any[], vendorName: string): AccountWithScore[] => {
+      // Convert inputs to lowercase for case-insensitive matching
+      const vendorLower = vendorName.toLowerCase();
+      
+      // Score each account based on relevance to the vendor
+      const scoredAccounts = accounts.map((acc: any) => {
+        let score = 0;
+        const nameLower = (acc.name || '').toLowerCase();
+        const codeLower = (acc.code || '').toLowerCase();
+        const typeLower = (acc.account_type || '').toLowerCase();
+        
+        // Prioritize accounts that are explicitly marked as AP
+        if (typeLower === 'accounts_payable' || typeLower === 'ap') score += 10;
+        if (typeLower.includes('payable')) score += 5;
+        
+        // Check for vendor-specific AP accounts
+        if (nameLower.includes(vendorLower) || vendorLower.includes(nameLower)) score += 8;
+        
+        // Common AP account names
+        if (nameLower.includes('vendor') || nameLower.includes('supplier')) score += 3;
+        if (nameLower.includes('trade') || nameLower.includes('payable')) score += 3;
+        
+        return { ...acc, score };
+      });
+      
+      // Sort by score (highest first) and take top 5
+      return scoredAccounts.sort((a: AccountWithScore, b: AccountWithScore) => b.score - a.score).slice(0, 5);
+    };
+    
+    // Get the most relevant AP accounts for this vendor
+    const relevantAccounts = getRelevantApAccounts(accounts, vendorName);
+    const accountOptions = relevantAccounts.map((acc: AccountWithScore) => {
       return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Type: ${acc.account_type || 'N/A'}`;
     }).join('\n');
     
