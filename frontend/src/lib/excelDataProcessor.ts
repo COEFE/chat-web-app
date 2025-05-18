@@ -535,9 +535,10 @@ export async function identifyCreditCardAccountWithAI(params: {
 }
 
 /**
- * Get a valid AP account ID from the database
+ * Get a valid liability account ID from the database
+ * @param accountType - The type of liability account to get ('ap' for Accounts Payable or 'cc' for Credit Card)
  */
-async function getApAccountId(): Promise<number> {
+async function getLiabilityAccountId(accountType: 'ap' | 'cc' = 'ap'): Promise<number> {
   try {
     // Get all accounts to analyze with AI
     try {
@@ -554,23 +555,41 @@ async function getApAccountId(): Promise<number> {
           return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Type: ${acc.account_type || 'N/A'}`;
         }).join('\n');
         
-        // Create a comprehensive prompt for Claude to identify the AP account
-        const prompt = `You are an accounting AI expert. I need you to identify the Accounts Payable (AP) account from the list below.
+        // Create a comprehensive prompt for Claude to identify the appropriate account
+        let accountDescription, accountTerms;
+        
+        if (accountType === 'ap') {
+          accountDescription = "Accounts Payable (AP) accounts are used to track money a company owes to vendors or suppliers.";
+          accountTerms = [
+            '"Accounts Payable", "AP", or "A/P"',
+            '"Trade Payables"',
+            '"Vendor Liabilities"',
+            '"Current Liabilities"'
+          ];
+        } else { // Credit Card
+          accountDescription = "Credit Card liability accounts are used to track money a company owes to credit card companies.";
+          accountTerms = [
+            '"Credit Card", "CC", or "Credit Card Payable"',
+            '"Credit Card Liability"',
+            '"Corporate Card"',
+            '"Company Card"',
+            '"Visa", "Mastercard", "Amex", or other card brand names'
+          ];
+        }
+        
+        const prompt = `You are an accounting AI expert. I need you to identify the ${accountType === 'ap' ? 'Accounts Payable (AP)' : 'Credit Card liability'} account from the list below.
 
-Accounts Payable (AP) accounts are used to track money a company owes to vendors or suppliers. 
+${accountDescription}
 They are typically liability accounts and may have names containing terms like:
-- "Accounts Payable", "AP", or "A/P"
-- "Trade Payables"
-- "Vendor Liabilities"
-- "Current Liabilities"
+${accountTerms.map(term => `- ${term}`).join('\n')}
 
-AP accounts often have account codes starting with 2 in standard accounting charts.
+${accountType === 'ap' ? 'AP accounts' : 'Credit Card accounts'} often have account codes starting with 2 in standard accounting charts.
 
 Available Accounts:
 ${accountOptions}
 
-Based on accounting best practices, identify the account that is most likely the Accounts Payable account.
-Respond with ONLY the account ID number of the best AP account. For example: "1234"`;
+Based on accounting best practices, identify the account that is most likely the ${accountType === 'ap' ? 'Accounts Payable' : 'Credit Card liability'} account.
+Respond with ONLY the account ID number of the best ${accountType === 'ap' ? 'AP' : 'Credit Card'} account. For example: "1234"`;
         
         try {
           // Call Claude API with optimized settings for faster responses
@@ -594,12 +613,12 @@ Respond with ONLY the account ID number of the best AP account. For example: "12
             // Verify the account exists in our options
             const accountExists = accounts.some(acc => acc.id === accountId);
             if (accountExists) {
-              console.log(`[ExcelDataProcessor] AI selected AP account ID: ${accountId}`);
+              console.log(`[ExcelDataProcessor] AI selected ${accountType === 'ap' ? 'AP' : 'Credit Card'} account ID: ${accountId}`);
               return accountId;
             }
           }
         } catch (aiError) {
-          console.log('[ExcelDataProcessor] AI-powered AP account selection failed in fallback:', aiError);
+          console.log(`[ExcelDataProcessor] AI-powered ${accountType === 'ap' ? 'AP' : 'Credit Card'} account selection failed in fallback:`, aiError);
         }
         
         // If AI selection fails, return the first account ID as a fallback
@@ -607,23 +626,27 @@ Respond with ONLY the account ID number of the best AP account. For example: "12
         return parseInt(accounts[0].id);
       }
     } catch (accountsError) {
-      console.log(`[ExcelDataProcessor] Could not find AP accounts in accounts table, trying alternative...`);
+      console.log(`[ExcelDataProcessor] Could not find ${accountType === 'ap' ? 'AP' : 'Credit Card'} accounts in accounts table, trying alternative...`);
     }
     
     // Check if the bills table exists and get the AP account ID from a valid bill
+    // Note: This fallback primarily works for AP accounts, but we'll try it for credit cards too
     try {
-      const billResult = await sql`
-        SELECT ap_account_id FROM bills
-        WHERE ap_account_id IS NOT NULL
-        LIMIT 1
-      `;
+      // Different column names based on account type
+      const columnName = accountType === 'ap' ? 'ap_account_id' : 'credit_card_account_id';
+      
+      const billResult = await sql.query(
+        `SELECT ${columnName} FROM bills
+        WHERE ${columnName} IS NOT NULL
+        LIMIT 1`
+      );
       
       if (billResult.rows && billResult.rows.length > 0) {
-        console.log(`[ExcelDataProcessor] Found AP account ID from bills table: ${billResult.rows[0].ap_account_id}`);
-        return parseInt(billResult.rows[0].ap_account_id);
+        console.log(`[ExcelDataProcessor] Found ${accountType === 'ap' ? 'AP' : 'Credit Card'} account ID from bills table: ${billResult.rows[0][columnName]}`);
+        return parseInt(billResult.rows[0][columnName]);
       }
     } catch (billError) {
-      console.log(`[ExcelDataProcessor] Could not get AP account ID from bills table, trying next option...`);
+      console.log(`[ExcelDataProcessor] Could not get ${accountType === 'ap' ? 'AP' : 'Credit Card'} account ID from bills table, trying next option...`);
     }
     
     // If still no result, try to determine what accounts table exists and query from there
@@ -713,12 +736,16 @@ Respond with ONLY the account ID number of the best AP account. For example: "12
     }
     
     // As a last resort, use a hardcoded ID from what we've observed in the error
-    // This should be from a valid AP account that exists in the system
-    console.log(`[ExcelDataProcessor] No accounts found, asking accounting API for a valid AP account ID`);
+    // This should be from a valid account that exists in the system
+    console.log(`[ExcelDataProcessor] No accounts found, asking accounting API for a valid ${accountType === 'ap' ? 'AP' : 'Credit Card'} account ID`);
     
     try {
-      // Make an API call to the accounting system to get a valid AP account ID
-      const response = await fetch('/api/accounts-payable/get-default-ap-account', {
+      // Make an API call to the accounting system to get a valid account ID
+      const endpoint = accountType === 'ap' 
+        ? '/api/accounts-payable/get-default-ap-account' 
+        : '/api/accounts-payable/get-default-credit-card-account';
+        
+      const response = await fetch(endpoint, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json'
@@ -728,22 +755,36 @@ Respond with ONLY the account ID number of the best AP account. For example: "12
       if (response.ok) {
         const data = await response.json();
         if (data.accountId) {
-          console.log(`[ExcelDataProcessor] Got AP account ID from API: ${data.accountId}`);
+          console.log(`[ExcelDataProcessor] Got ${accountType === 'ap' ? 'AP' : 'Credit Card'} account ID from API: ${data.accountId}`);
           return parseInt(data.accountId);
         }
       }
     } catch (apiError) {
-      console.log(`[ExcelDataProcessor] Error calling AP account API:`, apiError);
+      console.log(`[ExcelDataProcessor] Error calling ${accountType === 'ap' ? 'AP' : 'Credit Card'} account API:`, apiError);
     }
     
     // If all attempts fail, return 1 as a last resort (more likely to exist than 2000)
-    console.log(`[ExcelDataProcessor] All attempts failed, using default AP account ID: 1`);
-    return 1; // Default AP account ID that's more likely to exist
+    console.log(`[ExcelDataProcessor] All attempts failed, using default ${accountType === 'ap' ? 'AP' : 'Credit Card'} account ID: 1`);
+    return 1; // Default account ID that's more likely to exist
   } catch (error) {
-    console.error(`[ExcelDataProcessor] Error getting AP account ID:`, error);
+    console.error(`[ExcelDataProcessor] Error getting ${accountType === 'ap' ? 'AP' : 'Credit Card'} account ID:`, error);
     // Return 1 as a last resort (more likely to exist than 2000)
     return 1;
   }
+}
+
+/**
+ * Legacy function for backward compatibility
+ */
+async function getApAccountId(): Promise<number> {
+  return getLiabilityAccountId('ap');
+}
+
+/**
+ * Get a valid Credit Card account ID from the database
+ */
+async function getCreditCardAccountId(): Promise<number> {
+  return getLiabilityAccountId('cc');
 }
 
 /**
