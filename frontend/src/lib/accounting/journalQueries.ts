@@ -426,9 +426,9 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
       }
       
       // Required columns always exist
-      insertColumns.push('memo', 'source', 'created_by', 'user_id');
-      placeholders.push(`$${index++}`, `$${index++}`, `$${index++}`, `$${index++}`);
-      values.push(journal.memo, journal.source || null, userId, userId);
+      insertColumns.push('memo', 'source', 'created_by', 'user_id', 'is_posted');
+      placeholders.push(`$${index++}`, `$${index++}`, `$${index++}`, `$${index++}`, `$${index++}`);
+      values.push(journal.memo, journal.source || null, userId, userId, journal.is_posted !== undefined ? journal.is_posted : true);
       
       console.log(`[createJournal] Creating journal for user: ${userId}`);
       
@@ -459,9 +459,9 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
           await client.query(`
             INSERT INTO journal_lines (
               journal_id, line_number, account_id, description, debit, credit,
-              category, location, vendor, funder
+              category, location, vendor, funder, user_id
             ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
             )
           `, [
             journalId,
@@ -473,16 +473,17 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
             line.category || null,
             line.location || null,
             line.vendor || null,
-            line.funder || null
+            line.funder || null,
+            userId // Add the user_id to ensure it's not null
           ]);
         } else {
           // If line_number column doesn't exist, omit it
           await client.query(`
             INSERT INTO journal_lines (
               journal_id, account_id, description, debit, credit,
-              category, location, vendor, funder
+              category, location, vendor, funder, user_id
             ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
             )
           `, [
             journalId,
@@ -493,7 +494,8 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
             line.category || null,
             line.location || null,
             line.vendor || null,
-            line.funder || null
+            line.funder || null,
+            userId // Add the user_id to ensure it's not null
           ]);
         }
       }

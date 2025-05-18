@@ -336,7 +336,7 @@ export async function convertAIJournalToSystem(aiJournal: AIJournalEntry, userId
     journal_type: aiJournal.journal_type || 'GJ',
     memo: aiJournal.memo,
     reference_number: aiJournal.reference_number,
-    is_posted: false,
+    is_posted: true, // Set to posted status by default
     lines: journalLines,
     source: 'AI Assistant'
   };
@@ -355,6 +355,14 @@ export async function createJournalFromAI(aiJournal: AIJournalEntry, userId: str
   message: string;
   missingAccounts?: string[];
 }> {
+  console.log(`[journalUtils] Creating journal from AI with userId: ${userId}`);
+  console.log(`[journalUtils] Journal data:`, {
+    memo: aiJournal.memo,
+    transaction_date: aiJournal.transaction_date,
+    journal_type: aiJournal.journal_type,
+    reference_number: aiJournal.reference_number,
+    lineCount: aiJournal.lines?.length
+  });
   try {
     // Convert AI journal format to system format
     const { journal, missingAccounts } = await convertAIJournalToSystem(aiJournal, userId);
