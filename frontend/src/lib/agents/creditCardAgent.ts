@@ -957,7 +957,7 @@ Respond with ONLY "true" if the statement number appears valid, or "false" if it
       const userPrompt = `Credit Card Issuer: ${creditCardIssuer}\nStatement Number: ${statementNumber}\nLast Four Digits: ${lastFourDigits}\n\nIs this statement number valid for this issuer?`;
       
       const response = await this.anthropic.messages.create({
-        model: 'claude-3-7-sonnet-20240229',
+        model: 'claude-3-5-sonnet-20240620',
         max_tokens: 10,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
@@ -1082,9 +1082,9 @@ Important guidelines:
         }
       }
       
-      // Use Claude 3.7 for best extraction accuracy and efficiency
+      // Use Claude 3.5 Sonnet for extraction accuracy and efficiency
       const response = await this.anthropic.messages.create({
-        model: 'claude-3-7-sonnet-20240229', // Using Claude 3.7 for optimal accuracy and speed
+        model: 'claude-3-5-sonnet-20240620', // Using Claude 3.5 Sonnet for optimal accuracy and speed
         max_tokens: 4000,
         system: systemPrompt,
         messages,
