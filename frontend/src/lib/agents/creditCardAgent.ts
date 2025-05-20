@@ -133,8 +133,13 @@ export class CreditCardAgent implements Agent {
     try {
       console.log('[CreditCardAgent] Processing statement query:', query);
       
-      // Extract statement information
-      const statementInfo = await this.extractStatementInfo(query, context.userId);
+      // Check if we have a document context (PDF) to extract information from
+      if (context.documentContext && context.documentContext.type === 'pdf') {
+        console.log(`[CreditCardAgent] Processing PDF document: ${context.documentContext.name}`);
+      }
+      
+      // Extract statement information, passing both the query and document context
+      const statementInfo = await this.extractStatementInfo(query, context.userId, context.documentContext);
       
       if (!statementInfo.success) {
         return {
@@ -143,6 +148,33 @@ export class CreditCardAgent implements Agent {
           data: { sources: [] }
         };
       }
+      
+      // Use AI to determine if this is a question about the statement and extract the actual question
+      const questionAnalysis = await this.extractUserQuestion(query);
+      console.log(`[CreditCardAgent] Question analysis result: isQuestion=${questionAnalysis.isQuestion}`);
+      
+      if (questionAnalysis.isQuestion) {
+        console.log(`[CreditCardAgent] AI detected a question: "${questionAnalysis.extractedQuestion}"`);  
+        
+        // Use Claude 3.5 to analyze the query and provide an appropriate response
+        const aiResponse = await this.analyzeStatementQuery(questionAnalysis.extractedQuestion, statementInfo);
+        console.log(`[CreditCardAgent] AI response to question: ${aiResponse}`);
+        
+        return {
+          success: true,
+          message: aiResponse,
+          data: { 
+            statementInfo,
+            sources: [] 
+          }
+        };
+      }
+      
+      // If this is a processing request, continue with statement processing
+      console.log(`[CreditCardAgent] Processing statement request, not a question`);
+      
+      // Set a flag to track if we've returned a response
+      let responseReturned = false;
       
       // Prepare statement information
       const statementNumber = statementInfo.statementNumber || 'unknown';
@@ -220,14 +252,44 @@ export class CreditCardAgent implements Agent {
         console.log(`[CreditCardAgent] Using last four digits for account lookup: ${lastFourDigits}`);
         
         const accountName = `${statementInfo.creditCardIssuer} - ${lastFourDigits}`;
+        console.log(`[CreditCardAgent] Looking for account with exact name: "${accountName}"`);
         
-        // Try to find the account by name
-        const { rows } = await sql`
+        // Get all accounts for the user
+        const { rows: allAccounts } = await sql`
           SELECT id, code, name, account_type FROM accounts 
-          WHERE LOWER(name) LIKE ${`%${accountName.toLowerCase()}%`} AND user_id = ${context.userId}
+          WHERE user_id = ${context.userId}
         `;
         
-        account = rows[0];
+        console.log(`[CreditCardAgent] Found ${allAccounts.length} total accounts for user`);
+        
+        // If we have accounts, use AI to find the best match
+        let matchedAccount = null;
+        if (allAccounts.length > 0) {
+          // Use AI to find the best matching account
+          matchedAccount = await this.findMatchingAccountWithAI(
+            accountName,
+            lastFourDigits,
+            statementInfo.creditCardIssuer,
+            allAccounts
+          );
+        }
+        
+        // If AI found a matching account, use it
+        const exactMatches = matchedAccount ? [matchedAccount] : [];
+        
+        // If we found an exact match, use that account
+        if (exactMatches.length > 0) {
+          console.log(`[CreditCardAgent] Found existing account with exact name match: ${exactMatches[0].name} (${exactMatches[0].code})`);
+          account = exactMatches[0];
+        } else {
+          // If no exact match, try a partial match
+          const { rows } = await sql`
+            SELECT id, code, name, account_type FROM accounts 
+            WHERE LOWER(name) LIKE ${`%${accountName.toLowerCase()}%`} AND user_id = ${context.userId}
+          `;
+          
+          account = rows[0];
+        }
         
         // If account doesn't exist, we need to create it via the GL agent
         if (!account) {
@@ -336,6 +398,16 @@ export class CreditCardAgent implements Agent {
           data: { sources: [] }
         };
       }
+      // If we've reached this point without returning a response, provide a fallback response
+      console.log(`[CreditCardAgent] Reached end of processStatement method without returning a response, providing fallback response`);
+      return {
+        success: true,
+        message: `I've analyzed the ${statementInfo.creditCardIssuer} statement ending in ${statementInfo.lastFourDigits}. The statement shows a balance of $${statementInfo.balance?.toFixed(2)} due on ${statementInfo.dueDate}. There are ${statementInfo.transactions?.length || 0} transactions on this statement.`,
+        data: { 
+          statementInfo,
+          sources: [] 
+        }
+      };
     } catch (error) {
       console.error('[CreditCardAgent] Error processing statement:', error);
       return {
@@ -916,6 +988,238 @@ export class CreditCardAgent implements Agent {
    * @returns Promise with extracted information
    */
   /**
+   * Use AI to find the best matching account for a credit card
+   * @param targetAccountName The account name we're looking for
+   * @param lastFourDigits The last four digits of the credit card
+   * @param creditCardIssuer The credit card issuer (e.g., "American Express")
+   * @param existingAccounts Array of existing accounts to search through
+   * @returns The best matching account or null if no match found
+   */
+  private async findMatchingAccountWithAI(
+    targetAccountName: string,
+    lastFourDigits: string,
+    creditCardIssuer: string,
+    existingAccounts: any[]
+  ): Promise<any | null> {
+    try {
+      console.log(`[CreditCardAgent] Using AI to find matching account for: ${targetAccountName}`);
+      
+      // If no accounts, return null
+      if (!existingAccounts || existingAccounts.length === 0) {
+        return null;
+      }
+      
+      // Format the accounts for the AI prompt
+      const accountsFormatted = existingAccounts.map(acc => 
+        `ID: ${acc.id}, Code: ${acc.code}, Name: "${acc.name}", Type: ${acc.account_type}`
+      ).join('\n');
+      
+      // Prepare the system prompt for Claude
+      const systemPrompt = `You are an AI assistant that helps match credit card accounts.
+      
+You need to determine if any of the existing accounts match the target credit card account.
+
+Target Credit Card Information:
+- Account Name: "${targetAccountName}"
+- Credit Card Issuer: ${creditCardIssuer}
+- Last Four Digits: ${lastFourDigits}
+
+Existing Accounts:
+${accountsFormatted}
+
+Your task:
+1. Analyze the existing accounts and determine if any of them represent the same credit card as the target.
+2. Look for accounts with the same credit card issuer and last four digits.
+3. Consider variations in naming format, spacing, or capitalization.
+4. If you find a match, return the account ID as a number.
+5. If no match is found, return 0.
+
+Respond with ONLY the account ID number of the matching account, or 0 if no match found. Do not include any explanation or additional text.`;
+      
+      // Call Claude 3.5 to analyze the accounts
+      const response = await this.anthropic.messages.create({
+        model: 'claude-3-5-sonnet-20240620',
+        max_tokens: 100,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: 'Find the matching account.' }],
+        temperature: 0.1 // Very low temperature for consistent results
+      });
+      
+      // Extract the response
+      let matchingAccountId = 0;
+      if (response.content && response.content.length > 0) {
+        const contentBlock = response.content[0];
+        if (contentBlock.type === 'text') {
+          const idText = contentBlock.text.trim();
+          matchingAccountId = parseInt(idText, 10) || 0;
+        }
+      }
+      
+      // If we found a matching account ID, return the account
+      if (matchingAccountId > 0) {
+        const matchingAccount = existingAccounts.find(acc => acc.id === matchingAccountId);
+        if (matchingAccount) {
+          console.log(`[CreditCardAgent] AI found matching account: "${matchingAccount.name}" (${matchingAccount.code}) with ID ${matchingAccountId}`);
+          return matchingAccount;
+        }
+      }
+      
+      console.log(`[CreditCardAgent] AI did not find a matching account`);
+      return null;
+    } catch (error) {
+      console.error('[CreditCardAgent] Error finding matching account with AI:', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Extract the actual user question from a query string using AI
+   * @param query The raw query string that may contain a question embedded in context
+   * @returns Promise with analysis result containing isQuestion flag and extractedQuestion
+   */
+  private async extractUserQuestion(query: string): Promise<{ isQuestion: boolean; extractedQuestion: string }> {
+    try {
+      // First do a quick check for common patterns to avoid unnecessary AI calls
+      if (query.toLowerCase().includes("the user is asking:")) {
+        const userQuestionMatch = query.match(/the user is asking: "([^"]+)"/i);
+        if (userQuestionMatch) {
+          return {
+            isQuestion: true,
+            extractedQuestion: userQuestionMatch[1]
+          };
+        }
+      }
+      
+      // For processing instructions, don't use AI
+      if (query.toLowerCase().includes("process this statement") || 
+          query.toLowerCase().includes("record any transactions")) {
+        console.log(`[CreditCardAgent] Detected processing instruction: "${query}"`);  
+        return {
+          isQuestion: false,
+          extractedQuestion: query
+        };
+      }
+      
+      // Use Claude to analyze the query and determine if it's a question
+      const systemPrompt = `You are an AI assistant that analyzes text to determine if it contains a question about a credit card statement.
+      
+Your task is to:
+1. Determine if the input contains a question about a credit card statement
+2. If it does, extract just the question itself, removing any surrounding context
+3. Return only the extracted question, or the original input if no question is found
+
+Examples:
+- Input: "This is a credit card statement from the attached PDF file: statement.pdf\n\nThe user is asking: 'what's the starting balance?'"
+  Output: "what's the starting balance?"
+
+- Input: "This is a credit card statement from the attached PDF file: statement.pdf\n\nPlease process this statement and record any transactions."
+  Output: "" (empty string because this is not a question)
+
+Respond with ONLY the extracted question, nothing else.`;
+      
+      const response = await this.anthropic.messages.create({
+        model: 'claude-3-5-sonnet-20240620',
+        max_tokens: 100,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: query }],
+        temperature: 0.1 // Very low temperature for consistent extraction
+      });
+      
+      // Extract the response
+      let extractedQuestion = '';
+      if (response.content && response.content.length > 0) {
+        const contentBlock = response.content[0];
+        if (contentBlock.type === 'text') {
+          extractedQuestion = contentBlock.text.trim();
+        }
+      }
+      
+      // If Claude returned something meaningful, it's a question
+      const isQuestion = extractedQuestion.length > 0 && extractedQuestion !== query;
+      
+      // If Claude couldn't extract a question, use the original query
+      if (!isQuestion) {
+        extractedQuestion = query;
+      }
+      
+      console.log(`[CreditCardAgent] AI question extraction: isQuestion=${isQuestion}, extractedQuestion="${extractedQuestion}"`);      
+      return { isQuestion, extractedQuestion };
+    } catch (error) {
+      console.error('[CreditCardAgent] Error extracting question with AI:', error);
+      // Fall back to using the original query
+      return {
+        isQuestion: false,
+        extractedQuestion: query
+      };
+    }
+  }
+  
+  /**
+   * Analyze a user query about a statement using AI and provide a natural language response
+   * @param query The user's query about the statement
+   * @param statementInfo The extracted statement information
+   * @returns Promise with a natural language response to the query
+   */
+  private async analyzeStatementQuery(query: string, statementInfo: any): Promise<string> {
+    try {
+      console.log(`[CreditCardAgent] Analyzing statement query with AI: ${query}`);
+      
+      // Pre-calculate useful values that Claude might need
+      // Calculate starting balance by adding payments back to the ending balance
+      let startingBalance = statementInfo.balance || 0;
+      const payments = (statementInfo.transactions || []).filter((t: { amount: number }) => t.amount < 0);
+      const totalPayments = payments.reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
+      startingBalance = startingBalance - totalPayments;
+      
+      // Prepare the system prompt for Claude
+      const systemPrompt = `You are a financial assistant that answers questions about credit card statements.
+      
+You have access to the following information about a credit card statement:
+- Credit Card Issuer: ${statementInfo.creditCardIssuer || 'Unknown'}
+- Last Four Digits: ${statementInfo.lastFourDigits || 'Unknown'}
+- Statement Number: ${statementInfo.statementNumber || 'Unknown'}
+- Statement Date: ${statementInfo.statementDate || 'Unknown'}
+- Balance: $${statementInfo.balance?.toFixed(2) || 'Unknown'}
+- Due Date: ${statementInfo.dueDate || 'Unknown'}
+- Minimum Payment: $${statementInfo.minimumPayment?.toFixed(2) || 'Unknown'}
+- Transactions: ${JSON.stringify(statementInfo.transactions || [])}
+
+The user will ask questions about this statement. Provide clear, concise, and accurate answers based on the information above.
+
+If asked about the starting balance, calculate it by taking the current balance and adding back any payments (negative amounts) in the transactions list. The starting balance is approximately $${startingBalance.toFixed(2)}.
+
+If asked about specific transactions, provide details from the transactions list.
+
+Keep your responses concise and focused on answering the specific question asked.`;
+      
+      // Call Claude 3.5 to analyze the query
+      const response = await this.anthropic.messages.create({
+        model: 'claude-3-5-sonnet-20240620',
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: query }],
+        temperature: 0.2 // Lower temperature for more factual responses
+      });
+      
+      // Extract the response
+      let content = '';
+      if (response.content && response.content.length > 0) {
+        const contentBlock = response.content[0];
+        if (contentBlock.type === 'text') {
+          content = contentBlock.text.trim();
+        }
+      }
+      
+      console.log(`[CreditCardAgent] AI response: ${content}`);
+      
+      return content || 'I couldn\'t analyze the statement information. Please try asking a more specific question.';
+    } catch (error) {
+      console.error('[CreditCardAgent] Error analyzing statement query with AI:', error);
+      return 'I encountered an error while analyzing your question. Please try asking in a different way.';
+    }
+  }
+  
+  /**
    * Validate a statement number using AI
    * @param statementNumber The statement number to validate
    * @param creditCardIssuer The credit card issuer
@@ -931,12 +1235,15 @@ export class CreditCardAgent implements Agent {
       console.log(`[CreditCardAgent] Validating statement number with AI: ${statementNumber}`);
       
       // Prepare a specialized prompt for statement number validation
-      const systemPrompt = `You are a financial assistant specializing in credit card statement validation.
-      
-Your task is to determine if a given statement number format is valid for a specific credit card issuer.
+      const systemPrompt = `You are a credit card statement validator. Your task is to determine if a given statement number is valid based on the credit card issuer and last four digits of the card.
 
-For each credit card issuer, here are the expected statement number formats:
-- American Express: Usually contains masked digits with X's, like "XXXX-XXXXX1234-90098"
+Different credit card issuers have different statement number formats:
+- American Express: For American Express statements, look for account or statement numbers that:
+  * Often include masked digits with X's, such as "XXXX-XXXXX1-90098" or "XXXXXXXXXXXX1004"
+  * Frequently appear as longer sequences compared to other issuers
+  * May contain multiple segments separated by dashes
+  * Usually include the last four digits of the card somewhere in the number
+  * IMPORTANT: American Express statement numbers with many X's ARE VALID and should be accepted
 - Visa: Usually 15-16 digits, may be formatted as XXXX-XXXX-XXXX-1234 or similar
 - Mastercard: Usually 15-16 digits, may be formatted as XXXX-XXXX-XXXX-1234 or similar
 - Discover: Usually 15-16 digits, may be formatted as XXXX-XXXX-XXXX-1234 or similar
@@ -946,11 +1253,13 @@ A statement number is likely valid if:
 1. It matches the expected format for the given issuer
 2. It contains an appropriate mix of digits and/or masked characters (X's)
 3. If visible digits are present, they should include or match the last four digits of the card
+4. For American Express specifically, statement numbers with masked X's are VALID and expected
 
 A statement number is likely invalid if:
 1. It's a simple sequence of digits without any formatting (potential hallucination)
 2. It doesn't match the expected format for the issuer
 3. It contains unexpected characters or is unreasonably long/short
+4. It appears to be completely fabricated rather than extracted from the document
 
 Respond with ONLY "true" if the statement number appears valid, or "false" if it appears invalid or hallucinated.`;
 
@@ -982,7 +1291,7 @@ Respond with ONLY "true" if the statement number appears valid, or "false" if it
     }
   }
 
-  private async extractStatementInfo(query: string, userId?: string): Promise<{
+  private async extractStatementInfo(query: string, userId?: string, documentContext?: any): Promise<{
     success: boolean;
     message: string;
     creditCardIssuer?: string;
@@ -1003,7 +1312,7 @@ Respond with ONLY "true" if the statement number appears valid, or "false" if it
 Extract the following information from the statement:
 1. Credit card issuer (e.g., Visa, Mastercard, American Express, Chase, Capital One)
 2. Last four digits of the card - ONLY use digits that are explicitly shown in the document. Look for patterns like "XXXX-XXXX-XXXX-1234" or "Card ending in 1234" or "Account: XXXX XXXX XXXX 1234". The lastFourDigits field MUST contain EXACTLY four numeric characters that appear in the document.
-3. Statement number or ID - extract the ACTUAL statement number from the document. Look for fields labeled as "Statement #", "Reference Number", or similar. For American Express, this may appear as "XXXX-XXXXX1-90098" with masked digits. Include the full format with any X's intact.
+3. Statement number or account number - extract EXACTLY whatever account number or statement identifier appears in the document, even if it's partial. For American Express, this could be found near "Account Number", "Member Since", or at the top of the statement. For other issuers, look for "Statement #", "Reference Number", etc. DO NOT modify the number in any way - return it exactly as shown, whether it contains digits, letters, X's, or special characters. If no statement or account number is found, set this field to null.
 4. Statement date (in YYYY-MM-DD format)
 5. Statement balance (total amount due)
 6. Payment due date (in YYYY-MM-DD format)
@@ -1038,23 +1347,52 @@ Important guidelines:
 - For amounts, use positive numbers for charges and negative numbers for payments/credits
 - If you cannot extract certain information, use null for that field. DO NOT INVENT OR HALLUCINATE VALUES.
 - CRITICAL FOR LAST FOUR DIGITS: The lastFourDigits field MUST contain EXACTLY four numeric characters (0-9) that appear in the document. If you cannot find exactly four digits in the document, set lastFourDigits to null.
-- CRITICAL FOR STATEMENT NUMBER: Extract the statement number EXACTLY as it appears in the document. Do not modify, format, or create a statement number. If the document has a statement number with X's (like American Express statements), include those X's in your response. DO NOT USE THE EXAMPLE FORMATS FROM THIS PROMPT.
+- CRITICAL FOR STATEMENT NUMBER: For American Express, pay special attention to any account numbers or reference numbers on the statement. Check the top sections, account summary sections, and payment information sections. Use the complete statement/account number as shown - don't reformat it or remove any digits.
+- For all statement/account numbers: Extract them EXACTLY as they appear - including any formatting like dashes, spaces, or X's. Do not clean them up, reformat them, or remove any characters.
 - If the statement contains transaction data, make sure to extract as many transactions as possible
 - If you cannot extract any meaningful information, respond with: {"success": false, "message": "Could not extract statement information."}
 - Be precise and thorough - this information will be used for accounting purposes
 - CRITICAL: Return ONLY the JSON object without any additional text, explanation, or analysis. Your entire response should be valid JSON that can be parsed directly.
 - IMPORTANT: Only extract information that is explicitly present in the document. Do not fabricate or guess any values that are not clearly visible.`;
 
+      // Prepare message content - will be either simple text or multimodal with PDF
+      let messageContent: any = query;
+      let pdfFileName = null;
+      
+      // If we have a PDF document context, use it for multimodal analysis
+      if (documentContext && documentContext.type === 'pdf' && documentContext.content) {
+        // We have a PDF document with base64 content
+        pdfFileName = documentContext.name;
+        console.log(`[CreditCardAgent] Using PDF document in multimodal analysis: ${pdfFileName}`);
+        
+        // Create multimodal content array for Claude
+        messageContent = [
+          {
+            type: "text",
+            text: `Analyze this credit card statement PDF and extract all relevant information. ${query}`
+          },
+          {
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: "application/pdf",
+              data: documentContext.content
+            }
+          }
+        ];
+      } else {
+        // Fallback to text-only approach - extract PDF file name from query if present
+        const pdfMatch = query.match(/PDF file: ([\w\s.-]+\.pdf)/i);
+        pdfFileName = pdfMatch ? pdfMatch[1].trim() : null;
+      }
+      
+      // Prepare messages for the API call
       const messages: MessageParam[] = [
         {
           role: 'user',
-          content: query
+          content: messageContent
         }
       ];
-
-      // Extract PDF file name from query if present
-      const pdfMatch = query.match(/PDF file: ([\w\s.-]+\.pdf)/i);
-      const pdfFileName = pdfMatch ? pdfMatch[1].trim() : null;
       
       // If we have a PDF file name, check if we've already processed this PDF
       if (pdfFileName) {
@@ -1162,52 +1500,14 @@ Important guidelines:
           }
         }
         
-        // Validate both statement number and last four digits
-        // First check if the statement number looks like an example from our prompt or is suspicious
+        // Log statement number without extensive validation
         if (extractedInfo.statementNumber) {
-          // Log the detected statement number for debugging
-          console.log(`[CreditCardAgent] Validating statement number: ${extractedInfo.statementNumber}`);
-          
-          // Check for suspicious statement number patterns
-          const isExampleFormat = extractedInfo.statementNumber === "XXXX-XXXXX1-90098";
-          const isAllZeros = /^0+$/.test(extractedInfo.statementNumber.replace(/[^0-9]/g, ''));
-          const isSuspicious = isExampleFormat || isAllZeros;
-          
-          if (isSuspicious) {
-            console.log(`[CreditCardAgent] Detected suspicious statement number format: ${extractedInfo.statementNumber}, treating as invalid`);
-            extractedInfo.statementNumber = null;
-            
-            // If we have a valid statement date and last four digits, generate a reasonable statement number
-            if (extractedInfo.statementDate && extractedInfo.lastFourDigits) {
-              const datePart = extractedInfo.statementDate.replace(/-/g, '');
-              extractedInfo.statementNumber = `STMT-${extractedInfo.lastFourDigits}-${datePart}`;
-              console.log(`[CreditCardAgent] Generated alternative statement number: ${extractedInfo.statementNumber}`);
-            }
-          } else {
-            // Use AI to validate the statement number format
-            const isValid = await this.validateStatementNumberWithAI(
-              extractedInfo.statementNumber,
-              extractedInfo.creditCardIssuer,
-              extractedInfo.lastFourDigits
-            );
-            
-            if (isValid) {
-              console.log(`[CreditCardAgent] AI confirmed valid statement number format for ${extractedInfo.creditCardIssuer}: ${extractedInfo.statementNumber}`);
-            } else {
-              console.log(`[CreditCardAgent] AI detected potentially invalid statement number for ${extractedInfo.creditCardIssuer}: ${extractedInfo.statementNumber}`);
-              // Generate a more reasonable statement number if the AI thinks it's invalid
-              if (extractedInfo.statementDate && extractedInfo.lastFourDigits) {
-                const datePart = extractedInfo.statementDate.replace(/-/g, '');
-                extractedInfo.statementNumber = `STMT-${extractedInfo.lastFourDigits}-${datePart}`;
-                console.log(`[CreditCardAgent] Generated alternative statement number: ${extractedInfo.statementNumber}`);
-              }
-            }
-          }
+          console.log(`[CreditCardAgent] Using statement number as extracted: ${extractedInfo.statementNumber}`);
         } else if (extractedInfo.statementDate && extractedInfo.lastFourDigits) {
-          // If no statement number was extracted but we have date and last four, generate one
+          // Only generate a fallback if no statement number was found at all
           const datePart = extractedInfo.statementDate.replace(/-/g, '');
           extractedInfo.statementNumber = `STMT-${extractedInfo.lastFourDigits}-${datePart}`;
-          console.log(`[CreditCardAgent] Generated statement number from date and last four: ${extractedInfo.statementNumber}`);
+          console.log(`[CreditCardAgent] No statement number found, generated fallback: ${extractedInfo.statementNumber}`);
         }
         
         // Validate that last four digits are actually extracted from the document

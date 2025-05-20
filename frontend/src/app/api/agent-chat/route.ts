@@ -5,11 +5,13 @@ import { GLAgent } from '@/lib/agents/glAgent';
 import { APAgent } from '@/lib/agents/apAgent';
 import { InvoiceAgent } from '@/lib/agents/invoiceAgent';
 import { ReconciliationAgent } from '@/lib/agents/reconciliationAgent';
+import { CreditCardAgent } from '@/lib/agents/creditCardAgent';
 import { logAuditEvent } from '@/lib/auditLogger';
 import Anthropic from '@anthropic-ai/sdk';
 import { isExcelFile, parseExcelToText } from '@/lib/excelParser';
 import { processVendorBillsFromExcel } from '@/lib/excelDataProcessor';
-import { AgentMessage } from '@/types/agents';
+import { AgentMessage, DocumentContext, AgentResponse } from '@/types/agents';
+import { detectCreditCardStatement, isDocumentContentQuery } from '@/lib/documentDetection';
 
 // Interface for file attachments
 interface FileAttachment {
@@ -43,6 +45,10 @@ orchestrator.registerAgent(invoiceAgent);
 // Register the Reconciliation Agent
 const reconciliationAgent = new ReconciliationAgent();
 orchestrator.registerAgent(reconciliationAgent);
+
+// Register the Credit Card Agent
+const creditCardAgent = new CreditCardAgent();
+orchestrator.registerAgent(creditCardAgent);
 
 /**
  * API Route: /api/agent-chat
@@ -199,18 +205,19 @@ export async function POST(req: NextRequest) {
     };
     
     // Handle the request - determine if we should use direct Claude API for PDF processing
-    let result: {
-      success: boolean;
-      message: string;
-      agentId?: string;
-      sourceDocuments?: any;
-      data?: any;
-    };
+    let result: AgentResponse;
     
     // Check if this is a request to process vendor/bill data from Excel
     const isVendorBillRequest = isVendorBillCreationRequest({ query }) === true;
     
+    // Check if this is a request with a PDF attachment
+    const hasPdfAttachment = !!(attachments && 
+      attachments.length > 0 && 
+      (attachments[0].type === 'application/pdf' || attachments[0].name.toLowerCase().endsWith('.pdf')));
+    
+    // Process the request based on attachment type and content
     if (isVendorBillRequest && attachments && attachments.length > 0 && isExcelFile(attachments[0].name, attachments[0].type)) {
+      // Handle Excel file for vendor/bill processing
       console.log(`[Agent-Chat API] Processing vendor/bill creation from Excel file: ${attachments[0].name}`);
       
       try {
@@ -250,11 +257,164 @@ export async function POST(req: NextRequest) {
           agentId: "excel_processor"
         };
       }
-    }
-    else if (attachments && attachments.length > 0) {
-      console.log(`[Agent-Chat API] Processing request with ${attachments.length} attachments`);
+    } 
+    else if (hasPdfAttachment && attachments && attachments.length > 0) {
+      // Handle PDF attachments with potential AI-powered credit card statement detection
+      console.log(`[Agent-Chat API] Processing PDF attachment: ${attachments[0].name}`);
       
-      // Use Claude's API directly for PDF document processing
+      // Check if this is a content question rather than a processing request using AI
+      const isContentQuestion = await isDocumentContentQuery(query);
+      console.log(`[Agent-Chat API] AI query analysis - is content question: ${isContentQuestion}`);
+      
+      if (isContentQuestion) {
+        // For content questions, we'll use Claude to analyze the document directly
+        try {
+          console.log(`[Agent-Chat API] Handling as document content question: "${query}"`);
+          
+          // Configure Anthropic client for document analysis
+          const anthropic = new Anthropic({
+            apiKey: process.env.ANTHROPIC_API_KEY || "",
+          });
+          
+          // Prepare content blocks for Claude
+          const contentBlocks: any[] = [];
+          
+          // Add the user's query as a text block
+          contentBlocks.push({
+            type: "text",
+            text: `I've uploaded a document and want to understand its contents. ${query}`
+          });
+          
+          // Add the PDF document as a content block
+          contentBlocks.push({
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: "application/pdf",
+              data: attachments[0].base64Data
+            }
+          });
+          
+          // Call Claude API with the document for content analysis
+          const aiResponse = await anthropic.messages.create({
+            model: "claude-3-5-sonnet-20240620",
+            max_tokens: 4000,
+            system: `You are an AI assistant specializing in document analysis.
+              The user has uploaded a document and wants to know about its contents.
+              Analyze the document thoroughly and answer their question about what's in it.
+              If it's a credit card statement, describe the key details (issuer, balance, transactions) but don't process it.
+              Be informative, detailed and helpful in explaining what the document contains.`,
+            messages: [{
+              role: "user",
+              content: contentBlocks
+            }]
+          });
+          
+          // Extract response text
+          let responseText = '';
+          if (aiResponse.content && aiResponse.content.length > 0) {
+            const firstContent = aiResponse.content[0];
+            responseText = 'text' in firstContent ? firstContent.text : '';
+          }
+          
+          // Return the content analysis
+          result = {
+            success: true,
+            message: responseText,
+            agentId: "document_analyzer"
+          };
+          
+          return NextResponse.json(result);
+        } catch (error) {
+          console.error("[Agent-Chat API] Error analyzing document content:", error);
+          // Fall through to regular processing if content analysis fails
+        }
+      }
+      
+      try {
+        // Use AI to detect if this is a credit card statement
+        const isCreditCardStatement = await detectCreditCardStatement(
+          attachments[0].base64Data,
+          attachments[0].name
+        );
+        
+        if (isCreditCardStatement) {
+          console.log(`[Agent-Chat API] AI detected credit card statement in PDF: ${attachments[0].name}`);
+          
+          // Since this is confirmed to be a credit card statement, route directly to the CreditCardAgent
+          // instead of going through the orchestrator which might route to AP agent first
+          
+          // Get the CreditCardAgent directly
+          const creditCardAgent = orchestrator.getAgentById('credit_card_agent');
+          
+          if (creditCardAgent) {
+            console.log(`[Agent-Chat API] Routing credit card statement directly to CreditCardAgent`);
+            
+            // Extract text content from PDF for the CreditCardAgent
+            let pdfContent = `This is a credit card statement from the attached PDF file: ${attachments[0].name}\n\n`;
+            
+            // If the user is asking a specific question about the statement, include it
+            // Otherwise use the default processing message
+            if (query && !query.toLowerCase().includes('process') && !query.toLowerCase().includes('analyze')) {
+              pdfContent += `The user is asking: "${query}"`;
+            } else {
+              pdfContent += `Please process this statement and record any transactions.`;
+            }
+            
+            // Process directly with CreditCardAgent
+            result = await creditCardAgent.processRequest({
+              userId,
+              query: pdfContent, // Use the PDF content as the query
+              conversationId: conversationId,
+              previousMessages: enhancedMessages,
+              documentContext: {
+                type: 'pdf',
+                name: attachments[0].name,
+                content: attachments[0].base64Data
+              },
+              token: authorizationHeader ? authorizationHeader.split('Bearer ')[1] : ''
+            });
+            
+            // Return the result immediately - we've handled the credit card statement directly
+            return NextResponse.json(result);
+          } else {
+            // If CreditCardAgent is not available for some reason, log the error
+            console.error(`[Agent-Chat API] Could not find CreditCardAgent to process statement`);
+          }
+          
+          // If we reach here, we either couldn't find the CreditCardAgent or there was an error
+          // Fall back to using the orchestrator for this credit card statement
+          console.log(`[Agent-Chat API] Falling back to orchestrator for credit card statement processing`);
+          
+          // Extract text content from PDF for the CreditCardAgent
+          const pdfContent = `This is a credit card statement from the attached PDF file: ${attachments[0].name}\n\n` +
+                         `Please process this statement and record any transactions.`;
+                         
+          // Route through the orchestrator
+          result = await orchestrator.processRequest({
+            userId,
+            query: pdfContent,
+            conversationId,
+            previousMessages: enhancedMessages,
+            documentContext: {
+              type: 'pdf',
+              name: attachments[0].name,
+              content: attachments[0].base64Data
+            },
+            token: authorizationHeader ? authorizationHeader.split('Bearer ')[1] : ''
+          });
+          
+          return NextResponse.json(result);
+        }
+        
+        // If not a credit card statement, continue with general PDF processing
+        console.log(`[Agent-Chat API] Processing general PDF document: ${attachments[0].name}`);
+      } catch (error) {
+        console.error("[Agent-Chat API] Error during credit card statement AI detection:", error);
+        // Continue with normal processing if AI detection fails
+      }
+      
+      // Process the PDF with Claude's general document processing capabilities
       try {
         // Configure Anthropic client
         const anthropic = new Anthropic({
@@ -272,7 +432,77 @@ export async function POST(req: NextRequest) {
           });
         }
         
-        // Add content blocks for each attachment
+        // Add the PDF document as a content block
+        contentBlocks.push({
+          type: "document",
+          source: {
+            type: "base64",
+            media_type: "application/pdf",
+            data: attachments[0].base64Data
+          }
+        });
+        
+        // Call Claude API with the document
+        const aiResponse = await anthropic.messages.create({
+          model: "claude-3-5-sonnet-20240620",
+          max_tokens: 4000,
+          system: `You are Claude, an AI assistant specialized in accounting and finance. 
+            You're helping a user understand their financial documents. 
+            Analyze the provided document thoroughly and answer the user's query.
+            If the document appears to be a credit card statement, inform the user that you can help them process it.
+            Be detailed, accurate, and helpful in your response.`,
+          messages: [{
+            role: "user",
+            content: contentBlocks
+          }]
+        });
+        
+        // Extract response text
+        let responseText = '';
+        if (aiResponse.content && aiResponse.content.length > 0) {
+          const firstContent = aiResponse.content[0];
+          responseText = 'text' in firstContent ? firstContent.text : '';
+        }
+        
+        // Return the result
+        result = {
+          success: true,
+          message: responseText,
+          agentId: "document_processor"
+        };
+        
+        return NextResponse.json(result);
+      } catch (error) {
+        console.error("[Agent-Chat API] Error processing PDF document:", error);
+        
+        result = {
+          success: false,
+          message: `Failed to process the PDF document: ${error instanceof Error ? error.message : String(error)}\n\nPlease try again or contact support if the issue persists.`,
+          agentId: "document_processor"
+        };
+        
+        return NextResponse.json(result);
+      }
+    } else if (attachments && attachments.length > 0) {
+      // Process attachments with Claude's API
+      try {
+        // Configure Anthropic client
+        const anthropic = new Anthropic({
+          apiKey: process.env.ANTHROPIC_API_KEY || "",
+        });
+        
+        // Prepare content blocks for Claude
+        const contentBlocks: any[] = [];
+        
+        // Add the user's query as a text block
+        if (query && query.trim()) {
+          contentBlocks.push({
+            type: "text",
+            text: query
+          });
+        }
+        
+        // Process each attachment
         for (const attachment of attachments) {
           // Log attachment info for troubleshooting
           console.log(`[Agent-Chat API] Processing attachment: ${attachment.name}, type: ${attachment.type}`);
@@ -283,7 +513,48 @@ export async function POST(req: NextRequest) {
           // Handle different file types accordingly
           if (ext === 'pdf' || attachment.type === 'application/pdf') {
             // PDF files can be processed directly as documents
-            console.log(`[Agent-Chat API] Processing as PDF document: ${attachment.name}`);
+            console.log(`[Agent-Chat API] Processing PDF document: ${attachment.name}`);
+            
+            // First check if this is a credit card statement using AI
+            try {
+              const isCreditCardStatement = await detectCreditCardStatement(
+                attachment.base64Data,
+                attachment.name
+              );
+              
+              if (isCreditCardStatement) {
+                console.log(`[Agent-Chat API] AI detected credit card statement in PDF: ${attachment.name}`);
+                
+                // Extract text content from PDF for the CreditCardAgent
+                const pdfContent = `This is a credit card statement from the attached PDF file: ${attachment.name}\n\n` +
+                                `Please process this statement and record any transactions.`;
+                
+                // Route to the CreditCardAgent via the orchestrator
+                result = await orchestrator.processRequest({
+                  userId,
+                  query: pdfContent, // Use the PDF content as the query
+                  conversationId: conversationId,
+                  previousMessages: enhancedMessages,
+                  documentContext: {
+                    type: 'pdf',
+                    name: attachment.name,
+                    content: attachment.base64Data
+                  },
+                  token: authorizationHeader ? authorizationHeader.split('Bearer ')[1] : ''
+                });
+                
+                // Return the result directly
+                return NextResponse.json(result);
+              }
+              
+              // If not a credit card statement, continue with general PDF processing
+              console.log(`[Agent-Chat API] Processing as general PDF document: ${attachment.name}`);
+            } catch (error) {
+              console.error("[Agent-Chat API] Error during credit card statement AI detection:", error);
+              // Continue with normal processing if AI detection fails
+            }
+            
+            // Process as normal PDF document if not a credit card statement
             contentBlocks.push({
               type: "document",
               source: {
@@ -379,30 +650,47 @@ export async function POST(req: NextRequest) {
         result = {
           success: true,
           message: responseText,
-          agentId: "pdf_analysis", // Identify this as a PDF analysis response
+          agentId: "document_analyzer", // Identify this as a document analysis response
           sourceDocuments: null
         };
+        
+        return NextResponse.json(result);
       } catch (error) {
-        console.error("[Agent-Chat API] Error processing PDF with Claude:", error);
+        console.error("[Agent-Chat API] Error processing attachments with Claude:", error);
+        
         // Fall back to the orchestrator if Claude direct API fails
-        result = await orchestrator.processRequest({
-          userId,
-          query, // Use the original query without modification
-          conversationId: conversationId, // Use consistent conversationId
-          previousMessages: enhancedMessages, // Use enhanced messages with similar conversations as context
-          documentContext,
-          token: authorizationHeader.split('Bearer ')[1] // Pass the token for API calls that need auth
-        });
+        try {
+          result = await orchestrator.processRequest({
+            userId,
+            query, // Use the original query without modification
+            conversationId: conversationId, // Use consistent conversationId
+            previousMessages: enhancedMessages, // Use enhanced messages with similar conversations as context
+            documentContext,
+            token: authorizationHeader ? authorizationHeader.split('Bearer ')[1] : ''
+          });
+          
+          return NextResponse.json(result);
+        } catch (orchestratorError) {
+          console.error("[Agent-Chat API] Error with orchestrator fallback:", orchestratorError);
+          
+          result = {
+            success: false,
+            message: `Failed to process your request: ${error instanceof Error ? error.message : String(error)}\n\nPlease try again or contact support if the issue persists.`,
+            agentId: "error_handler"
+          };
+          
+          return NextResponse.json(result);
+        }
       }
     } else {
       // No PDF attachments, use the regular orchestrator flow
       result = await orchestrator.processRequest({
         userId,
         query, // Use the original query without modification
-        conversationId: conversationId, // Use consistent conversationId
+        conversationId, // Use consistent conversationId
         previousMessages: enhancedMessages, // Use enhanced messages with similar conversations as context
         documentContext,
-        token: authorizationHeader.split('Bearer ')[1] // Pass the token for API calls that need auth
+        token: authorizationHeader ? authorizationHeader.split('Bearer ')[1] : ''
       });
     }
 
@@ -445,8 +733,9 @@ export async function POST(req: NextRequest) {
       timestamp: new Date().toISOString()
     });
     
+    // Return an error message
     return NextResponse.json(
-      { error: "Failed to process chat request" }, 
+      { error: "An error occurred while processing your request", message: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
