@@ -17,7 +17,7 @@ export class BillCreditService {
       this.baseUrl = '';
     }
   }
-  }
+
 
   /**
    * Create a bill credit via API
