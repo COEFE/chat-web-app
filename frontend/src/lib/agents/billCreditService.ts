@@ -39,19 +39,27 @@ export class BillCreditService {
           const result = await sql`
             INSERT INTO bill_credits (
               vendor_id, 
-              vendor_name, 
-              credit_date, total_amount, 
-              memo, user_id, 
-              status
+              credit_number, 
+              credit_date, 
+              due_date, 
+              total_amount, 
+              status, 
+              terms, 
+              memo, 
+              ap_account_id, 
+              user_id
             ) 
             VALUES (
               ${billCreditData.vendor_id}, 
-              ${billCreditData.vendor_name}, 
+              ${billCreditData.credit_number || ''}, 
               ${billCreditData.credit_date}, 
+              ${billCreditData.due_date || billCreditData.credit_date}, 
               ${billCreditData.total_amount}, 
+              'open', 
+              ${billCreditData.terms || ''}, 
               ${billCreditData.memo}, 
-              ${billCreditData.user_id}, 
-              'open'
+              ${billCreditData.ap_account_id}, 
+              ${billCreditData.user_id}
             ) 
             RETURNING id, vendor_id, vendor_name, credit_date, total_amount, memo, user_id, status, created_at, updated_at
           `;
@@ -297,6 +305,9 @@ export class BillCreditService {
       user_id: '0', // Will be set by the API
       status: 'open', 
       ap_account_id: apAccountId,
+      credit_number: '',
+      due_date: refundDate,
+      terms: '',
       lines: [
         {
           expense_account_id: expenseAccountId,
@@ -361,6 +372,9 @@ export class BillCreditService {
       user_id: '0', // Will be set by the API
       status: 'open',
       ap_account_id: apAccountId,
+      credit_number: '',
+      due_date: chargebackDate,
+      terms: '',
       lines: [
         {
           expense_account_id: expenseAccountId,
