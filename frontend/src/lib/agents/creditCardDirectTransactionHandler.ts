@@ -261,15 +261,27 @@ async function findOrCreateVendor(
       }
     }
     
-    // Return a generic vendor object - in a real implementation, you might want to create the vendor
+    // No existing vendor found, create a new one
+    const newVendor = await sql`
+      INSERT INTO vendors (
+        name,
+        user_id,
+        is_active,
+        is_deleted
+      ) VALUES (
+        ${vendorName},
+        ${userId},
+        ${true},
+        ${false}
+      )
+      RETURNING *
+    `;
+    
+    console.log(`[CreditCardDirectTransactionHandler] Created new vendor:`, newVendor.rows[0]);
     return {
       success: true,
-      message: "Using vendor information",
-      vendor: {
-        id: vendorName.toLowerCase().replace(/\s+/g, '_'),
-        name: vendorName,
-        vendor_name: vendorName
-      }
+      message: "Created new vendor",
+      vendor: newVendor.rows[0]
     };
     
   } catch (error) {
@@ -277,6 +289,85 @@ async function findOrCreateVendor(
     return {
       success: false,
       message: "Error finding vendor"
+    };
+  }
+}
+
+/**
+ * Find or create an expense account for bill credits
+ */
+async function findOrCreateExpenseAccount(
+  userId: string,
+  expenseType: string = 'General Expense'
+): Promise<{ success: boolean; message: string; account?: any }> {
+  try {
+    // Try to find an expense account by type
+    const expenseAccount = await sql`
+      SELECT * FROM accounts 
+      WHERE user_id = ${userId} 
+      AND account_type = 'Expense'
+      AND name ILIKE ${'%' + expenseType + '%'}
+      LIMIT 1
+    `;
+    
+    if (expenseAccount.rows.length > 0) {
+      console.log(`[CreditCardDirectTransactionHandler] Found expense account:`, expenseAccount.rows[0]);
+      return {
+        success: true,
+        message: "Found expense account",
+        account: expenseAccount.rows[0]
+      };
+    }
+    
+    // Try to find any expense account
+    const anyExpenseAccount = await sql`
+      SELECT * FROM accounts 
+      WHERE user_id = ${userId} 
+      AND account_type = 'Expense'
+      LIMIT 1
+    `;
+    
+    if (anyExpenseAccount.rows.length > 0) {
+      console.log(`[CreditCardDirectTransactionHandler] Using default expense account:`, anyExpenseAccount.rows[0]);
+      return {
+        success: true,
+        message: "Using default expense account",
+        account: anyExpenseAccount.rows[0]
+      };
+    }
+    
+    // If no expense accounts exist, create a generic one
+    const newAccount = await sql`
+      INSERT INTO accounts (
+        code, 
+        name, 
+        account_type,
+        is_active,
+        is_deleted,
+        user_id
+      ) VALUES (
+        ${'EXP-' + Math.floor(1000 + Math.random() * 9000)},
+        ${expenseType},
+        ${'Expense'},
+        ${true},
+        ${false},
+        ${userId}
+      )
+      RETURNING *
+    `;
+    
+    console.log(`[CreditCardDirectTransactionHandler] Created new expense account:`, newAccount.rows[0]);
+    return {
+      success: true,
+      message: "Created new expense account",
+      account: newAccount.rows[0]
+    };
+    
+  } catch (error) {
+    console.error(`[CreditCardDirectTransactionHandler] Error finding expense account:`, error);
+    return {
+      success: false,
+      message: "Error finding expense account"
     };
   }
 }
@@ -297,6 +388,18 @@ async function createBillCreditForTransaction(
       amount: transaction.amount || 0
     });
     
+    // Find or create an expense account
+    const expenseAccountResult = await findOrCreateExpenseAccount(context.userId, 
+      transaction.type === 'chargeback' ? 'Credit Card Chargebacks' : 'Credit Card Refunds');
+    
+    if (!expenseAccountResult.success || !expenseAccountResult.account) {
+      return {
+        success: false,
+        error: "Failed to find or create expense account"
+      };
+    }
+    
+    const expenseAccountId = expenseAccountResult.account.id;
     let result;
     
     switch (creditType) {
@@ -307,7 +410,7 @@ async function createBillCreditForTransaction(
           refundAmount: Math.abs(transaction.amount || 0),
           refundDate: transaction.date || new Date().toISOString().split('T')[0],
           description: transaction.description || `${transaction.vendor} refund`,
-          expenseAccountId: 5000, // Default expense account
+          expenseAccountId: expenseAccountId,
           apAccountId: account.id,
           creditCardLastFour: transaction.accountLastFour || account.code?.slice(-4) || '****',
           transactionId: `${transaction.vendor}-${Date.now()}`
@@ -321,7 +424,7 @@ async function createBillCreditForTransaction(
           chargebackAmount: Math.abs(transaction.amount || 0),
           chargebackDate: transaction.date || new Date().toISOString().split('T')[0],
           description: transaction.description || `${transaction.vendor} chargeback`,
-          expenseAccountId: 5000, // Default expense account
+          expenseAccountId: expenseAccountId,
           apAccountId: account.id,
           creditCardLastFour: transaction.accountLastFour || account.code?.slice(-4) || '****',
           originalTransactionId: `${transaction.vendor}-original`
@@ -335,7 +438,7 @@ async function createBillCreditForTransaction(
           creditAmount: Math.abs(transaction.amount || 0),
           creditDate: transaction.date || new Date().toISOString().split('T')[0],
           description: transaction.description || `${transaction.vendor} credit`,
-          expenseAccountId: 5000, // Default expense account
+          expenseAccountId: expenseAccountId,
           apAccountId: account.id,
           creditNumber: `CC-CREDIT-${Date.now()}`,
           memo: `Credit card credit: ${transaction.description}`
