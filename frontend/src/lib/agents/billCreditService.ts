@@ -40,22 +40,20 @@ export class BillCreditService {
             INSERT INTO bill_credits (
               vendor_id, 
               vendor_name, 
-              date, 
-              amount, 
-              description, 
-              user_id, 
+              credit_date, total_amount, 
+              memo, user_id, 
               status
             ) 
             VALUES (
               ${billCreditData.vendor_id}, 
               ${billCreditData.vendor_name}, 
-              ${billCreditData.date}, 
-              ${billCreditData.amount}, 
-              ${billCreditData.description}, 
+              ${billCreditData.credit_date}, 
+              ${billCreditData.total_amount}, 
+              ${billCreditData.memo}, 
               ${billCreditData.user_id}, 
               'open'
             ) 
-            RETURNING id, vendor_id, vendor_name, date, amount, description, user_id, status, created_at, updated_at
+            RETURNING id, vendor_id, vendor_name, credit_date, total_amount, memo, user_id, status, created_at, updated_at
           `;
           
           if (result.rows.length === 0) {
@@ -70,22 +68,26 @@ export class BillCreditService {
               await sql`
                 INSERT INTO bill_credit_lines (
                   bill_credit_id,
-                  account_id,
+                  expense_account_id,
                   description,
-                  amount
+                  amount,
+                  quantity,
+                  unit_price
                 )
                 VALUES (
                   ${billCredit.id},
-                  ${line.account_id},
+                  ${line.expense_account_id},
                   ${line.description || ''},
-                  ${line.amount}
+                  ${line.amount},
+                  ${line.quantity || 1},
+                  ${line.unit_price || line.amount}
                 )
               `;
             }
             
             // Fetch the lines to return with the bill credit
             const linesResult = await sql`
-              SELECT id, bill_credit_id, account_id, description, amount
+              SELECT id, bill_credit_id, expense_account_id, description, amount
               FROM bill_credit_lines
               WHERE bill_credit_id = ${billCredit.id}
             `;
@@ -198,8 +200,7 @@ export class BillCreditService {
               billCreditsMap.get(billCreditId).lines.push({
                 id: row.line_id,
                 bill_credit_id: billCreditId,
-                account_id: row.account_id,
-                description: row.line_description || '',
+                account_id: row.expense_account_id, description: row.line_description || '',
                 amount: row.line_amount
               });
             }
@@ -290,21 +291,26 @@ export class BillCreditService {
     const billCreditData: Omit<BillCredit, 'id' | 'created_at' | 'updated_at'> = {
       vendor_id: vendorId,
       vendor_name: vendorName,
-      date: refundDate,
-      amount: refundAmount,
-      description: formattedDescription,
-      user_id: 0, // Will be set by the API
-      status: 'open',
+      credit_date: refundDate,
+      total_amount: refundAmount,
+      memo: formattedDescription,
+      user_id: '0', // Will be set by the API
+      status: 'open', 
+      ap_account_id: apAccountId,
       lines: [
         {
-          account_id: expenseAccountId,
+          expense_account_id: expenseAccountId,
           description: 'Credit Card Refund - Expense',
-          amount: -refundAmount // Negative to credit the expense account
+          amount: -refundAmount, // Negative to credit the expense account
+          quantity: 1,
+          unit_price: refundAmount
         },
         {
-          account_id: apAccountId,
+          expense_account_id: apAccountId,
           description: 'Credit Card Refund - AP',
-          amount: refundAmount // Positive to debit the AP account
+          amount: refundAmount, // Positive to debit the AP account
+          quantity: 1,
+          unit_price: refundAmount
         }
       ]
     };
@@ -349,21 +355,26 @@ export class BillCreditService {
     const billCreditData: Omit<BillCredit, 'id' | 'created_at' | 'updated_at'> = {
       vendor_id: vendorId,
       vendor_name: vendorName,
-      date: chargebackDate,
-      amount: chargebackAmount,
-      description: formattedDescription,
-      user_id: 0, // Will be set by the API
+      credit_date: chargebackDate,
+      total_amount: chargebackAmount,
+      memo: formattedDescription,
+      user_id: '0', // Will be set by the API
       status: 'open',
+      ap_account_id: apAccountId,
       lines: [
         {
-          account_id: expenseAccountId,
+          expense_account_id: expenseAccountId,
           description: 'Credit Card Chargeback - Expense',
-          amount: -chargebackAmount // Negative to credit the expense account
+          amount: -chargebackAmount, // Negative to credit the expense account
+          quantity: 1,
+          unit_price: chargebackAmount
         },
         {
-          account_id: apAccountId,
+          expense_account_id: apAccountId,
           description: 'Credit Card Chargeback - AP',
-          amount: chargebackAmount // Positive to debit the AP account
+          amount: chargebackAmount, // Positive to debit the AP account
+          quantity: 1,
+          unit_price: chargebackAmount
         }
       ]
     };
