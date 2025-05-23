@@ -400,6 +400,11 @@ async function createBillCreditForTransaction(
     }
     
     const expenseAccountId = expenseAccountResult.account.id;
+    
+    // Ensure we have a valid user ID
+    const userId = context.userId || 'system';
+    console.log(`[CreditCardDirectTransactionHandler] Using user ID: ${userId}`);
+    
     let result;
     
     switch (creditType) {
@@ -412,6 +417,7 @@ async function createBillCreditForTransaction(
           description: transaction.description || `${transaction.vendor} refund`,
           expenseAccountId: expenseAccountId,
           apAccountId: account.id,
+          userId: userId,
           creditCardLastFour: transaction.accountLastFour || account.code?.slice(-4) || '****',
           transactionId: `${transaction.vendor}-${Date.now()}`
         });
@@ -426,6 +432,7 @@ async function createBillCreditForTransaction(
           description: transaction.description || `${transaction.vendor} chargeback`,
           expenseAccountId: expenseAccountId,
           apAccountId: account.id,
+          userId: userId,
           creditCardLastFour: transaction.accountLastFour || account.code?.slice(-4) || '****',
           originalTransactionId: `${transaction.vendor}-original`
         });
@@ -440,6 +447,7 @@ async function createBillCreditForTransaction(
           description: transaction.description || `${transaction.vendor} credit`,
           expenseAccountId: expenseAccountId,
           apAccountId: account.id,
+          userId: userId,
           creditNumber: `CC-CREDIT-${Date.now()}`,
           memo: `Credit card credit: ${transaction.description}`
         });
@@ -454,9 +462,10 @@ async function createBillCreditForTransaction(
         entity_id: result.billCredit?.id,
         context: {
           vendor_id: vendor.id,
-          amount: Math.abs(transaction.amount || 0),
-          type: creditType,
-          source: 'credit_card_direct_transaction'
+          amount: transaction.amount || 0,
+          type: transaction.type || 'refund',
+          source: 'credit_card_direct_transaction',
+          user_id: context.userId // Include user ID in context for debugging
         },
         status: 'SUCCESS',
         timestamp: new Date().toISOString()
