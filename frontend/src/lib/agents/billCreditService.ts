@@ -273,9 +273,10 @@ export class BillCreditService {
     description: string;
     expenseAccountId: number;
     apAccountId: number;
+    userId?: string;
     authToken?: string;
     creditCardLastFour?: string;
-    transactionId?: string;
+    originalTransactionId?: string;
   }): Promise<{ success: boolean; billCredit?: BillCredit; error?: string }> {
     const {
       vendorId,
@@ -287,13 +288,13 @@ export class BillCreditService {
       apAccountId,
       authToken,
       creditCardLastFour,
-      transactionId
+      originalTransactionId
     } = params;
 
     // Format description with credit card info if available
     const formattedDescription = creditCardLastFour
-      ? `${description} (CC: *${creditCardLastFour})${transactionId ? ` - Ref: ${transactionId}` : ''}`
-      : `${description}${transactionId ? ` - Ref: ${transactionId}` : ''}`;
+      ? `${description} (CC: *${creditCardLastFour})${originalTransactionId ? ` - Ref: ${originalTransactionId}` : ''}`
+      : `${description}${originalTransactionId ? ` - Ref: ${originalTransactionId}` : ''}`;
 
     // Create bill credit data
     const billCreditData: Omit<BillCredit, 'id' | 'created_at' | 'updated_at'> = {
@@ -302,8 +303,8 @@ export class BillCreditService {
       credit_date: refundDate,
       total_amount: refundAmount,
       memo: formattedDescription,
-      user_id: '0', // Will be set by the API
-      status: 'open', 
+      user_id: params.userId || 'system', // Use provided userId or system as fallback
+      status: 'applied', // Create in applied status since these are automatic refunds
       ap_account_id: apAccountId,
       credit_number: '',
       due_date: refundDate,
@@ -340,9 +341,10 @@ export class BillCreditService {
     description: string;
     expenseAccountId: number;
     apAccountId: number;
+    userId?: string;
     authToken?: string;
     creditCardLastFour?: string;
-    transactionId?: string;
+    originalTransactionId?: string;
   }): Promise<{ success: boolean; billCredit?: BillCredit; error?: string }> {
     const {
       vendorId,
@@ -352,15 +354,16 @@ export class BillCreditService {
       description,
       expenseAccountId,
       apAccountId,
+      userId,
       authToken,
       creditCardLastFour,
-      transactionId
+      originalTransactionId
     } = params;
 
     // Format description with credit card info if available
     const formattedDescription = creditCardLastFour
-      ? `${description} (CC: *${creditCardLastFour})${transactionId ? ` - Ref: ${transactionId}` : ''}`
-      : `${description}${transactionId ? ` - Ref: ${transactionId}` : ''}`;
+      ? `${description} (CC: *${creditCardLastFour})${originalTransactionId ? ` - Ref: ${originalTransactionId}` : ''}`
+      : `${description}${originalTransactionId ? ` - Ref: ${originalTransactionId}` : ''}`;
 
     // Create bill credit data
     const billCreditData: Omit<BillCredit, 'id' | 'created_at' | 'updated_at'> = {
@@ -369,8 +372,8 @@ export class BillCreditService {
       credit_date: chargebackDate,
       total_amount: chargebackAmount,
       memo: formattedDescription,
-      user_id: '0', // Will be set by the API
-      status: 'open',
+      user_id: params.userId || 'system', // Use provided userId or system as fallback
+      status: 'applied', // Create in applied status since these are automatic chargebacks
       ap_account_id: apAccountId,
       credit_number: '',
       due_date: chargebackDate,
