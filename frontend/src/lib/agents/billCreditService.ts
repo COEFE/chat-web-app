@@ -38,27 +38,27 @@ export class BillCreditService {
           // Insert the bill credit
           const result = await sql`
             INSERT INTO bill_credits (
-              vendor_id, 
-              credit_number, 
-              credit_date, 
-              due_date, 
-              total_amount, 
-              status, 
-              terms, 
-              memo, 
-              ap_account_id, 
+              vendor_id,
+              credit_number,
+              credit_date,
+              due_date,
+              total_amount,
+              status,
+              terms,
+              memo,
+              ap_account_id,
               user_id
             ) 
             VALUES (
-              ${billCreditData.vendor_id}, 
-              ${billCreditData.credit_number || ''}, 
-              ${billCreditData.credit_date}, 
-              ${billCreditData.due_date || billCreditData.credit_date}, 
-              ${billCreditData.total_amount}, 
-              'open', 
-              ${billCreditData.terms || ''}, 
-              ${billCreditData.memo}, 
-              ${billCreditData.ap_account_id}, 
+              ${billCreditData.vendor_id},
+              ${billCreditData.credit_number || ''},
+              ${billCreditData.credit_date},
+              ${billCreditData.due_date || billCreditData.credit_date},
+              ${billCreditData.total_amount},
+              'open',
+              ${billCreditData.terms || ''},
+              ${billCreditData.memo},
+              ${billCreditData.ap_account_id},
               ${billCreditData.user_id}
             ) 
             RETURNING id, vendor_id, vendor_name, credit_date, total_amount, memo, user_id, status, created_at, updated_at
@@ -78,17 +78,17 @@ export class BillCreditService {
                   bill_credit_id,
                   expense_account_id,
                   description,
-                  amount,
                   quantity,
-                  unit_price
+                  unit_price,
+                  amount
                 )
                 VALUES (
                   ${billCredit.id},
                   ${line.expense_account_id},
                   ${line.description || ''},
-                  ${line.amount},
                   ${line.quantity || 1},
-                  ${line.unit_price || line.amount}
+                  ${line.unit_price || Math.abs(line.amount)},
+                  ${line.amount}
                 )
               `;
             }
