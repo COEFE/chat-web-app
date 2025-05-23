@@ -181,14 +181,48 @@ async function findOrCreateCreditCardAccount(
     }
     
     // Return a generic response - in a real implementation, you might want to create the account
+    // First try to find any credit card account as a fallback
+    const defaultAccount = await sql`
+      SELECT * FROM accounts 
+      WHERE user_id = ${userId} 
+      AND account_type = 'Credit Card'
+      LIMIT 1
+    `;
+    
+    if (defaultAccount.rows.length > 0) {
+      console.log(`[CreditCardDirectTransactionHandler] Using default credit card account:`, defaultAccount.rows[0]);
+      return {
+        success: true,
+        message: "Using default credit card account",
+        account: defaultAccount.rows[0]
+      };
+    }
+    
+    // If no credit card accounts exist at all, create a generic one
+    const newAccount = await sql`
+      INSERT INTO accounts (
+        code, 
+        name, 
+        account_type,
+        is_active,
+        is_deleted,
+        user_id
+      ) VALUES (
+        ${'CC-' + Math.floor(1000 + Math.random() * 9000)},
+        ${`${issuer || 'Credit Card'} Account ${accountNumber || ''}`.trim()},
+        ${'Credit Card'},
+        ${true},
+        ${false},
+        ${userId}
+      )
+      RETURNING *
+    `;
+    
+    console.log(`[CreditCardDirectTransactionHandler] Created new credit card account:`, newAccount.rows[0]);
     return {
       success: true,
-      message: "Using default credit card account",
-      account: {
-        id: accountNumber || '2009',
-        name: `${issuer || 'Credit Card'} Account ${accountNumber || ''}`.trim(),
-        account_type: 'Credit Card'
-      }
+      message: "Created new credit card account",
+      account: newAccount.rows[0]
     };
     
   } catch (error) {
