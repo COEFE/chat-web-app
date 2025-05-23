@@ -145,7 +145,7 @@ async function findOrCreateCreditCardAccount(
       const existingAccount = await sql`
         SELECT * FROM accounts 
         WHERE user_id = ${userId} 
-        AND (account_code LIKE ${'%' + accountNumber} OR account_name ILIKE ${'%' + accountNumber + '%'})
+        AND (code LIKE ${'%' + accountNumber} OR account_name ILIKE ${'%' + accountNumber + '%'})
         AND account_type = 'Credit Card'
         LIMIT 1
       `;
@@ -275,7 +275,7 @@ async function createBillCreditForTransaction(
           description: transaction.description || `${transaction.vendor} refund`,
           expenseAccountId: 5000, // Default expense account
           apAccountId: account.id,
-          creditCardLastFour: transaction.accountLastFour || account.account_code?.slice(-4) || '****',
+          creditCardLastFour: transaction.accountLastFour || account.code?.slice(-4) || '****',
           transactionId: `${transaction.vendor}-${Date.now()}`
         });
         break;
@@ -289,7 +289,7 @@ async function createBillCreditForTransaction(
           description: transaction.description || `${transaction.vendor} chargeback`,
           expenseAccountId: 5000, // Default expense account
           apAccountId: account.id,
-          creditCardLastFour: transaction.accountLastFour || account.account_code?.slice(-4) || '****',
+          creditCardLastFour: transaction.accountLastFour || account.code?.slice(-4) || '****',
           originalTransactionId: `${transaction.vendor}-original`
         });
         break;
