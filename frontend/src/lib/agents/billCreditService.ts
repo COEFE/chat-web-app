@@ -19,7 +19,6 @@ export class BillCreditService {
     }
   }
 
-
   /**
    * Create a bill credit via API
    */
@@ -142,7 +141,6 @@ export class BillCreditService {
       };
     }
   }
-  }
 
   /**
    * Get bill credits for a vendor
@@ -256,7 +254,7 @@ export class BillCreditService {
   }
 
   /**
-   * Create a bill credit for a credit card refund transaction
+   * Create a bill credit for a credit card refund
    */
   async createCreditCardRefundBillCredit(params: {
     vendorId: number;
@@ -266,7 +264,7 @@ export class BillCreditService {
     description: string;
     expenseAccountId: number;
     apAccountId: number;
-    authToken: string;
+    authToken?: string;
     creditCardLastFour?: string;
     transactionId?: string;
   }): Promise<{ success: boolean; billCredit?: BillCredit; error?: string }> {
@@ -280,28 +278,35 @@ export class BillCreditService {
       apAccountId,
       authToken,
       creditCardLastFour,
-      transactionId,
+      transactionId
     } = params;
+
+    // Format description with credit card info if available
+    const formattedDescription = creditCardLastFour
+      ? `${description} (CC: *${creditCardLastFour})${transactionId ? ` - Ref: ${transactionId}` : ''}`
+      : `${description}${transactionId ? ` - Ref: ${transactionId}` : ''}`;
 
     // Create bill credit data
     const billCreditData: Omit<BillCredit, 'id' | 'created_at' | 'updated_at'> = {
       vendor_id: vendorId,
-      credit_number: transactionId ? `CC-REFUND-${transactionId}` : undefined,
-      credit_date: refundDate,
-      total_amount: Math.abs(refundAmount), // Ensure positive amount for credit
-      status: 'Applied',
-      memo: `Credit card refund${creditCardLastFour ? ` - Card ending in ${creditCardLastFour}` : ''}: ${description}`,
-      ap_account_id: apAccountId,
+      vendor_name: vendorName,
+      date: refundDate,
+      amount: refundAmount,
+      description: formattedDescription,
+      user_id: 0, // Will be set by the API
+      status: 'open',
       lines: [
         {
-          expense_account_id: expenseAccountId,
-          description: description,
-          quantity: 1,
-          unit_price: Math.abs(refundAmount),
-          amount: Math.abs(refundAmount),
-          category: 'Credit Card Refund',
+          account_id: expenseAccountId,
+          description: 'Credit Card Refund - Expense',
+          amount: -refundAmount // Negative to credit the expense account
         },
-      ],
+        {
+          account_id: apAccountId,
+          description: 'Credit Card Refund - AP',
+          amount: refundAmount // Positive to debit the AP account
+        }
+      ]
     };
 
     return this.createBillCredit(billCreditData, authToken);
@@ -318,9 +323,9 @@ export class BillCreditService {
     description: string;
     expenseAccountId: number;
     apAccountId: number;
-    authToken: string;
+    authToken?: string;
     creditCardLastFour?: string;
-    originalTransactionId?: string;
+    transactionId?: string;
   }): Promise<{ success: boolean; billCredit?: BillCredit; error?: string }> {
     const {
       vendorId,
@@ -332,28 +337,35 @@ export class BillCreditService {
       apAccountId,
       authToken,
       creditCardLastFour,
-      originalTransactionId,
+      transactionId
     } = params;
+
+    // Format description with credit card info if available
+    const formattedDescription = creditCardLastFour
+      ? `${description} (CC: *${creditCardLastFour})${transactionId ? ` - Ref: ${transactionId}` : ''}`
+      : `${description}${transactionId ? ` - Ref: ${transactionId}` : ''}`;
 
     // Create bill credit data
     const billCreditData: Omit<BillCredit, 'id' | 'created_at' | 'updated_at'> = {
       vendor_id: vendorId,
-      credit_number: originalTransactionId ? `CC-CHARGEBACK-${originalTransactionId}` : undefined,
-      credit_date: chargebackDate,
-      total_amount: Math.abs(chargebackAmount), // Ensure positive amount for credit
-      status: 'Applied',
-      memo: `Credit card chargeback${creditCardLastFour ? ` - Card ending in ${creditCardLastFour}` : ''}: ${description}`,
-      ap_account_id: apAccountId,
+      vendor_name: vendorName,
+      date: chargebackDate,
+      amount: chargebackAmount,
+      description: formattedDescription,
+      user_id: 0, // Will be set by the API
+      status: 'open',
       lines: [
         {
-          expense_account_id: expenseAccountId,
-          description: description,
-          quantity: 1,
-          unit_price: Math.abs(chargebackAmount),
-          amount: Math.abs(chargebackAmount),
-          category: 'Credit Card Chargeback',
+          account_id: expenseAccountId,
+          description: 'Credit Card Chargeback - Expense',
+          amount: -chargebackAmount // Negative to credit the expense account
         },
-      ],
+        {
+          account_id: apAccountId,
+          description: 'Credit Card Chargeback - AP',
+          amount: chargebackAmount // Positive to debit the AP account
+        }
+      ]
     };
 
     return this.createBillCredit(billCreditData, authToken);
