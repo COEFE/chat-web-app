@@ -152,28 +152,100 @@ export class BillCreditService {
     authToken?: string
   ): Promise<{ success: boolean; billCredits?: BillCredit[]; error?: string }> {
     try {
-      const response = await fetch(
-        `${this.baseUrl}/api/bill-credits?vendor_id=${vendorId}`,
-        {
-          headers: {
-            'Authorization': authToken ? `Bearer ${authToken}` : 'Server-Auth',
-          },
+      // Check if we're in a server-side environment
+      if (typeof window === 'undefined') {
+        // Server-side: Use direct database access
+        console.log('[BillCreditService] Using direct database access to get bill credits');
+        
+        try {
+          const result = await sql`
+            SELECT bc.*, bcl.id as line_id, bcl.account_id, bcl.description as line_description, bcl.amount as line_amount
+            FROM bill_credits bc
+            LEFT JOIN bill_credit_lines bcl ON bc.id = bcl.bill_credit_id
+            WHERE bc.vendor_id = ${vendorId}
+            ORDER BY bc.date DESC, bc.id, bcl.id
+          `;
+          
+          if (result.rows.length === 0) {
+            return {
+              success: true,
+              billCredits: []
+            };
+          }
+          
+          // Process the results to group lines by bill credit
+          const billCreditsMap = new Map();
+          
+          for (const row of result.rows) {
+            const billCreditId = row.id;
+            
+            if (!billCreditsMap.has(billCreditId)) {
+              billCreditsMap.set(billCreditId, {
+                id: row.id,
+                vendor_id: row.vendor_id,
+                vendor_name: row.vendor_name,
+                date: row.date,
+                amount: row.amount,
+                description: row.description,
+                user_id: row.user_id,
+                status: row.status,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+                lines: []
+              });
+            }
+            
+            // Add line if it exists
+            if (row.line_id) {
+              billCreditsMap.get(billCreditId).lines.push({
+                id: row.line_id,
+                bill_credit_id: billCreditId,
+                account_id: row.account_id,
+                description: row.line_description || '',
+                amount: row.line_amount
+              });
+            }
+          }
+          
+          const billCredits = Array.from(billCreditsMap.values());
+          
+          return {
+            success: true,
+            billCredits
+          };
+        } catch (dbError: any) {
+          console.error('[BillCreditService] Database error getting bill credits:', dbError);
+          return {
+            success: false,
+            error: dbError.message || 'Database error getting bill credits'
+          };
         }
-      );
+      } else {
+        // Client-side: Use fetch API
+        const response = await fetch(
+          `${this.baseUrl}/api/bill-credits?vendor_id=${vendorId}`,
+          {
+            headers: {
+              'Authorization': authToken ? `Bearer ${authToken}` : 'Server-Auth',
+            },
+          }
+        );
 
-      const result = await response.json();
+        const result = await response.json();
 
-      if (!response.ok) {
+        if (!response.ok) {
+          console.error('[BillCreditService] Error getting bill credits:', result);
+          return {
+            success: false,
+            error: result.error || `HTTP ${response.status}: ${response.statusText}`,
+          };
+        }
+
         return {
-          success: false,
-          error: result.error || `HTTP ${response.status}: ${response.statusText}`,
+          success: true,
+          billCredits: result.billCredits,
         };
       }
-
-      return {
-        success: true,
-        billCredits: result.billCredits || [],
-      };
     } catch (error: any) {
       console.error('[BillCreditService] Exception getting bill credits:', error);
       return {
@@ -194,7 +266,7 @@ export class BillCreditService {
     description: string;
     expenseAccountId: number;
     apAccountId: number;
-    authToken?: string;
+    authToken: string;
     creditCardLastFour?: string;
     transactionId?: string;
   }): Promise<{ success: boolean; billCredit?: BillCredit; error?: string }> {
@@ -246,7 +318,7 @@ export class BillCreditService {
     description: string;
     expenseAccountId: number;
     apAccountId: number;
-    authToken?: string;
+    authToken: string;
     creditCardLastFour?: string;
     originalTransactionId?: string;
   }): Promise<{ success: boolean; billCredit?: BillCredit; error?: string }> {
