@@ -50,18 +50,18 @@ export class BillCreditService {
               user_id
             ) 
             VALUES (
-              ${billCreditData.vendor_id},
+              ${Number(billCreditData.vendor_id)},
               ${billCreditData.credit_number || ''},
               ${billCreditData.credit_date},
               ${billCreditData.due_date || billCreditData.credit_date},
-              ${billCreditData.total_amount},
+              ${Number(billCreditData.total_amount)},
               'open',
               ${billCreditData.terms || ''},
               ${billCreditData.memo},
-              ${billCreditData.ap_account_id},
+              ${Number(billCreditData.ap_account_id)},
               ${billCreditData.user_id}
             ) 
-            RETURNING id, vendor_id, vendor_name, credit_date, total_amount, memo, user_id, status, created_at, updated_at
+            RETURNING id, vendor_id, credit_date, total_amount, memo, user_id, status, created_at, updated_at
           `;
           
           if (result.rows.length === 0) {
@@ -83,12 +83,12 @@ export class BillCreditService {
                   amount
                 )
                 VALUES (
-                  ${billCredit.id},
-                  ${line.expense_account_id},
+                  ${Number(billCredit.id)},
+                  ${Number(line.expense_account_id)},
                   ${line.description || ''},
-                  ${line.quantity || 1},
-                  ${line.unit_price || Math.abs(line.amount)},
-                  ${line.amount}
+                  ${Number(line.quantity || 1)},
+                  ${Number(line.unit_price || Math.abs(Number(line.amount)))},
+                  ${Number(line.amount)}
                 )
               `;
             }
@@ -97,7 +97,7 @@ export class BillCreditService {
             const linesResult = await sql`
               SELECT id, bill_credit_id, expense_account_id, description, amount
               FROM bill_credit_lines
-              WHERE bill_credit_id = ${billCredit.id}
+              WHERE bill_credit_id = ${Number(billCredit.id)}
             `;
             
             billCredit.lines = linesResult.rows as BillCreditLine[];
@@ -170,7 +170,7 @@ export class BillCreditService {
             SELECT bc.*, bcl.id as line_id, bcl.account_id, bcl.description as line_description, bcl.amount as line_amount
             FROM bill_credits bc
             LEFT JOIN bill_credit_lines bcl ON bc.id = bcl.bill_credit_id
-            WHERE bc.vendor_id = ${vendorId}
+            WHERE bc.vendor_id = ${Number(vendorId)}
             ORDER BY bc.date DESC, bc.id, bcl.id
           `;
           
