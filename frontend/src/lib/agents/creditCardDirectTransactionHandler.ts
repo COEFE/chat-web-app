@@ -145,7 +145,7 @@ async function findOrCreateCreditCardAccount(
       const existingAccount = await sql`
         SELECT * FROM accounts 
         WHERE user_id = ${userId} 
-        AND (code LIKE ${'%' + accountNumber} OR account_name ILIKE ${'%' + accountNumber + '%'})
+        AND (code LIKE ${'%' + accountNumber} OR name ILIKE ${'%' + accountNumber + '%'})
         AND account_type = 'Credit Card'
         LIMIT 1
       `;
@@ -165,7 +165,7 @@ async function findOrCreateCreditCardAccount(
       const issuerAccount = await sql`
         SELECT * FROM accounts 
         WHERE user_id = ${userId} 
-        AND account_name ILIKE ${'%' + issuer + '%'}
+        AND name ILIKE ${'%' + issuer + '%'}
         AND account_type = 'Credit Card'
         LIMIT 1
       `;
@@ -186,7 +186,7 @@ async function findOrCreateCreditCardAccount(
       message: "Using default credit card account",
       account: {
         id: accountNumber || '2009',
-        account_name: `${issuer || 'Credit Card'} Account ${accountNumber || ''}`.trim(),
+        name: `${issuer || 'Credit Card'} Account ${accountNumber || ''}`.trim(),
         account_type: 'Credit Card'
       }
     };
