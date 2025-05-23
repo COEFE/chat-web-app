@@ -7,7 +7,16 @@ export class BillCreditService {
   private baseUrl: string;
 
   constructor(baseUrl: string = '') {
-    this.baseUrl = baseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+    // Handle both client and server environments
+    if (baseUrl) {
+      this.baseUrl = baseUrl;
+    } else if (typeof window !== 'undefined') {
+      this.baseUrl = window.location.origin;
+    } else {
+      // Default to empty string for API routes which are relative
+      this.baseUrl = '';
+    }
+  }
   }
 
   /**
@@ -20,7 +29,7 @@ export class BillCreditService {
     try {
       console.log('[BillCreditService] Creating bill credit:', billCreditData);
 
-      const response = await fetch(`${this.baseUrl}/api/bill-credits`, {
+      const response = await fetch(`${this.baseUrl ? this.baseUrl : ""}/api/bill-credits`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
