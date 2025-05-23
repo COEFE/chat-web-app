@@ -55,7 +55,7 @@ export class BillCreditService {
               ${billCreditData.credit_date},
               ${billCreditData.due_date || billCreditData.credit_date},
               ${Number(billCreditData.total_amount)},
-              'open',
+              ${billCreditData.status || 'open'},
               ${billCreditData.terms || ''},
               ${billCreditData.memo},
               ${Number(billCreditData.ap_account_id)},
