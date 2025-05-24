@@ -36,6 +36,15 @@ export class AccountingOrchestrator {
     this.agents[agent.id] = agent;
     console.log(`[Orchestrator] Registered agent: ${agent.id} - ${agent.name}`);
   }
+  
+  /**
+   * Get an agent by its ID
+   * @param agentId The ID of the agent to retrieve
+   * @returns The agent with the specified ID, or undefined if not found
+   */
+  getAgentById(agentId: string): Agent | undefined {
+    return this.agents[agentId];
+  }
 
   /**
    * Process a user request by determining which specialized agent should handle it
@@ -126,10 +135,6 @@ export class AccountingOrchestrator {
   }
 
   /**
-   * Determine which specialized agent should handle the query
-   * Uses AI-based intent classification to route to the appropriate agent
-   */
-  /**
    * Detect bill payment intent in the query using AI-powered analysis
    */
   private async detectBillPaymentIntent(query: string): Promise<boolean> {
@@ -207,8 +212,18 @@ export class AccountingOrchestrator {
     try {
       console.log(`[Orchestrator] Determining target agent for query: "${query}"`);
       
-      // Check for bill payment patterns FIRST with AI
-      // This is prioritized because payment patterns can sometimes be mistaken for bill creation
+      // Check for credit card patterns FIRST
+      // Credit card refunds/transactions should be handled by credit card agent, not AP agent
+      const classification = await classifyUserIntent(query);
+      console.log(`[Orchestrator] Query classified as: ${classification.intent} (confidence: ${classification.confidence})`);
+      
+      if (classification.intent === 'credit_card' && classification.confidence > 0.6) {
+        console.log('[Orchestrator] Credit card query detected, routing to credit card agent');
+        return this.agents['credit_card_agent'];
+      }
+      
+      // Check for bill payment patterns SECOND (after credit card check)
+      // This prevents credit card refunds from being misclassified as bill payments
       if (await this.detectBillPaymentIntent(query)) {
         console.log('[Orchestrator] Bill payment query detected, routing to AP agent');
         return this.agents['ap_agent'];
@@ -232,11 +247,7 @@ export class AccountingOrchestrator {
         return undefined;
       }
       
-      // Use AI-based intent classification 
-      const classification = await classifyUserIntent(query);
-      console.log(`[Orchestrator] Query classified as: ${classification.intent} (confidence: ${classification.confidence})`);
-      
-      // Map intents to agent IDs
+      // Map remaining intents to agent IDs
       let targetAgentId: string | undefined = undefined;
       
       switch (classification.intent) {
@@ -251,6 +262,9 @@ export class AccountingOrchestrator {
           break;
         case 'reconciliation':
           targetAgentId = 'reconciliation_agent';
+          break;
+        case 'credit_card':
+          targetAgentId = 'credit_card_agent';
           break;
         default:
           // For unknown queries, as a fallback, we'll check if any agent claims it can handle the query

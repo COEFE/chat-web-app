@@ -2889,11 +2889,79 @@ export class CreditCardAgent implements Agent {
               }
             }
             
+            // Validate account IDs and amount before journal line insertion
+            if (!debitAccountId || !creditAccountId) {
+              throw new Error(`Invalid account IDs: debitAccountId=${debitAccountId}, creditAccountId=${creditAccountId}`);
+            }
+            if (!amount || amount <= 0) {
+              throw new Error(`Invalid amount: ${amount}`);
+            }
+            
+            // Verify accounts exist in database
+            const debitAccountCheck = await sql`SELECT id FROM accounts WHERE id = ${debitAccountId}`;
+            const creditAccountCheck = await sql`SELECT id FROM accounts WHERE id = ${creditAccountId}`;
+            
+            if (debitAccountCheck.rows.length === 0) {
+              throw new Error(`Debit account not found: ${debitAccountId}`);
+            }
+            if (creditAccountCheck.rows.length === 0) {
+              throw new Error(`Credit account not found: ${creditAccountId}`);
+            }
+            
+            console.log(`[CreditCardAgent] [${timestamp}] VALIDATION PASSED: debitAccountId=${debitAccountId}, creditAccountId=${creditAccountId}, amount=${amount}`);
             try {
-              // Insert first line
-              await sql.query(line1Query, line1Values);
-              // Insert second line
-              await sql.query(line2Query, line2Values);
+              // Insert both journal lines in a single statement to avoid trigger issues
+              let multiInsertQuery: string;
+              let multiInsertValues: any[];
+              
+              if (hasUserId && hasLineNumber) {
+                multiInsertQuery = `
+                  INSERT INTO journal_lines (journal_id, account_id, ${debitColumn}, ${creditColumn}, description, user_id, line_number) 
+                  VALUES 
+                    ($1, $2, $3, $4, $5, $6, $7),
+                    ($8, $9, $10, $11, $12, $13, $14)
+                `;
+                multiInsertValues = [
+                  journalEntryId, debitAccountId, amount, 0, transaction.description, context.userId, 1,
+                  journalEntryId, creditAccountId, 0, amount, transaction.description, context.userId, 2
+                ];
+              } else if (hasUserId && !hasLineNumber) {
+                multiInsertQuery = `
+                  INSERT INTO journal_lines (journal_id, account_id, ${debitColumn}, ${creditColumn}, description, user_id) 
+                  VALUES 
+                    ($1, $2, $3, $4, $5, $6),
+                    ($7, $8, $9, $10, $11, $12)
+                `;
+                multiInsertValues = [
+                  journalEntryId, debitAccountId, amount, 0, transaction.description, context.userId,
+                  journalEntryId, creditAccountId, 0, amount, transaction.description, context.userId
+                ];
+              } else if (!hasUserId && hasLineNumber) {
+                multiInsertQuery = `
+                  INSERT INTO journal_lines (journal_id, account_id, ${debitColumn}, ${creditColumn}, description, line_number) 
+                  VALUES 
+                    ($1, $2, $3, $4, $5, $6),
+                    ($7, $8, $9, $10, $11, $12)
+                `;
+                multiInsertValues = [
+                  journalEntryId, debitAccountId, amount, 0, transaction.description, 1,
+                  journalEntryId, creditAccountId, 0, amount, transaction.description, 2
+                ];
+              } else {
+                multiInsertQuery = `
+                  INSERT INTO journal_lines (journal_id, account_id, ${debitColumn}, ${creditColumn}, description) 
+                  VALUES 
+                    ($1, $2, $3, $4, $5),
+                    ($6, $7, $8, $9, $10)
+                `;
+                multiInsertValues = [
+                  journalEntryId, debitAccountId, amount, 0, transaction.description,
+                  journalEntryId, creditAccountId, 0, amount, transaction.description
+                ];
+              }
+              
+              // Execute the multi-row insert
+              await sql.query(multiInsertQuery, multiInsertValues);
               
               console.log(`[CreditCardAgent] [${timestamp}] Successfully created journal lines`);
             } catch (lineError) {
@@ -4130,10 +4198,7 @@ Do not include any other text outside of the JSON object.`;
                 refundAmount: Math.abs(transaction.amount),
                 refundDate: transaction.date,
                 description: transaction.description,
-                expenseAccountId: expenseAccountId,
-                apAccountId: accountId,
-                creditCardLastFour: accountName.slice(-4),
-                transactionId: transaction.transactionId || transaction.id || `tx-${Date.now()}`
+                apAccountId: accountId,                expenseAccountId: expenseAccountId,
               });
               break;
               

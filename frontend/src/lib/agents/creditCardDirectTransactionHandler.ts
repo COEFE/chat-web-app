@@ -2,9 +2,10 @@ import { AgentContext, AgentResponse } from "@/types/agents";
 import { extractTransactionWithAI, ExtractedTransaction } from "./creditCardTransactionExtractor";
 import { 
   shouldCreateBillCredit,
-  createCreditCardRefund,
-  createCreditCardChargeback,
+  createCreditCardRefund, 
+  createCreditCardChargeback, 
   createGeneralCreditCardBillCredit,
+  createJournalEntryForBillCredit,
   getCreditCardCreditType
 } from "./creditCardBillCreditIntegration";
 import { logAuditEvent } from "@/lib/auditLogger";
@@ -388,18 +389,49 @@ async function createBillCreditForTransaction(
       amount: transaction.amount || 0
     });
     
-    // Find or create an expense account
-    const expenseAccountResult = await findOrCreateExpenseAccount(context.userId, 
-      transaction.type === 'chargeback' ? 'Credit Card Chargebacks' : 'Credit Card Refunds');
+    // Import the AI account selector
+    const { selectAccountsWithAI } = await import('./aiAccountSelector');
     
-    if (!expenseAccountResult.success || !expenseAccountResult.account) {
-      return {
-        success: false,
-        error: "Failed to find or create expense account"
-      };
+    // Use AI to select the appropriate accounts
+    const accountSelectionResult = await selectAccountsWithAI({
+      transactionDescription: transaction.description || '',
+      transactionAmount: transaction.amount || 0,
+      transactionDate: transaction.date || new Date().toISOString().split('T')[0],
+      transactionType: creditType,
+      vendorName: vendor.name || vendor.vendor_name || transaction.vendor || '',
+      userId: context.userId || 'system',
+      creditCardLastFour: transaction.accountLastFour || account.code?.slice(-4) || '****',
+      transactionCategory: transaction.type || creditType || ''
+    });
+    
+    // If AI selection failed, fall back to the original method
+    let expenseAccountId: number;
+    let apAccountId: number = account.id; // Default to the provided account
+    
+    if (accountSelectionResult.success) {
+      console.log(`[CreditCardDirectTransactionHandler] AI selected accounts:`, {
+        expenseAccount: accountSelectionResult.expenseAccountName,
+        apAccount: accountSelectionResult.apAccountName,
+        confidence: accountSelectionResult.confidence
+      });
+      
+      expenseAccountId = accountSelectionResult.expenseAccountId!;
+      apAccountId = accountSelectionResult.apAccountId!;
+    } else {
+      console.log(`[CreditCardDirectTransactionHandler] AI account selection failed, falling back to default method`);
+      // Fall back to the original method
+      const expenseAccountResult = await findOrCreateExpenseAccount(context.userId, 
+        transaction.type === 'chargeback' ? 'Credit Card Chargebacks' : 'Credit Card Refunds');
+      
+      if (!expenseAccountResult.success || !expenseAccountResult.account) {
+        return {
+          success: false,
+          error: "Failed to find or create expense account"
+        };
+      }
+      
+      expenseAccountId = expenseAccountResult.account.id;
     }
-    
-    const expenseAccountId = expenseAccountResult.account.id;
     
     // Ensure we have a valid user ID
     const userId = context.userId || 'system';
@@ -416,10 +448,10 @@ async function createBillCreditForTransaction(
           refundDate: transaction.date || new Date().toISOString().split('T')[0],
           description: transaction.description || `${transaction.vendor} refund`,
           expenseAccountId: expenseAccountId,
-          apAccountId: account.id,
+          apAccountId: apAccountId, // Use AI-selected AP account
           userId: userId,
           creditCardLastFour: transaction.accountLastFour || account.code?.slice(-4) || '****',
-          transactionId: `${transaction.vendor}-${Date.now()}`
+          originalTransactionId: `${transaction.vendor}-${Date.now()}`
         });
         break;
         
@@ -431,7 +463,7 @@ async function createBillCreditForTransaction(
           chargebackDate: transaction.date || new Date().toISOString().split('T')[0],
           description: transaction.description || `${transaction.vendor} chargeback`,
           expenseAccountId: expenseAccountId,
-          apAccountId: account.id,
+          apAccountId: apAccountId, // Use AI-selected AP account
           userId: userId,
           creditCardLastFour: transaction.accountLastFour || account.code?.slice(-4) || '****',
           originalTransactionId: `${transaction.vendor}-original`
@@ -446,9 +478,10 @@ async function createBillCreditForTransaction(
           creditDate: transaction.date || new Date().toISOString().split('T')[0],
           description: transaction.description || `${transaction.vendor} credit`,
           expenseAccountId: expenseAccountId,
-          apAccountId: account.id,
+          apAccountId: apAccountId, // Use AI-selected AP account
           userId: userId,
           creditNumber: `CC-CREDIT-${Date.now()}`,
+          creditCardLastFour: transaction.accountLastFour || account.code?.slice(-4) || '****',
           memo: `Credit card credit: ${transaction.description}`
         });
     }
@@ -470,6 +503,77 @@ async function createBillCreditForTransaction(
         status: 'SUCCESS',
         timestamp: new Date().toISOString()
       });
+      
+      // Create journal entry for the bill credit
+      if (result.billCredit) {
+        console.log('[CreditCardDirectTransactionHandler] Creating journal entry for bill credit:', result.billCredit.id);
+        
+        try {
+          const journalResult = await createJournalEntryForBillCredit({
+            billCredit: result.billCredit,
+            expenseAccountId: expenseAccountId,
+            apAccountId: apAccountId,
+            userId: context.userId,
+            conversationId: context.conversationId
+          });
+          
+          if (journalResult.success) {
+            console.log('[CreditCardDirectTransactionHandler] Successfully created journal entry:', journalResult.journalId);
+            
+            // Log successful journal creation
+            await logAuditEvent({
+              user_id: context.userId,
+              action_type: 'journal_entry_created',
+              entity_type: 'JOURNAL',
+              entity_id: journalResult.journalId?.toString(),
+              context: {
+                bill_credit_id: result.billCredit.id,
+                journal_id: journalResult.journalId,
+                source: 'credit_card_bill_credit',
+                user_id: context.userId
+              },
+              status: 'SUCCESS',
+              timestamp: new Date().toISOString()
+            });
+          } else {
+            console.error('[CreditCardDirectTransactionHandler] Failed to create journal entry:', journalResult.error);
+            
+            // Log failed journal creation (but don't fail the overall operation)
+            await logAuditEvent({
+              user_id: context.userId,
+              action_type: 'journal_entry_creation_failed',
+              entity_type: 'JOURNAL',
+              entity_id: 'unknown',
+              context: {
+                bill_credit_id: result.billCredit.id,
+                error: journalResult.error,
+                source: 'credit_card_bill_credit',
+                user_id: context.userId
+              },
+              status: 'FAILURE',
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch (journalError) {
+          console.error('[CreditCardDirectTransactionHandler] Error creating journal entry:', journalError);
+          
+          // Log journal creation error (but don't fail the overall operation)
+          await logAuditEvent({
+            user_id: context.userId,
+            action_type: 'journal_entry_creation_error',
+            entity_type: 'JOURNAL',
+            entity_id: 'unknown',
+            context: {
+              bill_credit_id: result.billCredit.id,
+              error: journalError instanceof Error ? journalError.message : 'Unknown error',
+              source: 'credit_card_bill_credit',
+              user_id: context.userId
+            },
+            status: 'FAILURE',
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
       
       return {
         success: true,

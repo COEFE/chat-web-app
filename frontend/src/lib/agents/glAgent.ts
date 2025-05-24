@@ -43,6 +43,50 @@ export class GLAgent implements Agent {
     this.anthropic = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || "",
     });
+    
+    // Register this agent's message handler
+    this.registerMessageHandler();
+  }
+  
+  /**
+   * Register this agent's message handler with the agent communication system
+   */
+  private async registerMessageHandler(): Promise<void> {
+    try {
+      // Import the agent communication functions dynamically to avoid circular dependencies
+      const { registerAgentMessageHandler } = await import('@/lib/agentCommunication');
+      
+      // Register a handler for this agent's messages
+      registerAgentMessageHandler(this.id, async (message) => {
+        console.log(`[GLAgent] Processing message from handler: ${message.id}, action: ${message.action}`);
+        
+        // Create a minimal context for processing the message
+        const context: AgentContext = {
+          query: '',
+          userId: message.userId,
+          conversationId: message.conversationId,
+          previousMessages: [],
+          additionalContext: {}
+        };
+        
+        // Handle different message actions
+        switch (message.action) {
+          case 'CREATE_GL_ACCOUNT':
+            await this.handleGLAccountCreationRequest(message, context);
+            break;
+          case 'CREATE_JOURNAL_ENTRY':
+            await this.handleJournalEntryCreationRequest(message, context);
+            break;
+            
+          default:
+            throw new Error(`Unknown action: ${message.action}`);
+        }
+      });
+      
+      console.log(`[GLAgent] Registered message handler for agent: ${this.id}`);
+    } catch (error) {
+      console.error('[GLAgent] Error registering message handler:', error);
+    }
   }
 
   /**
@@ -143,6 +187,9 @@ export class GLAgent implements Agent {
             case 'CREATE_GL_ACCOUNT':
               await this.handleGLAccountCreationRequest(message, context);
               break;
+            case 'CREATE_JOURNAL_ENTRY':
+              await this.handleJournalEntryCreationRequest(message, context);
+              break;
               
             default:
               // Unknown action
@@ -186,11 +233,13 @@ export class GLAgent implements Agent {
    * @param message The agent message
    * @param context The agent context
    */
-  private async handleGLAccountCreationRequest(message: any, context: AgentContext): Promise<void> {
+  private async handleGLAccountCreationRequest(message: { id: string; payload: any; sender: string; userId: string; }, context: AgentContext): Promise<void> {
     const { respondToAgentMessage, MessageStatus } = await import('@/lib/agentCommunication');
     
     try {
-      console.log('[GLAgent] Handling GL account creation request:', message);
+      console.log('[GLAgent] Handling GL account creation request. Message ID:', message.id);
+      console.log('[GLAgent] Message payload:', JSON.stringify(message.payload));
+      console.log('[GLAgent] Sender:', message.sender);
       
       // Extract account information from the message payload
       const { 
@@ -199,13 +248,28 @@ export class GLAgent implements Agent {
         suggestedName, 
         accountType,
         startingBalance,
-        balanceDate 
+        balanceDate,
+        description // Additional field that might be sent by CreditCardAgent
       } = message.payload;
+      
+      console.log('[GLAgent] Extracted fields:', {
+        suggestedName,
+        accountType,
+        expenseDescription,
+        expenseType,
+        description
+      });
       
       // Validate required fields
       if (!suggestedName || !accountType) {
+        console.error('[GLAgent] Missing required fields for account creation:', {
+          suggestedName: !!suggestedName,
+          accountType: !!accountType
+        });
         throw new Error('Missing required fields for GL account creation');
       }
+      
+      console.log('[GLAgent] Required fields validation passed');
       
       // Convert starting balance to number if provided
       const initialBalance = startingBalance ? parseFloat(startingBalance) : undefined;
@@ -258,6 +322,51 @@ export class GLAgent implements Agent {
           code = startCode.toString();
           console.log(`[GLAgent] No existing expense accounts, using code: ${code}`);
         }
+      } else if (accountType === 'liability' && expenseType === 'credit_card') {
+        // Special handling for credit card liability accounts
+        // Use 2100-2199 range for credit card accounts
+        let startCode = 2100;
+        let endCode = 2199;
+        let availableCode = null;
+        
+        console.log(`[GLAgent] Finding code for credit card liability account`);
+        
+        // Get existing credit card account codes
+        const query = `
+          SELECT code FROM accounts 
+          WHERE LOWER(account_type) = 'liability' AND code ~ '^[0-9]+$'
+          AND CAST(code AS INTEGER) BETWEEN ${startCode} AND ${endCode}
+          ORDER BY CAST(code AS INTEGER) ASC
+        `;
+        
+        const result = await sql.query(query);
+        
+        if (result.rows.length > 0) {
+          // Convert to array of integers for easier processing
+          const existingCodes = result.rows.map(row => parseInt(row.code));
+          
+          // Find the first available code in the range
+          for (let i = startCode; i <= endCode; i++) {
+            if (!existingCodes.includes(i)) {
+              availableCode = i;
+              break;
+            }
+          }
+          
+          // If we found an available code, use it
+          if (availableCode) {
+            code = availableCode.toString();
+            console.log(`[GLAgent] Found available credit card account code: ${code}`);
+          } else {
+            // If all codes in range are taken, use a different range
+            code = '2200';
+            console.log(`[GLAgent] All credit card account codes in range ${startCode}-${endCode} are taken, using ${code}`);
+          }
+        } else {
+          // No existing credit card accounts, start at the beginning of the range
+          code = startCode.toString();
+          console.log(`[GLAgent] No existing credit card accounts, using code: ${code}`);
+        }
       } else {
         // For other account types, generate a code based on the type
         // This is a simplified approach - in a real system, you'd have more logic here
@@ -270,12 +379,24 @@ export class GLAgent implements Agent {
         };
         
         code = typeCodeMap[accountType.toLowerCase()] || '9000';
+        console.log(`[GLAgent] Using default code for ${accountType}: ${code}`);
       }
       
       // Create notes from the description if available
-      const notes = expenseDescription 
-        ? `Account created for: ${expenseDescription}${expenseType ? ` (${expenseType})` : ''}` 
-        : `Account created by ${message.sender} agent`;
+      let notes = '';
+      
+      if (description) {
+        // Use the explicit description if provided (e.g., from CreditCardAgent)
+        notes = description;
+      } else if (expenseDescription) {
+        // Fall back to expense description if available
+        notes = `Account created for: ${expenseDescription}${expenseType ? ` (${expenseType})` : ''}`;
+      } else {
+        // Default note
+        notes = `Account created by ${message.sender} agent`;
+      }
+      
+      console.log(`[GLAgent] Using notes: ${notes}`);
       
       // Create the GL account with optional starting balance
       const result = await createGLAccount(
@@ -288,11 +409,23 @@ export class GLAgent implements Agent {
       );
       
       if (result.success) {
-        // Respond with success
+        console.log(`[GLAgent] Successfully created account:`, result.account);
+        
+        // Prepare a detailed response payload with all necessary account information
+        const responsePayload = {
+          account: result.account,
+          accountId: result.account?.id,
+          accountName: name,
+          accountCode: code,
+          accountType: accountType,
+          success: true
+        };
+        
+        // Respond with success and include the full account details
         await respondToAgentMessage(
           message.id,
           MessageStatus.COMPLETED,
-          { account: result.account },
+          responsePayload,
           `Successfully created GL account: ${name} (${code})`
         );
         
@@ -326,7 +459,7 @@ export class GLAgent implements Agent {
           timestamp: new Date().toISOString()
         });
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('[GLAgent] Error handling GL account creation request:', error);
       
       // Respond with error
@@ -336,6 +469,124 @@ export class GLAgent implements Agent {
         { error: error instanceof Error ? error.message : 'Unknown error' },
         `Error creating GL account: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
+      
+      // Re-throw the error to be handled by the caller
+      throw error;
+    }
+  }
+
+  /**
+   * Handle a journal entry creation request from another agent
+   * @param message The agent message
+   * @param context The agent context
+   */
+  private async handleJournalEntryCreationRequest(message: { id: string; payload: any; sender: string; userId: string; }, context: AgentContext): Promise<void> {
+    const { respondToAgentMessage, MessageStatus } = await import('@/lib/agentCommunication');
+    
+    try {
+      console.log('[GLAgent] Handling journal entry creation request. Message ID:', message.id);
+      console.log('[GLAgent] Message payload:', JSON.stringify(message.payload));
+      console.log('[GLAgent] Sender:', message.sender);
+      
+      // Extract journal entry information from the message payload
+      const { journalEntry, billCreditId, source } = message.payload;
+      
+      if (!journalEntry) {
+        throw new Error('Missing journal entry data in message payload');
+      }
+      
+      console.log('[GLAgent] Creating journal entry for bill credit:', billCreditId);
+      
+      // Create the journal entry using the existing utility
+      const result = await createJournalFromAI(journalEntry, message.userId);
+      
+      if (result.success) {
+        console.log(`[GLAgent] Successfully created journal entry:`, result.journalId);
+        
+        // Prepare response payload
+        const responsePayload = {
+          journalId: result.journalId,
+          billCreditId,
+          source,
+          success: true
+        };
+        
+        // Respond with success
+        await respondToAgentMessage(
+          message.id,
+          MessageStatus.COMPLETED,
+          responsePayload,
+          `Successfully created journal entry with ID: ${result.journalId}`
+        );
+        
+        // Log the successful journal creation
+        await logAuditEvent({
+          user_id: message.userId,
+          action_type: "CREATE_JOURNAL",
+          entity_type: "JOURNAL",
+          entity_id: result.journalId?.toString() || 'unknown',
+          context: { 
+            message, 
+            journalId: result.journalId, 
+            billCreditId,
+            source,
+            agentId: this.id 
+          },
+          status: "SUCCESS",
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        // Respond with failure
+        await respondToAgentMessage(
+          message.id,
+          MessageStatus.FAILED,
+          { error: result.message, missingAccounts: result.missingAccounts },
+          `Failed to create journal entry: ${result.message}`
+        );
+        
+        // Log the failed journal creation
+        await logAuditEvent({
+          user_id: message.userId,
+          action_type: "CREATE_JOURNAL",
+          entity_type: "JOURNAL",
+          entity_id: 'unknown',
+          context: { 
+            message, 
+            error: result.message, 
+            missingAccounts: result.missingAccounts,
+            billCreditId,
+            source,
+            agentId: this.id 
+          },
+          status: "FAILURE",
+          timestamp: new Date().toISOString()
+        });
+      }
+    } catch (error: unknown) {
+      console.error('[GLAgent] Error handling journal entry creation request:', error);
+      
+      // Respond with error
+      await respondToAgentMessage(
+        message.id,
+        MessageStatus.FAILED,
+        { error: error instanceof Error ? error.message : 'Unknown error' },
+        `Error creating journal entry: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      
+      // Log the error
+      await logAuditEvent({
+        user_id: message.userId,
+        action_type: "CREATE_JOURNAL",
+        entity_type: "JOURNAL",
+        entity_id: 'unknown',
+        context: { 
+          message, 
+          error: error instanceof Error ? error.message : 'Unknown error',
+          agentId: this.id 
+        },
+        status: "FAILURE",
+        timestamp: new Date().toISOString()
+      });
       
       // Re-throw the error to be handled by the caller
       throw error;
@@ -1209,7 +1460,7 @@ Make sure the journal entry is valid - debits must equal credits. Every line mus
           if (debitLines.length > 0) {
             lineUpdates.push({
               lineId: debitLines[0].id,
-              field: 'debit' as const, // Explicitly type as const
+              field: 'debit' as const,
               value: Number(editDetails.value || 0)
             });
           }
@@ -1219,7 +1470,7 @@ Make sure the journal entry is valid - debits must equal credits. Every line mus
           if (creditLines.length > 0) {
             lineUpdates.push({
               lineId: creditLines[0].id,
-              field: 'credit' as const, // Explicitly type as const
+              field: 'credit' as const,
               value: Number(editDetails.value || 0)
             });
           }
@@ -1238,7 +1489,7 @@ Make sure the journal entry is valid - debits must equal credits. Every line mus
             if (parseFloat(line.debit) > 0 || parseFloat(line.credit) > 0) {
               updates.lineUpdates.push({
                 lineId: line.id,
-                field: (parseFloat(line.debit) > 0 ? 'debit' : 'credit') as 'debit' | 'credit', // Cast to union type
+                field: (parseFloat(line.debit) > 0 ? 'debit' : 'credit') as 'debit' | 'credit',
                 value: Number(editDetails.value)
               });
               break; // Just update the first matching line
@@ -1305,7 +1556,7 @@ Make sure the journal entry is valid - debits must equal credits. Every line mus
       };
     }
   }
-  
+
   private async handleJournalSummary(context: AgentContext): Promise<AgentResponse> {
     try {
       // Use direct SQL queries with correct column names based on database schema
@@ -1669,21 +1920,21 @@ First explain the journal entry you're creating with a clear explanation of why 
       if (journalRows.length === 0) {
         return {
           success: false,
-          message: `Journal #${journalId} does not exist.`
+          message: `Journal entry #${journalId} not found.`
         };
       }
 
       if (journalRows[0].is_posted) {
         return {
           success: false,
-          message: `Journal #${journalId} is already posted. You cannot delete attachments from posted journal entries.`
+          message: `Cannot delete attachments from posted journal entry #${journalId}.`
         };
       }
 
       if (journalRows[0].is_deleted) {
         return {
           success: false,
-          message: `Journal #${journalId} has been deleted. You cannot delete attachments from deleted journal entries.`
+          message: `Cannot delete attachments from deleted journal entry #${journalId}.`
         };
       }
 
@@ -1809,7 +2060,7 @@ First explain the journal entry you're creating with a clear explanation of why 
             
             return {
               success: true,
-              message: `Successfully deleted the attachment "${onlyAttachment.file_name}" from journal #${journalId}.`
+              message: `Attachment "${onlyAttachment.file_name}" from journal #${journalId} has been deleted.`
             };
           } catch (error) {
             console.error("[GLAgent] Error deleting attachment:", error);
@@ -1852,8 +2103,23 @@ First explain the journal entry you're creating with a clear explanation of why 
 
       // Ensure we have a file in the document context
       const docCtx = context.documentContext || {};
-      const fileUrl: string | undefined = docCtx.fileUrl || docCtx.url;
-      const fileName: string | undefined = docCtx.fileName || docCtx.name;
+      
+      // Handle both old format and new DocumentContext interface
+      let fileUrl: string | undefined;
+      if ('fileUrl' in docCtx && typeof docCtx.fileUrl === 'string') {
+        fileUrl = docCtx.fileUrl;
+      } else if ('url' in docCtx && typeof docCtx.url === 'string') {
+        fileUrl = docCtx.url;
+      } else if ('type' in docCtx && docCtx.type === 'pdf' && 'content' in docCtx && typeof docCtx.content === 'string') {
+        fileUrl = 'data:application/pdf;base64,' + docCtx.content;
+      }
+      
+      let fileName: string | undefined;
+      if ('fileName' in docCtx && typeof docCtx.fileName === 'string') {
+        fileName = docCtx.fileName;
+      } else if ('name' in docCtx && typeof docCtx.name === 'string') {
+        fileName = docCtx.name;
+      }
 
       if (!fileUrl) {
         return { success: false, message: "Please provide the file you want to attach (e.g., upload it in the chat) so I can attach it to the journal entry." };

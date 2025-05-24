@@ -272,10 +272,139 @@ export function clearOldMessages(maxAgeMs: number = 24 * 60 * 60 * 1000): void {
   });
 }
 
-// Set up a periodic cleanup of old messages
+/**
+ * Wait for a response to a specific agent message
+ * @param messageId The ID of the message to wait for a response
+ * @param timeoutMs Maximum time to wait in milliseconds
+ * @returns The response message or null if timeout
+ */
+export async function waitForAgentResponse(
+  messageId: string,
+  timeoutMs: number = 5000
+): Promise<AgentMessage | null> {
+  const startTime = Date.now();
+  
+  // Check if the message exists
+  let message = getMessageById(messageId);
+  if (!message) {
+    console.error(`[AgentCommunication] Cannot wait for message ${messageId}: Message not found`);
+    return null;
+  }
+  
+  // If the message already has a response, return it immediately
+  if (message.status === MessageStatus.COMPLETED || 
+      message.status === MessageStatus.FAILED || 
+      message.status === MessageStatus.REJECTED) {
+    return message;
+  }
+  
+  // Wait for the response with timeout
+  return new Promise((resolve) => {
+    // Set a timeout to resolve with null if no response is received
+    const timeout = setTimeout(() => {
+      console.log(`[AgentCommunication] Timeout waiting for response to message ${messageId}`);
+      resolve(null);
+    }, timeoutMs);
+    
+    // Check for response periodically
+    const checkInterval = setInterval(() => {
+      const currentTime = Date.now();
+      const elapsedTime = currentTime - startTime;
+      
+      // Get the latest message state
+      const currentMessage = getMessageById(messageId);
+      
+      // If the message has a response or we've exceeded the timeout, resolve
+      if (currentMessage && (
+          currentMessage.status === MessageStatus.COMPLETED || 
+          currentMessage.status === MessageStatus.FAILED || 
+          currentMessage.status === MessageStatus.REJECTED)) {
+        clearTimeout(timeout);
+        clearInterval(checkInterval);
+        resolve(currentMessage);
+      } else if (elapsedTime >= timeoutMs) {
+        clearTimeout(timeout);
+        clearInterval(checkInterval);
+        resolve(null);
+      }
+    }, 100); // Check every 100ms
+  });
+}
+
+// Registered agent handlers for processing messages
+type AgentMessageHandler = (message: AgentMessage) => Promise<void>;
+const agentMessageHandlers: Record<string, AgentMessageHandler> = {};
+
+/**
+ * Register a handler for processing messages for a specific agent
+ * @param agentId The ID of the agent
+ * @param handler The handler function to process messages
+ */
+export function registerAgentMessageHandler(agentId: string, handler: AgentMessageHandler): void {
+  agentMessageHandlers[agentId] = handler;
+  console.log(`[AgentCommunication] Registered message handler for agent: ${agentId}`);
+}
+
+/**
+ * Process pending messages for all registered agents
+ */
+async function processPendingMessages(): Promise<void> {
+  try {
+    // Get all agents with pending messages
+    const agentsWithPendingMessages = Object.keys(agentMessageHandlers).filter(agentId => {
+      const pendingMessages = getPendingMessagesForAgent(agentId);
+      return pendingMessages.length > 0;
+    });
+    
+    if (agentsWithPendingMessages.length === 0) {
+      return; // No pending messages to process
+    }
+    
+    console.log(`[AgentCommunication] Processing pending messages for ${agentsWithPendingMessages.length} agents`);
+    
+    // Process messages for each agent
+    for (const agentId of agentsWithPendingMessages) {
+      const pendingMessages = getPendingMessagesForAgent(agentId);
+      console.log(`[AgentCommunication] Agent ${agentId} has ${pendingMessages.length} pending messages`);
+      
+      const handler = agentMessageHandlers[agentId];
+      if (handler) {
+        // Process each message
+        for (const message of pendingMessages) {
+          try {
+            console.log(`[AgentCommunication] Processing message ${message.id} for agent ${agentId}`);
+            await updateMessageStatus(message.id, MessageStatus.PROCESSING);
+            await handler(message);
+          } catch (error) {
+            console.error(`[AgentCommunication] Error processing message ${message.id} for agent ${agentId}:`, error);
+            // Mark message as failed
+            await respondToAgentMessage(
+              message.id,
+              MessageStatus.FAILED,
+              { error: error instanceof Error ? error.message : 'Unknown error' },
+              `Failed to process message: ${error instanceof Error ? error.message : 'Unknown error'}`
+            );
+          }
+        }
+      } else {
+        console.warn(`[AgentCommunication] No handler registered for agent ${agentId}`);
+      }
+    }
+  } catch (error) {
+    console.error('[AgentCommunication] Error processing pending messages:', error);
+  }
+}
+
+// Set up a periodic cleanup of old messages and process pending messages
 // In a production environment, this would be handled by a cron job or similar
 if (typeof window === 'undefined') { // Only run on server
+  // Clean up old messages every 6 hours
   setInterval(() => {
     clearOldMessages();
-  }, 6 * 60 * 60 * 1000); // Run every 6 hours
+  }, 6 * 60 * 60 * 1000);
+  
+  // Process pending messages every 1 second
+  setInterval(() => {
+    processPendingMessages();
+  }, 1000);
 }
