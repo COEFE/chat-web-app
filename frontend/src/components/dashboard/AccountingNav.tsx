@@ -27,6 +27,7 @@ export function AccountingNav() {
       subLinks: [
         { name: "Vendors", href: "/dashboard/accounts-payable/vendors" },
         { name: "Bills", href: "/dashboard/accounts-payable/bills" },
+        { name: "Bill Credits", href: "/dashboard/accounts-payable/bill-credits" },
         { name: "Aging Report", href: "/dashboard/accounts-payable/aging-report" }
       ]
     },

@@ -7,8 +7,7 @@ export async function GET() {
     const result = await identifyExpenseAccountWithAI({
       memo: "Office supplies - paper, pens, and printer ink",
       vendorId: 1,
-      accountName: "Office Supplies",
-      amount: "120.50"
+      amount: 120.50  // Convert string to number
     });
 
     return NextResponse.json({

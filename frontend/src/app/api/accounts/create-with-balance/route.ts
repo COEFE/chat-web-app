@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     
     // Parse the request body
     const body = await req.json();
-    const { code: rawCode, name, accountType, startingBalance, notes, balanceDate } = body;
+    const { code: rawCode, name, accountType, startingBalance, notes, balanceDate, parentId } = body;
     
     // Validate required fields
     if (!rawCode || !name || !accountType) {
@@ -98,7 +98,8 @@ export async function POST(req: NextRequest) {
         userId,
         initialBalance,
         balanceDate || new Date().toISOString().split('T')[0], // Use provided date or today
-        accountType as 'asset' | 'liability' | 'equity' | 'revenue' | 'expense' // Pass the account type directly
+        accountType as 'asset' | 'liability' | 'equity' | 'revenue' | 'expense', // Pass the account type directly
+        parentId || null // Pass the parent ID if provided
       );
       
       console.log(`[create-with-balance] Result:`, result);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { getAuth } from 'firebase/auth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,8 +23,19 @@ export default function CreateGLAccountWithBalanceButton() {
     accountType: 'expense',
     startingBalance: '0',
     notes: '',
-    balanceDate: new Date().toISOString().split('T')[0] // Today's date in YYYY-MM-DD format
+    balanceDate: new Date().toISOString().split('T')[0], // Today's date in YYYY-MM-DD format
+    parentId: 'none'
   });
+  
+  // State for accounts list
+  const [accounts, setAccounts] = useState<Array<{
+    id: number;
+    code: string;
+    name: string;
+    account_type: string;
+    parent_id: number | null;
+  }>>([]);
+  const [isLoadingAccounts, setIsLoadingAccounts] = useState(false);
   const [journalId, setJournalId] = useState<number | null>(null);
   const [accountId, setAccountId] = useState<number | null>(null);
 
@@ -40,8 +51,58 @@ export default function CreateGLAccountWithBalanceButton() {
    * Handle select changes
    */
   const handleSelectChange = (name: string, value: string) => {
-    setAccountDetails(prev => ({ ...prev, [name]: value }));
+    // If changing account type, reset parent ID since parents are filtered by type
+    if (name === 'accountType') {
+      setAccountDetails(prev => ({ ...prev, [name]: value, parentId: '' }));
+    } else {
+      setAccountDetails(prev => ({ ...prev, [name]: value }));
+    }
   };
+  
+  /**
+   * Fetch accounts for parent dropdown
+   */
+  const fetchAccounts = async () => {
+    setIsLoadingAccounts(true);
+    try {
+      // Get the current user and ID token from Firebase
+      const auth = getAuth();
+      const user = auth.currentUser;
+      
+      if (!user) {
+        setError('No authenticated user found. Please log in again.');
+        setIsLoadingAccounts(false);
+        return;
+      }
+      
+      // Get the ID token
+      const idToken = await user.getIdToken(true);
+
+      // Fetch accounts from API
+      const response = await fetch('/api/accounts', {
+        headers: {
+          'Authorization': `Bearer ${idToken}`
+        }
+      });
+      
+      const data = await response.json();
+      
+      if (data.accounts) {
+        setAccounts(data.accounts);
+      } else if (data.error) {
+        console.error('Error fetching accounts:', data.error);
+      }
+    } catch (err) {
+      console.error('Error fetching accounts:', err);
+    } finally {
+      setIsLoadingAccounts(false);
+    }
+  };
+  
+  // Fetch accounts on component mount
+  useEffect(() => {
+    fetchAccounts();
+  }, []);
 
   /**
    * Create GL account with starting balance
@@ -67,6 +128,12 @@ export default function CreateGLAccountWithBalanceButton() {
       // Get the ID token
       const idToken = await user.getIdToken(true);
 
+      // Prepare the request data - convert parentId to number if it exists
+      const requestData = {
+        ...accountDetails,
+        parentId: accountDetails.parentId && accountDetails.parentId !== 'none' ? parseInt(accountDetails.parentId, 10) : null
+      };
+      
       // Make the API request with the authorization header
       const response = await fetch('/api/accounts/create-with-balance', {
         method: 'POST',
@@ -74,7 +141,7 @@ export default function CreateGLAccountWithBalanceButton() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${idToken}`
         },
-        body: JSON.stringify(accountDetails)
+        body: JSON.stringify(requestData)
       });
       
       const data = await response.json();
@@ -207,7 +274,28 @@ export default function CreateGLAccountWithBalanceButton() {
               />
             </div>
             <div className="space-y-2">
-              {/* Placeholder for layout balance */}
+              <Label htmlFor="parentId">Parent Account</Label>
+              <Select
+                value={accountDetails.parentId}
+                onValueChange={(value) => handleSelectChange('parentId', value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="No parent (top-level account)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No parent (top-level account)</SelectItem>
+                  {accounts
+                    .filter(account => account.account_type?.toLowerCase() === accountDetails.accountType.toLowerCase())
+                    .sort((a, b) => a.code.localeCompare(b.code))
+                    .map(account => (
+                      <SelectItem key={account.id} value={account.id.toString()}>
+                        {account.code} - {account.name}
+                      </SelectItem>
+                    ))
+                  }
+                </SelectContent>
+              </Select>
+              {isLoadingAccounts && <p className="text-xs text-muted-foreground mt-1">Loading accounts...</p>}
             </div>
           </div>
           

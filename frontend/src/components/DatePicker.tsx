@@ -17,9 +17,10 @@ interface DatePickerProps {
   setDate: (date: Date | undefined) => void;
   className?: string;
   id?: string;
+  placeholder?: string;
 }
 
-export function DatePicker({ date, setDate, className, id }: DatePickerProps) {
+export function DatePicker({ date, setDate, className, id, placeholder }: DatePickerProps) {
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -35,7 +36,7 @@ export function DatePicker({ date, setDate, className, id }: DatePickerProps) {
           <CalendarIcon className="mr-2 h-4 w-4" />
           {date && date instanceof Date && !isNaN(date.getTime()) 
             ? format(date, "PPP") 
-            : <span>Pick a date</span>}
+            : <span>{placeholder || "Pick a date"}</span>}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0">

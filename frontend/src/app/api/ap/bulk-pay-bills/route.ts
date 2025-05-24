@@ -1,8 +1,16 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
-import { NextRequest } from 'next/server';
-import { createBulkBillPayments, CreateBulkBillPaymentsData } from '@/lib/accounting/apQueries';
+import { sql } from '@vercel/postgres';
 import { z } from 'zod';
+
+// Define the interface for bulk bill payment data
+interface CreateBulkBillPaymentsData {
+  billIds: number[];
+  paymentDate: string;
+  paymentAccountId: number;
+  paymentMethod?: string;
+  referenceNumber?: string;
+}
 
 // Helper function to determine a valid payment account ID
 async function getPaymentAccountId(authToken: string, paymentMethod?: string, billInfo?: any): Promise<number | null> {
@@ -112,8 +120,100 @@ export async function POST(request: Request) {
         referenceNumber,
       };
 
-      console.log('[API /ap/bulk-pay-bills] Calling createBulkBillPayments with data:', bulkPaymentData);
-      const result = await createBulkBillPayments(bulkPaymentData, userId);
+      console.log('[API /ap/bulk-pay-bills] Processing bulk bill payments with data:', bulkPaymentData);
+      
+      // Implement the bulk payment processing directly in the route handler
+      const successes: { billId: number; message: string }[] = [];
+      const failures: { billId: number; error: string }[] = [];
+      
+      // Process each bill payment
+      for (const billId of billIds) {
+        try {
+          // Get the bill details to determine the amount
+          const billResult = await sql`
+            SELECT id, bill_number, total_amount, vendor_id, ap_account_id FROM bills 
+            WHERE id = ${billId} AND user_id = ${userId}
+          `;
+          
+          if (billResult.rows.length === 0) {
+            failures.push({ billId, error: `Bill not found with ID ${billId}` });
+            continue;
+          }
+          
+          const bill = billResult.rows[0];
+          
+          // Get vendor name for the journal entry description
+          const vendorResult = await sql`
+            SELECT name FROM vendors WHERE id = ${bill.vendor_id} AND user_id = ${userId}
+          `;
+          
+          const vendorName = vendorResult.rows.length > 0 
+            ? vendorResult.rows[0].name 
+            : `Vendor ID ${bill.vendor_id}`;
+          
+          // Create a journal entry for the payment
+          const journalDescription = `Payment for bill #${bill.bill_number} to ${vendorName}`;
+          const referenceNumber = bulkPaymentData.referenceNumber || `PMT-${billId}-${Date.now()}`;
+          
+          // Create journal entry
+          const journalResult = await sql`
+            INSERT INTO journal_entries (
+              date, description, reference_number, user_id, created_at, updated_at
+            ) VALUES (
+              ${paymentDate}, ${journalDescription}, ${referenceNumber}, ${userId}, NOW(), NOW()
+            ) RETURNING id
+          `;
+          
+          const journalId = journalResult.rows[0].id;
+          
+          // Create journal entry lines
+          // 1. Credit the payment account (bank account)
+          await sql`
+            INSERT INTO journal_lines (
+              journal_id, account_id, description, debit, credit, created_at, updated_at
+            ) VALUES (
+              ${journalId}, ${paymentAccountId}, ${`Payment from account for bill #${bill.bill_number}`}, 0, ${bill.total_amount}, NOW(), NOW()
+            )
+          `;
+          
+          // 2. Debit the AP account
+          await sql`
+            INSERT INTO journal_lines (
+              journal_id, account_id, description, debit, credit, created_at, updated_at
+            ) VALUES (
+              ${journalId}, ${bill.ap_account_id}, ${`Payment to ${vendorName} for bill #${bill.bill_number}`}, ${bill.total_amount}, 0, NOW(), NOW()
+            )
+          `;
+          
+          // Update the bill status to Paid
+          await sql`
+            UPDATE bills SET status = 'Paid', updated_at = NOW() WHERE id = ${billId} AND user_id = ${userId}
+          `;
+          
+          // Record the payment in bill_payments table
+          await sql`
+            INSERT INTO bill_payments (
+              bill_id, payment_date, amount, payment_method, reference_number, journal_id, user_id, created_at, updated_at
+            ) VALUES (
+              ${billId}, ${paymentDate}, ${bill.total_amount}, ${paymentMethod || 'Bank Transfer'}, ${referenceNumber}, ${journalId}, ${userId}, NOW(), NOW()
+            )
+          `;
+          
+          successes.push({ 
+            billId, 
+            message: `Bill #${bill.bill_number} paid successfully with journal entry #${journalId}` 
+          });
+          
+        } catch (error) {
+          console.error(`[API /ap/bulk-pay-bills] Error processing bill ID ${billId}:`, error);
+          failures.push({ 
+            billId, 
+            error: error instanceof Error ? error.message : 'Unknown error occurred' 
+          });
+        }
+      }
+      
+      const result = { successes, failures };
       console.log('[API /ap/bulk-pay-bills] Bulk payment processing complete. Successes:', result.successes.length, 'Failures:', result.failures.length);
 
       // 5. Determine overall status and return response

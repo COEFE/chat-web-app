@@ -16,6 +16,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -48,16 +49,16 @@ const billLineSchema = z.object({
   expense_account_id: z.string().min(1, "Account is required"),
   description: z.string().optional(),
   quantity: z.string().min(1, "Quantity is required").refine(
-    (val) => !isNaN(parseFloat(val)) && parseFloat(val) > 0,
-    "Quantity must be a positive number"
+    (val) => !isNaN(parseFloat(val)) && parseFloat(val) !== 0,
+    "Quantity cannot be zero"
   ),
   unit_price: z.string().min(1, "Unit price is required").refine(
-    (val) => !isNaN(parseFloat(val)) && parseFloat(val) >= 0,
-    "Unit price must be a non-negative number"
+    (val) => !isNaN(parseFloat(val)),
+    "Unit price must be a valid number"
   ),
   amount: z.string().min(1, "Amount is required").refine(
-    (val) => !isNaN(parseFloat(val)) && parseFloat(val) >= 0,
-    "Amount must be a non-negative number"
+    (val) => !isNaN(parseFloat(val)),
+    "Amount must be a valid number"
   ),
   // Added fields to match journal entries
   category: z.string().optional(),
@@ -127,9 +128,11 @@ interface Bill {
 interface BillFormProps {
   bill: Bill | null;
   onClose: (refreshData?: boolean) => void;
+  isCreditNote?: boolean;
+  title?: string;
 }
 
-export function BillForm({ bill, onClose }: BillFormProps) {
+export function BillForm({ bill, onClose, isCreditNote = false, title = "Add Bill" }: BillFormProps) {
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -374,6 +377,10 @@ export function BillForm({ bill, onClose }: BillFormProps) {
       const auth = getAuth();
       const idToken = await auth.currentUser?.getIdToken();
       
+      // Calculate total amount, making it negative for credit notes if needed
+      const rawTotalAmount = calculateTotalAmount();
+      const totalAmount = isCreditNote && rawTotalAmount > 0 ? -rawTotalAmount : rawTotalAmount;
+      
       // Prepare bill data
       const billData = {
         vendor_id: parseInt(data.vendor_id),
@@ -381,24 +388,35 @@ export function BillForm({ bill, onClose }: BillFormProps) {
         bill_date: format(data.bill_date, 'yyyy-MM-dd'),
         due_date: format(data.due_date, 'yyyy-MM-dd'),
         terms: data.terms || null,
-        memo: data.memo || null,
+        memo: (isCreditNote ? 'CREDIT NOTE: ' : '') + (data.memo || ''),
         ap_account_id: parseInt(data.ap_account_id),
         status: data.status,
-        total_amount: calculateTotalAmount(),
+        total_amount: totalAmount,
       };
       
       // Prepare line items
-      const lineItems = data.lines.map(line => ({
-        id: line.id,
-        expense_account_id: parseInt(line.expense_account_id),
-        description: line.description || null,
-        quantity: parseAmount(line.quantity),
-        unit_price: parseAmount(line.unit_price),
-        amount: parseAmount(line.amount),
-        category: line.category || null,
-        location: line.location || null,
-        funder: line.funder || null
-      }));
+      const lineItems = data.lines.map(line => {
+        // For credit notes, ensure amounts are negative if they're not already
+        const quantity = parseAmount(line.quantity);
+        const unitPrice = parseAmount(line.unit_price);
+        const amount = parseAmount(line.amount);
+        
+        // If this is a credit note and the amount is positive, make it negative
+        const adjustedQuantity = isCreditNote && quantity > 0 ? -quantity : quantity;
+        const adjustedAmount = isCreditNote && amount > 0 ? -amount : amount;
+        
+        return {
+          id: line.id,
+          expense_account_id: parseInt(line.expense_account_id),
+          description: line.description || null,
+          quantity: adjustedQuantity,
+          unit_price: unitPrice, // Keep unit price as is, only adjust quantity
+          amount: adjustedAmount,
+          category: line.category || null,
+          location: line.location || null,
+          funder: line.funder || null
+        };
+      });
       
       let response;
       if (bill) {
@@ -457,11 +475,14 @@ export function BillForm({ bill, onClose }: BillFormProps) {
   return (
     <>
       <Dialog open={true} onOpenChange={() => onClose()}>
-        <DialogContent className="lg:max-w-screen-lg">
+        <DialogContent className="lg:max-w-screen-lg max-h-[85vh] overflow-y-auto p-4 md:p-6">
           <DialogHeader>
-            <DialogTitle>{bill ? "Edit Bill" : "Create New Bill"}</DialogTitle>
+            <DialogTitle>{title}</DialogTitle>
             <DialogDescription>
-              {bill ? "Update bill information" : "Create a new bill for a vendor"}
+              {bill ? 
+                "Update information" : 
+                (isCreditNote ? "Create a new vendor credit" : "Create a new bill for a vendor")
+              }
             </DialogDescription>
           </DialogHeader>
 
@@ -471,7 +492,7 @@ export function BillForm({ bill, onClose }: BillFormProps) {
             </div>
           ) : (
             <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Vendor Selection */}
                 <div className="space-y-2">
@@ -621,7 +642,38 @@ export function BillForm({ bill, onClose }: BillFormProps) {
                     <FormItem>
                       <FormLabel>Payment Terms</FormLabel>
                       <Select 
-                        onValueChange={field.onChange} 
+                        onValueChange={(value) => {
+                          field.onChange(value);
+                          
+                          // Auto-calculate due date based on selected payment terms
+                          const billDate = form.getValues('bill_date');
+                          if (billDate) {
+                            let dueDate = new Date(billDate);
+                            
+                            // Simple calculation for common terms
+                            if (value === 'Net 15') {
+                              dueDate.setDate(billDate.getDate() + 15);
+                              form.setValue('due_date', dueDate);
+                            } else if (value === 'Net 30') {
+                              dueDate.setDate(billDate.getDate() + 30);
+                              form.setValue('due_date', dueDate);
+                            } else if (value === 'Net 45') {
+                              dueDate.setDate(billDate.getDate() + 45);
+                              form.setValue('due_date', dueDate);
+                            } else if (value === 'Net 60') {
+                              dueDate.setDate(billDate.getDate() + 60);
+                              form.setValue('due_date', dueDate);
+                            } else if (value === 'COD' || value === 'Due on Receipt') {
+                              // Due immediately
+                              form.setValue('due_date', billDate);
+                            } else if (value === '2/10 Net 30') {
+                              // Net 30 with 2% discount if paid within 10 days
+                              dueDate.setDate(billDate.getDate() + 30);
+                              form.setValue('due_date', dueDate);
+                            }
+                            // For other terms, the server-side AI will handle them
+                          }
+                        }} 
                         defaultValue={field.value || ''}
                         disabled={(bill?.amount_paid || 0) > 0}
                       >
@@ -638,8 +690,13 @@ export function BillForm({ bill, onClose }: BillFormProps) {
                           <SelectItem value="2/10 Net 30">2/10 Net 30</SelectItem>
                           <SelectItem value="COD">COD (Cash on Delivery)</SelectItem>
                           <SelectItem value="Due on Receipt">Due on Receipt</SelectItem>
+                          <SelectItem value="EOM">EOM (End of Month)</SelectItem>
+                          <SelectItem value="MFI">MFI (Month Following Invoice)</SelectItem>
                         </SelectContent>
                       </Select>
+                      <FormDescription>
+                        Selecting payment terms will automatically update the due date.
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -724,39 +781,39 @@ export function BillForm({ bill, onClose }: BillFormProps) {
               />
 
               {/* Line Items */}
-              <div className="space-y-4">
+              <div className="space-y-2">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-medium">Line Items</h3>
+                  <h3 className="text-base font-medium">Line Items</h3>
                   <Button
                     type="button"
-                    variant="outline"
-                    size="sm"
                     onClick={() => append({
                       expense_account_id: "",
                       description: "",
                       quantity: "1",
                       unit_price: "0",
-                      amount: "0",
+                      amount: "0"
                     })}
+                    size="sm"
+                    className="h-7 gap-1 text-xs"
                   >
-                    <Plus className="mr-2 h-4 w-4" />
+                    <Plus className="h-3 w-3" />
                     Add Line
                   </Button>
                 </div>
 
-                <div className="border rounded-md p-4">
-                  <div className="grid grid-cols-12 gap-4 font-medium pb-2 mb-2 border-b">
+                <div className="border rounded-md p-2 overflow-y-auto max-h-[30vh]">
+                  <div className="grid grid-cols-12 gap-2 font-medium pb-1 mb-1 border-b text-xs">
                     <div className="col-span-3">Account</div>
                     <div className="col-span-3">Description</div>
-                    <div className="col-span-1">Quantity</div>
-                    <div className="col-span-1">Unit Price</div>
+                    <div className="col-span-1">Qty</div>
+                    <div className="col-span-1">Price</div>
                     <div className="col-span-1">Amount</div>
                     <div className="col-span-2">Category/Location</div>
                     <div className="col-span-1">Actions</div>
                   </div>
 
                   {fields.map((field, index) => (
-                    <div key={field.id} className="grid grid-cols-12 gap-2 mb-4 items-start">
+                    <div key={field.id} className="grid grid-cols-12 gap-2 mb-2 items-start text-sm">
                       {/* Account */}
                       <div className="col-span-3">
                         <FormField
@@ -769,7 +826,7 @@ export function BillForm({ bill, onClose }: BillFormProps) {
                                 defaultValue={field.value}
                               >
                                 <FormControl>
-                                  <SelectTrigger className="h-9">
+                                  <SelectTrigger className="h-8 text-xs">
                                     <SelectValue placeholder="Select account" />
                                   </SelectTrigger>
                                 </FormControl>
@@ -795,7 +852,7 @@ export function BillForm({ bill, onClose }: BillFormProps) {
                           render={({ field }) => (
                             <FormItem>
                               <FormControl>
-                                <Input {...field} className="h-9" placeholder="Description" />
+                                <Input {...field} className="h-8 text-xs" placeholder="Description" />
                               </FormControl>
                               <FormMessage />
                             </FormItem>

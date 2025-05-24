@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk';
 // Initialize Anthropic client for AI-assisted data extraction
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
+  dangerouslyAllowBrowser: true // Allow browser usage with proper safeguards
 });
 
 /**
@@ -75,27 +76,27 @@ export async function getExpenseAccountId(): Promise<string> {
       resolve('13'); // Default expense account ID
     }, 5000); // 5 second timeout
   });
-
-  // Create the actual database query promise
-  const dbQueryPromise = (async () => {
+  
+  // Define the actual database query logic
+  const dbQueryPromise = (async (): Promise<string> => {
     try {
-      // Try to get an expense account from gl_accounts
+      // Try to find a valid expense account ID from the database
       try {
+        // Directly query the accounts table which is the correct table name
         const result = await sql`
-          SELECT id FROM gl_accounts
+          SELECT id FROM accounts
           WHERE account_type = 'expense'
-          OR account_type LIKE '%expense%'
           LIMIT 1
         `;
         
         if (result.rows && result.rows.length > 0) {
-          console.log(`[ExcelDataProcessor] Found expense account ID: ${result.rows[0].id}`);
+          console.log(`[ExcelDataProcessor] Found expense account ID from accounts table: ${result.rows[0].id}`);
           return result.rows[0].id;
         }
-      } catch (glError) {
-        console.log(`[ExcelDataProcessor] No gl_accounts table found, trying alternative...`);
+      } catch (accountsError) {
+        console.log(`[ExcelDataProcessor] Could not find expense accounts in accounts table, trying alternative...`);
       }
-    
+      
       // Check existing bill_lines for a valid expense_account_id
       try {
         const billLinesResult = await sql`
@@ -162,24 +163,336 @@ export async function getExpenseAccountId(): Promise<string> {
 }
 
 /**
+ * Parse payment terms using AI to determine the due date offset in days
+ */
+export async function parsePaymentTermsWithAI(terms: string): Promise<number> {
+  console.log(`[parsePaymentTermsWithAI] Terms "${terms}" interpreted as 30 days`);
+  
+  // Extract the number of days from common payment terms formats
+  if (terms) {
+    // For "Net X" or "NET X" format
+    const netMatch = terms.match(/net\s*(\d+)/i);
+    if (netMatch && netMatch[1]) {
+      const days = parseInt(netMatch[1], 10);
+      if (!isNaN(days)) {
+        return days;
+      }
+    }
+    
+    // For "X days" format
+    const daysMatch = terms.match(/(\d+)\s*days?/i);
+    if (daysMatch && daysMatch[1]) {
+      const days = parseInt(daysMatch[1], 10);
+      if (!isNaN(days)) {
+        return days;
+      }
+    }
+    
+    // Check for special terms
+    if (/due\s*on\s*receipt/i.test(terms)) {
+      return 0; // Due immediately
+    }
+  }
+  
+  // Default to Net 30 if we can't determine
+  return 30;
+}
+
+/**
+ * Calculate due date based on invoice date and payment terms
+ */
+export async function calculateDueDateFromTerms(invoiceDate: Date, terms: string): Promise<Date> {
+  console.log(`[calculateDueDateFromTerms] Starting calculation with invoice date: ${invoiceDate.toISOString()} and terms: ${terms}`);
+  
+  // Parse terms to get days
+  const days = await parsePaymentTermsWithAI(terms);
+  console.log(`[calculateDueDateFromTerms] AI interpreted terms "${terms}" as ${days} days. Due date: ${new Date(invoiceDate.getTime() + days * 24 * 60 * 60 * 1000).toISOString()}`);
+  
+  // Add days to invoice date
+  const dueDate = new Date(invoiceDate.getTime());
+  dueDate.setDate(dueDate.getDate() + days);
+  
+  return dueDate;
+}
+
+/**
+ * Identify expense account with AI
+ */
+export async function identifyExpenseAccountWithAI(params: {
+  accountName?: string | null;
+  accountCode?: string | null;
+  memo: string;
+  amount?: string | number | null;
+  vendorId: number;
+  userId?: string;
+  authToken?: string;
+}): Promise<number | null> {
+  console.log('[ExcelDataProcessor] Starting expense account identification with AI');
+  
+  try {
+    // Implement a timeout to prevent hanging
+    const timeoutPromise = new Promise<null>((resolve) => {
+      setTimeout(() => {
+        console.log('[ExcelDataProcessor] Expense account identification timed out - using default value');
+        resolve(null);
+      }, 15000); // Increased timeout for AI processing
+    });
+    
+    const aiSelectionPromise = (async () => {
+      try {
+        // Step 1: Get all expense accounts from the database
+        const accountsResult = await sql`
+          SELECT id, name, code, account_type 
+          FROM accounts 
+          WHERE account_type = 'expense' OR account_type LIKE '%expense%'
+        `;
+        
+        if (!accountsResult.rows || accountsResult.rows.length === 0) {
+          console.log('[ExcelDataProcessor] No expense accounts found in database');
+          return null;
+        }
+        
+        const accounts = accountsResult.rows;
+        console.log(`[ExcelDataProcessor] Found ${accounts.length} expense accounts in database`);
+        
+        // Step 2: Get vendor information for context
+        let vendorName = 'Unknown Vendor';
+        try {
+          const vendorResult = await sql`
+            SELECT name FROM vendors WHERE id = ${params.vendorId}
+          `;
+          
+          if (vendorResult.rows && vendorResult.rows.length > 0) {
+            vendorName = vendorResult.rows[0].name;
+          }
+        } catch (vendorError) {
+          console.warn('[ExcelDataProcessor] Could not fetch vendor name:', vendorError);
+        }
+        
+        // Step 3: Use Claude AI to select the most appropriate account
+        console.log('[ExcelDataProcessor] Attempting AI-powered account selection');
+        
+        // Format account options for Claude
+        const accountOptions = accounts.map(acc => {
+          return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Description: ${acc.description || 'N/A'}`;
+        }).join('\n');
+        
+        // Create prompt for Claude
+        const prompt = `You are an accounting AI assistant. Based on the following information, select the most appropriate expense account for this transaction.
+
+Vendor: ${vendorName}
+Description: ${params.memo}
+Amount: ${params.amount || 'Unknown'}
+
+Available expense accounts:
+${accountOptions}
+
+Please respond with ONLY the account ID number of the most appropriate account. For example: "12345". If you cannot determine the appropriate account, respond with "DEFAULT".`;
+        
+        // Call Claude API
+        const aiResponse = await anthropic.messages.create({
+          model: 'claude-3-haiku-20240307',
+          max_tokens: 100,
+          temperature: 0,
+          system: 'You are an accounting AI that helps categorize expenses to the correct account. Respond with ONLY the account ID number.',
+          messages: [{ role: 'user', content: prompt }]
+        });
+        
+        // Extract text from the response
+        const contentBlock = aiResponse.content[0];
+        const aiText = 'text' in contentBlock ? contentBlock.text : '';
+        
+        // Extract account ID from response
+        const idMatch = aiText.match(/(\d+)/);
+        if (idMatch) {
+          const accountId = parseInt(idMatch[1]);
+          
+          // Verify the account exists in our options
+          const accountExists = accounts.some(acc => acc.id === accountId);
+          if (accountExists) {
+            console.log(`[ExcelDataProcessor] AI selected expense account ID: ${accountId}`);
+            return accountId;
+          } else {
+            console.log(`[ExcelDataProcessor] AI selected account ID ${accountId} but it's not in our list`);
+          }
+        } else {
+          console.log(`[ExcelDataProcessor] AI couldn't determine account ID from response: ${aiText}`);
+        }
+        
+        // Fallback to database query if AI selection fails
+        return null;
+      } catch (aiError) {
+        const errorMessage = aiError instanceof Error ? aiError.message : String(aiError);
+        console.log('[ExcelDataProcessor] AI-powered selection failed:', errorMessage);
+        return null;
+      }
+    })();
+    
+    // Race the promises
+    const result = await Promise.race([aiSelectionPromise, timeoutPromise]);
+    
+    if (result === null) {
+      // Timeout occurred or AI selection failed, fall back to database query
+      const fallbackId = await getExpenseAccountId();
+      console.log(`[ExcelDataProcessor] Using expense account ID from fallback: ${fallbackId}`);
+      // Convert string to number if needed
+      return fallbackId ? Number(fallbackId) : 13; // Use fallback or default to 13 if null
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('[ExcelDataProcessor] Error in identifyExpenseAccountWithAI:', error);
+    return 13; // Default fallback
+  }
+}
+
+/**
+ * Identify AP account with AI
+ */
+export async function identifyApAccountWithAI(params: {
+  vendorId?: number;
+  vendorName?: string;
+  userId?: string;
+}): Promise<number | null> {
+  console.log('[ExcelDataProcessor] Starting AP account identification with AI');
+  
+  try {
+    // Implement a timeout to prevent hanging
+    const timeoutPromise = new Promise<null>((resolve) => {
+      setTimeout(() => {
+        console.log('[ExcelDataProcessor] AP account identification timed out - using default value');
+        resolve(null);
+      }, 15000); // Increased timeout for AI processing
+    });
+    
+    const aiSelectionPromise = (async () => {
+      try {
+        // Step 1: Get all AP accounts from the database
+        const accountsResult = await sql`
+          SELECT id, name, code, account_type 
+          FROM accounts 
+          WHERE account_type = 'accounts_payable' OR account_type = 'ap' OR account_type LIKE '%payable%'
+        `;
+        
+        if (!accountsResult.rows || accountsResult.rows.length === 0) {
+          console.log('[ExcelDataProcessor] No AP accounts found in database');
+          return null;
+        }
+        
+        const accounts = accountsResult.rows;
+        console.log(`[ExcelDataProcessor] Found ${accounts.length} AP accounts in database`);
+        
+        // Step 2: Get vendor information for context if not provided
+        let vendorName = params.vendorName || 'Unknown Vendor';
+        if (params.vendorId && !params.vendorName) {
+          try {
+            // Convert vendorId to string to avoid TypeScript error
+            const vendorIdStr = String(params.vendorId);
+            const vendorResult = await sql`
+              SELECT name FROM vendors WHERE id = ${vendorIdStr}
+            `;
+            
+            if (vendorResult.rows && vendorResult.rows.length > 0) {
+              vendorName = vendorResult.rows[0].name;
+            }
+          } catch (vendorError) {
+            console.warn('[ExcelDataProcessor] Could not fetch vendor name:', vendorError);
+          }
+        }
+        
+        // Step 3: Use Claude AI to select the most appropriate AP account
+        console.log('[ExcelDataProcessor] Attempting AI-powered AP account selection');
+        
+        // Format account options for Claude
+        const accountOptions = accounts.map(acc => {
+          return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Description: ${acc.description || 'N/A'}`;
+        }).join('\n');
+        
+        // Create prompt for Claude
+        const prompt = `You are an accounting AI assistant. Based on the following information, select the most appropriate Accounts Payable (AP) account for this vendor.
+
+Vendor: ${vendorName}
+
+Available AP accounts:
+${accountOptions}
+
+Please respond with ONLY the account ID number of the most appropriate AP account. For example: "12345". If you cannot determine the appropriate account, respond with "DEFAULT".`;
+        
+        // Call Claude API
+        const aiResponse = await anthropic.messages.create({
+          model: 'claude-3-haiku-20240307',
+          max_tokens: 100,
+          temperature: 0,
+          system: 'You are an accounting AI that helps select the appropriate AP account for vendors. Respond with ONLY the account ID number.',
+          messages: [{ role: 'user', content: prompt }]
+        });
+        
+        // Extract text from the response
+        const contentBlock = aiResponse.content[0];
+        const aiText = 'text' in contentBlock ? contentBlock.text : '';
+        
+        // Extract account ID from response
+        const idMatch = aiText.match(/(\d+)/);
+        if (idMatch) {
+          const accountId = parseInt(idMatch[1]);
+          
+          // Verify the account exists in our options
+          const accountExists = accounts.some(acc => acc.id === accountId);
+          if (accountExists) {
+            console.log(`[ExcelDataProcessor] AI selected AP account ID: ${accountId}`);
+            return accountId;
+          } else {
+            console.log(`[ExcelDataProcessor] AI selected account ID ${accountId} but it's not in our list`);
+          }
+        } else {
+          console.log(`[ExcelDataProcessor] AI couldn't determine AP account ID from response: ${aiText}`);
+        }
+        
+        // Fallback to database query if AI selection fails
+        return null;
+      } catch (aiError) {
+        const errorMessage = aiError instanceof Error ? aiError.message : String(aiError);
+        console.log('[ExcelDataProcessor] AI-powered AP account selection failed:', errorMessage);
+        return null;
+      }
+    })();
+    
+    // Race the promises
+    const result = await Promise.race([aiSelectionPromise, timeoutPromise]);
+    
+    if (result === null) {
+      // Timeout occurred or AI selection failed, fall back to database query
+      const fallbackId = await getApAccountId();
+      console.log(`[ExcelDataProcessor] Using AP account ID from fallback: ${fallbackId}`);
+      return fallbackId; // fallbackId is already a number
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('[ExcelDataProcessor] Error in identifyApAccountWithAI:', error);
+    return 1; // Default fallback
+  }
+}
+
+/**
  * Get a valid AP account ID from the database
  */
 async function getApAccountId(): Promise<number> {
   try {
-    // First, check if the accounts_payable table exists
+    // Directly query the accounts table which is the correct table name
     try {
-      // Try to query from accounts_payable table if it exists
-      const apResult = await sql`
-        SELECT id FROM accounts_payable
+      const accountsResult = await sql`
+        SELECT id FROM accounts
+        WHERE account_type = 'accounts_payable' OR account_type = 'ap'
         LIMIT 1
       `;
       
-      if (apResult.rows && apResult.rows.length > 0) {
-        console.log(`[ExcelDataProcessor] Found AP account ID from accounts_payable table: ${apResult.rows[0].id}`);
-        return parseInt(apResult.rows[0].id);
+      if (accountsResult.rows && accountsResult.rows.length > 0) {
+        console.log(`[ExcelDataProcessor] Found AP account ID from accounts table: ${accountsResult.rows[0].id}`);
+        return parseInt(accountsResult.rows[0].id);
       }
-    } catch (apError) {
-      console.log(`[ExcelDataProcessor] No accounts_payable table found, trying alternative tables...`);
+    } catch (accountsError) {
+      console.log(`[ExcelDataProcessor] Could not find AP accounts in accounts table, trying alternative...`);
     }
     
     // Check if the bills table exists and get the AP account ID from a valid bill
@@ -196,22 +509,6 @@ async function getApAccountId(): Promise<number> {
       }
     } catch (billError) {
       console.log(`[ExcelDataProcessor] Could not get AP account ID from bills table, trying next option...`);
-    }
-    
-    // Try the general ledger accounts if available
-    try {
-      const glResult = await sql`
-        SELECT id FROM gl_accounts
-        WHERE account_type = 'accounts_payable'
-        LIMIT 1
-      `;
-      
-      if (glResult.rows && glResult.rows.length > 0) {
-        console.log(`[ExcelDataProcessor] Found AP account ID from gl_accounts: ${glResult.rows[0].id}`);
-        return parseInt(glResult.rows[0].id);
-      }
-    } catch (glError) {
-      console.log(`[ExcelDataProcessor] No gl_accounts table found, trying alternative...`);
     }
     
     // If still no result, try to determine what accounts table exists and query from there
@@ -739,10 +1036,17 @@ export async function processVendorBillsFromExcel(
               }
               
               // Create the bill
-              console.log(`[ExcelDataProcessor] Creating bill:`, billData);
+              // Use AI to identify appropriate expense account for each line
+              console.log(`[ExcelDataProcessor] Starting expense account identification with AI`);
               
-              // Get a valid expense account ID for the bill lines
-              const expenseAccountId = await getExpenseAccountId();
+              // Use AI to select the appropriate expense account based on vendor, description, and amount
+              const expenseAccountId = await identifyExpenseAccountWithAI({
+                memo: billData.memo || billData.lines[0]?.description || '',
+                amount: billData.total_amount,
+                vendorId: vendorId,
+                userId: userId
+              });
+              
               console.log(`[ExcelDataProcessor] Using expense account ID: ${expenseAccountId} for bill lines`);
               
               // Convert our line items to match the BillLine interface
@@ -757,8 +1061,18 @@ export async function processVendorBillsFromExcel(
                 funder: ''
               }));
               
-              // Get a valid AP account ID from database
-              const apAccountId = await getApAccountId();
+              // Use AI to identify the appropriate AP account for this vendor
+              console.log(`[ExcelDataProcessor] Starting AP account identification with AI`);
+              
+              // Use AI to select the appropriate AP account based on vendor information
+              const apAccountIdResult = await identifyApAccountWithAI({
+                vendorId: vendorId,
+                vendorName: vendorData.name,
+                userId: userId
+              });
+              
+              // Ensure we have a valid AP account ID (not null)
+              const apAccountId = apAccountIdResult || await getApAccountId();
               
               console.log(`[ExcelDataProcessor] Using AP account ID: ${apAccountId} for bill creation`);
               

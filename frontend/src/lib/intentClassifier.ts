@@ -4,7 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
  * Intent classification result
  */
 export interface IntentClassification {
-  intent: 'ap_bill' | 'ar_invoice' | 'gl_query' | 'reconciliation' | 'unknown';
+  intent: 'ap_bill' | 'ar_invoice' | 'gl_query' | 'reconciliation' | 'credit_card' | 'unknown';
   confidence: number; // 0-1 scale
   details?: string;
 }
@@ -32,6 +32,7 @@ export async function classifyUserIntent(query: string): Promise<IntentClassific
       - ar_invoice: Queries about customer invoices, accounts receivable, creating/viewing/managing invoices
       - gl_query: Queries about general ledger, chart of accounts, journal entries, or financial reporting
       - reconciliation: Queries about account reconciliation or bank reconciliation
+      - credit_card: Queries about credit card statements, processing credit card transactions, or managing credit card accounts
       - unknown: Queries that don't clearly fit the categories above
       
       Respond in JSON format with these fields:
@@ -56,6 +57,11 @@ export async function classifyUserIntent(query: string): Promise<IntentClassific
       Key indicators for AR (invoices):
       - "Customer paid the invoice" / "We received payment"
       - "Invoice payment received" / "Customer settled invoice"
+      
+      CREDIT CARD TRANSACTIONS:
+      - Credit card refunds, chargebacks, or transactions → credit_card intent
+      - Examples: "Amazon charge was refunded", "credit card refund", "Amex charge on account 2009"
+      - Look for patterns: "[vendor] charge", "[amount] was refunded", "credit card [action]"
       
       CUSTOMER NAMES: If the query mentions a customer name, it's most likely about an invoice (ar_invoice).
       The presence of a known customer name strongly indicates this is an accounts receivable query.
@@ -95,6 +101,8 @@ export async function classifyUserIntent(query: string): Promise<IntentClassific
       return { intent: 'gl_query', confidence: 0.7 };
     } else if (responseText.includes('reconciliation')) {
       return { intent: 'reconciliation', confidence: 0.7 };
+    } else if (responseText.includes('credit_card')) {
+      return { intent: 'credit_card', confidence: 0.7 };
     }
     
     return { intent: 'unknown', confidence: 0.5 };

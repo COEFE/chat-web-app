@@ -314,13 +314,19 @@ export async function createBill(bill: Bill, lines: BillLine[], userId?: string)
     const billStatus = bill.status || 'Open';
     console.log(`[Bill Create] Creating bill with status: ${billStatus}`);
     
+    // For credit card transactions that are already paid, we need to set amount_paid correctly
+    // If the bill status is 'Paid', set amount_paid to the total amount
+    // Otherwise, use the provided amount_paid or default to 0
+    const amountPaid = billStatus === 'Paid' ? totalAmount : (bill.amount_paid || 0);
+    console.log(`[Bill Create] Setting amount_paid to ${amountPaid} for bill with status: ${billStatus}`);
+    
     const billResult = await sql.query(billQuery, [
       bill.vendor_id,
       bill.bill_number || null,
       bill.bill_date,
       bill.due_date,
       totalAmount,
-      0, // Initial amount_paid is 0
+      amountPaid, // Use the calculated amount_paid value
       billStatus, // Use the determined status
       bill.terms || null,
       bill.memo || null,

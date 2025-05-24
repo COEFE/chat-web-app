@@ -37,7 +37,7 @@ console.log("[CreditCardAgent] Verifying sql module import:");
 console.log("[CreditCardAgent] sql available:", !!sql);
 console.log("[CreditCardAgent] sql.query available:", !!sql.query);
 import { AgentContext, AgentResponse, Agent } from "@/types/agents";
-
+import { getAIJournalType } from './integrateAIJournalTypeSelector';
 // AI-powered transaction processing imports
 import { 
   extractTransactionWithAI, 
@@ -54,6 +54,7 @@ import {
   getCreditCardCreditType
 } from './creditCardBillCreditIntegration';
 import { CreditCardTransaction } from "../../types/creditCard";
+import { getEnhancedColumnsCheck, buildEnhancedJournalColumns } from './creditCardAgentPatch';
 
 /**
  * Represents credit card statement information extracted from documents
@@ -69,6 +70,7 @@ interface StatementInfo {
   dueDate?: string;
   minimumPayment?: number;
   transactions?: CreditCardTransaction[];
+  previousBalance?: number; // Added to support starting balance from statements
 }
 
 /**
@@ -322,7 +324,7 @@ export class CreditCardAgent implements Agent {
           return {
             success: false,
             message: `Error processing transactions: ${
-              error instanceof Error ? error.message : "Unknown error"
+              error instanceof Error ? (error as Error).message : "Unknown error"
             }`,
             data: { sources: [] },
           };
@@ -582,7 +584,7 @@ export class CreditCardAgent implements Agent {
           return {
             success: false,
             message: `Error processing transactions: ${
-              error instanceof Error ? error.message : "Unknown error"
+              error instanceof Error ? (error as Error).message : "Unknown error"
             }`,
             data: { sources: [] },
           };
@@ -1092,7 +1094,7 @@ export class CreditCardAgent implements Agent {
             );
             if (error instanceof Error) {
               console.error(
-                `[CreditCardAgent] [${errorTimestamp}] Error message: ${error.message}`
+                `[CreditCardAgent] [${errorTimestamp}] Error message: ${(error as Error).message}`
               );
               console.error(
                 `[CreditCardAgent] [${errorTimestamp}] Error stack: ${error.stack}`
@@ -1245,7 +1247,7 @@ export class CreditCardAgent implements Agent {
           );
           if (error instanceof Error) {
             console.error(
-              `[CreditCardAgent] [${fallbackTimestamp}] Error message: ${error.message}`
+              `[CreditCardAgent] [${fallbackTimestamp}] Error message: ${(error as Error).message}`
             );
             console.error(
               `[CreditCardAgent] [${fallbackTimestamp}] Error stack: ${error.stack}`
@@ -1459,7 +1461,9 @@ export class CreditCardAgent implements Agent {
             context,
             accountName,
             statementInfo.creditCardIssuer,
-            statementInfo.lastFourDigits
+            statementInfo.lastFourDigits,
+            statementInfo.previousBalance, // Pass starting balance
+            statementInfo.statementDate    // Pass balance date
           );
 
           console.log(`[CreditCardAgent] GL agent account creation result:`);
@@ -1612,7 +1616,7 @@ export class CreditCardAgent implements Agent {
                   message: `I've processed statement ${statementNumber} for account "${
                     account.name
                   }", but encountered an error when processing transactions: ${
-                    error instanceof Error ? error.message : "Unknown error"
+                    error instanceof Error ? (error as Error).message : "Unknown error"
                   }`,
                   data: { sources: [] },
                 };
@@ -1665,7 +1669,7 @@ export class CreditCardAgent implements Agent {
       return {
         success: false,
         message: `I encountered an error while processing the statement: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
         data: { sources: [] },
       };
@@ -1684,7 +1688,9 @@ export class CreditCardAgent implements Agent {
     context: AgentContext,
     accountName: string,
     creditCardIssuer: string,
-    lastFourDigits: string
+    lastFourDigits: string,
+    startingBalance?: number, // Added startingBalance
+    balanceDate?: string      // Added balanceDate
   ): Promise<{
     success: boolean;
     message: string;
@@ -1743,9 +1749,8 @@ export class CreditCardAgent implements Agent {
         expenseDescription: `Credit card account for ${creditCardIssuer}`,
         expenseType: "credit_card",
         description: `Credit card account for ${creditCardIssuer} ending in ${lastFourDigits}`,
-        // We're not setting a starting balance here as it will be set when processing the statement
-        startingBalance: undefined,
-        balanceDate: undefined,
+        startingBalance: startingBalance, // Pass through startingBalance from method parameters
+        balanceDate: balanceDate,       // Pass through balanceDate from method parameters
       };
 
       // Log the exact payload we're sending to help with debugging
@@ -1929,7 +1934,7 @@ export class CreditCardAgent implements Agent {
       return {
         success: false,
         message: `Error creating account: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
       };
     }
@@ -2247,7 +2252,7 @@ export class CreditCardAgent implements Agent {
       return {
         success: false,
         message: `Error processing transactions: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
         processedCount: 0,
         categorizedTransactions: [],
@@ -2276,7 +2281,9 @@ export class CreditCardAgent implements Agent {
     context: AgentContext,
     accountId: number,
     accountName: string,
-    transaction: CreditCardTransaction
+    transaction: CreditCardTransaction,
+    isRefund: boolean = false,
+    isPayment: boolean = false
   ): Promise<{
     success: boolean;
     message: string;
@@ -2478,7 +2485,7 @@ export class CreditCardAgent implements Agent {
         return {
           success: false,
           message: `Failed to find payment account: ${
-            error instanceof Error ? error.message : "Unknown error"
+            error instanceof Error ? (error as Error).message : "Unknown error"
           }`,
         };
       }
@@ -2541,18 +2548,7 @@ export class CreditCardAgent implements Agent {
         }
         
         // Check which columns exist in journals table and which ones are required (not null)
-        const columnsCheck = await sql`
-          SELECT 
-            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'date') as has_date,
-            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transaction_date') as has_transaction_date,
-            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'description') as has_description,
-            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'memo') as has_memo,
-            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'notes') as has_notes,
-            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'debit_amount') as has_debit_amount,
-            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'credit_amount') as has_credit_amount,
-            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'amount') as has_amount,
-            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'created_by') as has_created_by
-        `;
+        const columnsCheck = await getEnhancedColumnsCheck();
         
         // Check which columns have NOT NULL constraints
         const notNullCheck = await sql`
@@ -2573,6 +2569,8 @@ export class CreditCardAgent implements Agent {
         const hasCreditAmount = columnsCheck.rows[0].has_credit_amount;
         const hasAmount = columnsCheck.rows[0].has_amount;
         const hasCreatedBy = columnsCheck.rows[0].has_created_by;
+        const hasIsPosted = columnsCheck.rows[0].has_is_posted;
+        const hasJournalType = columnsCheck.rows[0].has_journal_type;
         
         // Create a map of required columns (those with NOT NULL constraints)
         const requiredColumns = new Map();
@@ -2590,6 +2588,8 @@ export class CreditCardAgent implements Agent {
           hasCreditAmount,
           hasAmount,
           hasCreatedBy,
+          hasIsPosted,
+          hasJournalType,
           requiredColumns: Array.from(requiredColumns.keys())
         });
         
@@ -2665,6 +2665,31 @@ export class CreditCardAgent implements Agent {
           placeholders.push(`$${paramIndex++}`);
         }
         
+        
+        // CRITICAL FIX: Add is_posted column for payment transactions
+        if (hasIsPosted) {
+          columns.push('is_posted');
+          values.push(true); // Always set to true for payment transactions
+          placeholders.push(`$${paramIndex++}`);
+        }
+        
+        // AI-POWERED: Add journal_type column for payment transactions
+        if (hasJournalType && isPayment) {
+          columns.push('journal_type');
+          
+          // Use AI to determine the appropriate journal type
+          try {
+            const aiJournalType = await getAIJournalType(transaction, context);
+            values.push(aiJournalType);
+            console.log(`[CreditCardAgent] AI determined journal type: ${aiJournalType} for payment: ${transaction.description}`);
+          } catch (error) {
+            console.warn(`[CreditCardAgent] AI journal type failed, using fallback 'CCY': ${(error as Error).message}`);
+            values.push('CCY'); // Fallback to Credit Card Payment type
+          }
+          
+          placeholders.push(`${paramIndex++}`);
+        }
+        
         // Construct the SQL query dynamically
         const columnsStr = columns.join(', ');
         const placeholdersStr = placeholders.join(', ');
@@ -2731,8 +2756,36 @@ export class CreditCardAgent implements Agent {
                 } else if (column === 'credit_amount' || column.includes('credit')) {
                   fallbackValues.push(String(Math.abs(transaction.amount) || 0));
                 } else {
-                  // Generic default for other required columns
-                  fallbackValues.push('');
+                  // Generic default for other required columns based on type
+
+                  if (column === 'id') {
+
+                    // Skip id column in fallback as it should be auto-generated
+
+                    return;
+
+                  } else if (column.includes('amount') || column.includes('price')) {
+
+                    fallbackValues.push('0');
+
+                  } else if (column.includes('date')) {
+
+                    fallbackValues.push(transaction.date || new Date().toISOString().split('T')[0]);
+
+                  } else if (column === 'is_posted') {
+
+                    fallbackValues.push('true');
+
+                  } else if (column === 'journal_type') {
+                  fallbackValues.push('CCY'); // Simple fallback for journal type
+
+                  } else {
+
+                    // String default for other columns
+
+                    fallbackValues.push('');
+
+                  }
                 }
                 
                 fallbackPlaceholders.push(`$${fallbackParamIndex++}`);
@@ -3122,7 +3175,7 @@ export class CreditCardAgent implements Agent {
       return {
         success: false,
         message: `Error creating journal entry: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
       };
     }
@@ -3324,7 +3377,7 @@ Do not include any other text outside of the JSON object.`;
       return {
         success: false,
         message: `Error analyzing transaction: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
         expenseCategory: "Uncategorized",
         expenseType: "general",
@@ -3884,7 +3937,7 @@ Do not include any other text outside of the JSON object.`;
       return {
         success: false,
         message: `Error requesting GL account creation: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
       };
     }
@@ -4602,7 +4655,7 @@ Do not include any other text outside of the JSON object.`;
           error
         );
         if (error instanceof Error) {
-          console.error("[CreditCardAgent] Error message:", error.message);
+          console.error("[CreditCardAgent] Error message:", (error as Error).message);
           console.error("[CreditCardAgent] Error stack:", error.stack);
         }
 
@@ -4616,7 +4669,7 @@ Do not include any other text outside of the JSON object.`;
         return {
           success: false,
           message: `Error creating bill: ${
-            error instanceof Error ? error.message : "Unknown error"
+            error instanceof Error ? (error as Error).message : "Unknown error"
           }`,
         };
       }
@@ -4628,7 +4681,7 @@ Do not include any other text outside of the JSON object.`;
       return {
         success: false,
         message: `Error recording transaction in AP: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
       };
     }
@@ -4727,7 +4780,7 @@ Do not include any other text outside of the JSON object.`;
       return {
         success: false,
         message: `Error finding or creating vendor: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
       };
     }
@@ -5295,7 +5348,7 @@ Output (just the brief description):`;
       return {
         success: false,
         message: `Error finding/creating credit card account: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
       };
     }
@@ -5337,7 +5390,7 @@ Output (just the brief description):`;
       return {
         success: false,
         message: `Error creating credit card account: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
       };
     }
@@ -5436,7 +5489,7 @@ Output (just the brief description):`;
       return {
         success: false,
         message: `Error creating account via GL Agent: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
       };
     }
@@ -6497,7 +6550,7 @@ Important guidelines:
       return {
         success: false,
         message: `Error extracting statement information: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
       };
     }
@@ -6609,7 +6662,7 @@ Important guidelines:
       return {
         success: false,
         message: `Error saving extraction data to cache: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
       };
     }
@@ -6798,7 +6851,7 @@ Important guidelines:
       return {
         success: false,
         message: `Error clearing extraction cache: ${
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
       };
     }

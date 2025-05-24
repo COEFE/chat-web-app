@@ -1,5 +1,6 @@
 import { sql } from '@vercel/postgres';
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 
 // Create OpenAI client for embeddings
@@ -16,6 +17,61 @@ function getOpenAIClient() {
     }
   }
   return openaiClient;
+}
+
+/**
+ * Uses AI to determine if a proposed account name is a duplicate of existing accounts
+ * @param proposedName The new account name being proposed
+ * @param existingAccounts Array of existing accounts with similar names
+ * @returns Boolean indicating if this should be considered a duplicate
+ */
+async function checkIfDuplicateAccountName(
+  proposedName: string,
+  existingAccounts: Array<{code: string, name: string}>
+): Promise<boolean> {
+  try {
+    console.log(`[GLUtils] Checking if '${proposedName}' is a duplicate of existing accounts:`, 
+      existingAccounts.map(a => a.name));
+    
+    // Use Claude for more accurate duplicate detection
+    const anthropic = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || "",
+    });
+    
+    const response = await anthropic.messages.create({
+      model: "claude-3-5-sonnet-20240620",
+      max_tokens: 50,
+      temperature: 0.1,
+      system: `You are an AI assistant that helps determine if a proposed GL account name is a duplicate of existing accounts.
+      
+      A duplicate account means it represents the same accounting concept and would cause confusion or redundancy in the chart of accounts.
+      Similar but distinct accounts (e.g., "Office Supplies" vs "Office Equipment") should NOT be considered duplicates.
+      
+      Respond with ONLY "true" if the proposed name is a duplicate, or "false" if it's sufficiently distinct.`,
+      messages: [{ 
+        role: "user", 
+        content: `Proposed GL account name: "${proposedName}"
+
+Existing similar account names:
+${existingAccounts.map(a => `- ${a.name} (${a.code})`).join('\n')}
+
+Is the proposed account name a duplicate? Answer with ONLY true or false.`
+      }]
+    });
+    
+    const responseText = typeof response.content[0] === 'object' && 'text' in response.content[0] ? response.content[0].text.trim().toLowerCase() : '';
+    
+    // Parse the response
+    const isDuplicate = responseText === 'true';
+    console.log(`[GLUtils] AI determined '${proposedName}' is ${isDuplicate ? 'a duplicate' : 'not a duplicate'}`);
+    
+    return isDuplicate;
+  } catch (error) {
+    console.error('[GLUtils] Error checking for duplicate account name:', error);
+    // Default to false (not a duplicate) if there's an error with the AI check
+    // This prevents blocking account creation due to AI service issues
+    return false;
+  }
 }
 
 /**
@@ -434,7 +490,8 @@ export async function createGLAccount(
   userId?: string,
   startingBalance?: number,
   balanceDate?: string,
-  accountType?: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense'
+  accountType?: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense',
+  parentId?: number | null
 ): Promise<{ success: boolean; message: string; account?: any; journalId?: number }> {
   try {
     console.log(`[GLUtils] Creating GL account: ${code} - ${name}`);
@@ -443,15 +500,30 @@ export async function createGLAccount(
       return { success: false, message: 'Both code and name are required to create a GL account.' };
     }
     
-    // Check if account with this code already exists
-    const { rows: existingAccounts } = await sql`
+    // Check if account with this code or name already exists
+    const { rows: existingAccountsByCode } = await sql`
       SELECT code, name FROM accounts WHERE code = ${code}
     `;
     
-    if (existingAccounts.length > 0) {
+    if (existingAccountsByCode.length > 0) {
       return { 
         success: false, 
-        message: `A GL account with code ${code} already exists (${existingAccounts[0].name}).` 
+        message: `A GL account with code ${code} already exists (${existingAccountsByCode[0].name}).` 
+      };
+    }
+    
+    // Check for duplicate account names (exact match only)
+    const { rows: existingAccountsByName } = await sql`
+      SELECT code, name FROM accounts 
+      WHERE LOWER(name) = LOWER(${name})
+      LIMIT 1
+    `;
+    
+    if (existingAccountsByName.length > 0) {
+      // An account with the exact same name already exists
+      return {
+        success: false,
+        message: `A GL account with name "${name}" already exists (${existingAccountsByName[0].code}).`
       };
     }
     
@@ -464,10 +536,10 @@ export async function createGLAccount(
       
       // Insert the new account
       const accountResult = await client.query(`
-        INSERT INTO accounts (code, name, notes, is_custom, account_type)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, code, name, notes, is_custom, account_type
-      `, [code, name, notes ?? null, true, accountType || getAccountTypeFromCode(code)]);
+        INSERT INTO accounts (code, name, notes, is_custom, account_type, parent_id)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, code, name, notes, is_custom, account_type, parent_id
+      `, [code, name, notes ?? null, true, accountType || getAccountTypeFromCode(code), parentId || null]);
       
       const account = accountResult.rows[0];
       

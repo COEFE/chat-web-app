@@ -29,12 +29,24 @@ export async function extractGLAccountInfoWithAI(query: string): Promise<GLAccou
       system: `You are an AI assistant that extracts structured GL (General Ledger) account information from user queries.
       
       Extract ONLY the following information:
-      - code: The GL account code/number (usually numeric)
+      - code: The GL account code/number (MUST be a 5-digit number following standard accounting conventions)
       - name: The name/title of the GL account
       - description: Any description provided for the account
       - account_type: The type of account (e.g., asset, liability, expense, revenue, equity)
       
-      If any information is missing, omit that field entirely rather than guessing.
+      IMPORTANT RULES FOR ACCOUNT CODES:
+      1. ALWAYS use 5-digit account codes (no more, no less)
+      2. Follow standard accounting chart of accounts conventions:
+         - 10000-19999: Asset accounts
+         - 20000-29999: Liability accounts
+         - 30000-39999: Equity accounts
+         - 40000-49999: Revenue accounts
+         - 50000-59999: Cost of Goods Sold accounts
+         - 60000-69999: Expense accounts
+      3. Place accounts logically within their ranges (e.g., 61000-61999 for office expenses)
+      4. Use your accounting expertise to choose appropriate numbers
+      
+      If any information is missing, omit that field entirely rather than guessing. If the account_type is provided but no code is specified, generate an appropriate 5-digit code based on accounting standards.
       
       Respond with VALID JSON only, following this format:
       {
@@ -45,11 +57,17 @@ export async function extractGLAccountInfoWithAI(query: string): Promise<GLAccou
       }
       
       Examples:
-      1. "Create a new GL account 6050 for Office Supplies, it's an expense account"
-         {"code": "6050", "name": "Office Supplies", "account_type": "expense"}
+      1. "Create a new GL account for Office Supplies, it's an expense account"
+         {"code": "61500", "name": "Office Supplies", "account_type": "expense"}
       
       2. "I need to add Marketing Expense account"
-         {"name": "Marketing Expense", "account_type": "expense"}`,
+         {"code": "62000", "name": "Marketing Expense", "account_type": "expense"}
+         
+      3. "Create account 12345 for Company Vehicle"
+         {"code": "12345", "name": "Company Vehicle", "account_type": "asset"}
+         
+      4. "Add a new Accounts Receivable account for tracking customer balances"
+         {"code": "11000", "name": "Accounts Receivable", "account_type": "asset", "description": "For tracking customer balances"}`,
       messages: [{ role: "user", content: query }]
     });
     

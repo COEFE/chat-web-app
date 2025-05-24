@@ -84,6 +84,20 @@ export async function isBillPaymentQueryWithAI(
 
   NOTE: In this system, "bills" and "invoices" both refer to accounts payable items.
   
+  IMPORTANT - EXCLUDE CREDIT CARD TRANSACTIONS:
+  Do NOT classify as payment queries if the message is about:
+  - Credit card refunds (e.g., "Amazon refund", "charge was refunded")
+  - Credit card chargebacks
+  - Credit card statement processing
+  - Credit card transactions or charges
+  These should be handled by the credit card agent, not the AP agent.
+  
+  ONLY classify as payment queries if it's about:
+  - Paying existing bills to vendors
+  - Recording payments made to vendors
+  - Marking bills as paid
+  - Bill payment processing
+  
   Return a JSON object with:
   - isPaymentQuery: true if the message is about making/recording a payment, false otherwise
   - confidence: number between 0 and 1 indicating your confidence level

@@ -196,7 +196,9 @@ export async function POST(req: NextRequest) {
 
     // Drop trigger if exists (separate statement)
     try {
-      await sql`DROP TRIGGER IF EXISTS check_journal_balance_trigger ON journal_lines;`;
+      // Use query method with raw SQL for consistency with other operations
+      await sql.query(`DROP TRIGGER IF EXISTS check_journal_balance_trigger ON journal_lines;`);
+      console.log('[journals/db-setup] Successfully dropped existing trigger');
     } catch (triggerErr) {
       console.warn('[journals/db-setup] Warning dropping trigger:', triggerErr);
       // Continue anyway, as the trigger might not exist
@@ -212,7 +214,19 @@ export async function POST(req: NextRequest) {
     `;
     
     // Execute as raw SQL to avoid prepared statement issues
-    await sql.query(triggerSQL);
+    try {
+      await sql.query(triggerSQL);
+      console.log('[journals/db-setup] Successfully created trigger');
+    } catch (createTriggerErr: any) {
+      // Check if this is a "trigger already exists" error (code 42710)
+      if (createTriggerErr.code === '42710') {
+        console.log('[journals/db-setup] Trigger already exists, continuing');
+        // This is not a fatal error, we can continue
+      } else {
+        // For other errors, rethrow to be caught by the outer try-catch
+        throw createTriggerErr;
+      }
+    }
 
     return NextResponse.json({ 
       success: true, 

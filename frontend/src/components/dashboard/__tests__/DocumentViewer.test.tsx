@@ -177,7 +177,7 @@ describe('DocumentViewer Refresh Logic', () => {
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       storagePath: 'users/test-user-123/doc-1.xlsx',
       size: 1024,
-      uploadedAt: Timestamp.fromDate(new Date()), // Use mocked Timestamp
+      folderId: null,      uploadedAt: Timestamp.fromDate(new Date()), // Use mocked Timestamp
       updatedAt: Timestamp.fromDate(new Date()), // Add updatedAt
       status: 'complete', // Add status
       createdAt: Timestamp.fromDate(new Date()), // Add createdAt

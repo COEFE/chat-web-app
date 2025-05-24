@@ -95,7 +95,7 @@ describe('LoginPage', () => {
   test('displays error message when login fails', async () => {
     // Mock authentication failure
     const authError = new Error('auth/unauthorized-domain');
-    authError.code = 'auth/unauthorized-domain';
+    (authError as any).code = 'auth/unauthorized-domain';
     (signInWithPopup as jest.Mock).mockRejectedValue(authError);
     
     render(<LoginPage />);

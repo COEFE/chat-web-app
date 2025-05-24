@@ -1,17 +1,46 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/lib/auth';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { initializeApp, getApps } from 'firebase/app';
 
 /**
  * Simple page to fix the user_id in bill_credits table
  * This calls the API endpoint to update bill credits with user_id = '0'
  */
+// Firebase configuration
+const firebaseConfig = {
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+};
+
+// Initialize Firebase
+let app;
+if (typeof window !== 'undefined' && !getApps().length) {
+  app = initializeApp(firebaseConfig);
+}
+
 export default function FixBillCreditUserIdPage() {
-  const { user, loading } = useAuth();
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [isFixing, setIsFixing] = useState(false);
+  
+  // Initialize auth
+  useEffect(() => {
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+      setLoading(false);
+    });
+    
+    return () => unsubscribe();
+  }, []);
 
   const fixBillCreditUserId = async () => {
     if (!user) {
@@ -23,11 +52,14 @@ export default function FixBillCreditUserIdPage() {
     setError(null);
     
     try {
+      const auth = getAuth();
+      const token = await user.getIdToken();
+      
       const response = await fetch('/api/fix-bill-credit-user-id', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${await user.getIdToken()}`
+          'Authorization': `Bearer ${token}`
         }
       });
       

@@ -20,10 +20,47 @@ export async function POST(request: Request) {
       return error;
     }
     
-    console.log('[GL Agent Journal API] Authenticated user:', userId);
-    
     // Parse request body
     const body = await request.json();
+    
+    // For internal API calls, use the userId from the request body
+    let effectiveUserId = userId;
+    
+    // Special handling for internal API calls
+    if (userId === 'internal-api') {
+      // If the request comes from an internal API call, check for userId in the body
+      if (body.userId && body.userId !== 'internal-api') {
+        // If a valid user ID is provided in the body, use it
+        effectiveUserId = body.userId;
+        console.log('[GL Agent Journal API] Using userId from request body for internal API call:', effectiveUserId);
+      } else if (body.originator === 'AP_BILL_PAYMENT') {
+        // For bill payments, use a special system user ID
+        effectiveUserId = 'system-bill-payment';
+        console.log('[GL Agent Journal API] Using system user ID for bill payment journal');
+      } else {
+        // For other internal operations, use a default system user
+        effectiveUserId = 'system-journal';
+        console.log('[GL Agent Journal API] Using default system user ID for internal operation');
+      }
+    }
+    
+    // Log the effective user ID for debugging
+    console.log('[GL Agent Journal API] Effective user ID:', effectiveUserId);
+    
+    console.log('[GL Agent Journal API] Authenticated user:', effectiveUserId);
+    console.log('[GL Agent Journal API] Request URL:', request.url);
+    console.log('[GL Agent Journal API] Request headers:', {
+      contentType: request.headers.get('Content-Type'),
+      authorization: request.headers.get('Authorization')?.substring(0, 15) + '...',
+    });
+    console.log('[GL Agent Journal API] Journal entry data:', {
+      memo: body.journalEntry?.memo,
+      transaction_date: body.journalEntry?.transaction_date,
+      journal_type: body.journalEntry?.journal_type,
+      reference_number: body.journalEntry?.reference_number,
+      lineCount: body.journalEntry?.lines?.length,
+      originator: body.originator
+    });
     
     // Validate input
     if (!body.journalEntry) {
@@ -40,6 +77,12 @@ export async function POST(request: Request) {
     
     // Validate journal entry format has required fields
     if (!journalEntry.memo || !journalEntry.transaction_date || !journalEntry.lines || journalEntry.lines.length === 0) {
+      console.error('[GL Agent Journal API] Missing required fields in journal entry:', { 
+        hasMemo: !!journalEntry.memo, 
+        hasDate: !!journalEntry.transaction_date, 
+        hasLines: !!journalEntry.lines, 
+        lineCount: journalEntry.lines?.length 
+      });
       return NextResponse.json(
         { 
           success: false, 
@@ -48,6 +91,20 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+    
+    // Log the full journal entry for debugging
+    console.log('[GL Agent Journal API] Processing journal entry:', {
+      memo: journalEntry.memo,
+      date: journalEntry.transaction_date,
+      type: journalEntry.journal_type,
+      reference: journalEntry.reference_number,
+      lineCount: journalEntry.lines.length,
+      lines: journalEntry.lines.map(l => ({
+        account: l.account_code_or_name,
+        debit: l.debit,
+        credit: l.credit
+      }))
+    });
     
     // Validate lines have required fields
     for (const line of journalEntry.lines) {
@@ -66,7 +123,7 @@ export async function POST(request: Request) {
     
     // Use the existing createJournalFromAI function to create the journal entry
     // This maintains consistency with how the GL agent would create entries
-    const result = await createJournalFromAI(journalEntry, userId);
+    const result = await createJournalFromAI(journalEntry, effectiveUserId);
     
     if (!result.success) {
       console.error(`[GL Agent Journal API] Error creating journal: ${result.message}`);
@@ -82,7 +139,7 @@ export async function POST(request: Request) {
     
     // Log audit event for journal creation
     await logAuditEvent({
-      user_id: userId,
+      user_id: effectiveUserId,
       action_type: 'JOURNAL_CREATED',
       entity_type: 'JOURNAL',
       entity_id: String(result.journalId),

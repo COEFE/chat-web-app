@@ -362,6 +362,7 @@ export async function POST(req: NextRequest) {
             }
             
             // Process directly with CreditCardAgent
+            // IMPORTANT: Structure the context exactly like the working test implementation
             result = await creditCardAgent.processRequest({
               userId,
               query: pdfContent, // Use the PDF content as the query
@@ -371,6 +372,18 @@ export async function POST(req: NextRequest) {
                 type: 'pdf',
                 name: attachments[0].name,
                 content: attachments[0].base64Data
+              },
+              additionalContext: {
+                forceTransactionProcessing: true,
+                // Match the exact structure from the working test implementation
+                // This is key to ensuring the extracted data is properly passed to the next step
+                statementInfo: null, // Will be filled by the agent during extraction
+                transactions: [], // Will be filled by the agent during extraction
+                documentContext: {
+                  extractedData: {
+                    statementInfo: null // This will be filled by the agent during extraction
+                  }
+                }
               },
               token: authorizationHeader ? authorizationHeader.split('Bearer ')[1] : ''
             });

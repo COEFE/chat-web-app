@@ -43,7 +43,9 @@ export default function DatabaseAdminPage() {
       "035_recreate_audit_logs_table.sql",
       "036_add_user_id_to_journals.sql",
       "037_create_bill_refunds_table.sql",
-      "038_add_bill_refund_journal_type.sql"
+      "038_add_bill_refund_journal_type.sql",
+      "039_add_credit_card_journal_types.sql",
+      "040_add_credit_card_refund_journal_type.sql"
     ];
     setAvailableMigrations(migrations);
   }, []);
@@ -66,7 +68,9 @@ export default function DatabaseAdminPage() {
       "035_recreate_audit_logs_table.sql": "Recreates the audit_logs table to resolve issues with the previous migration. Required for the audit trail system to function properly.",
       "036_add_user_id_to_journals.sql": "Adds user_id column to journals table and creates an index for better performance. CRITICAL SECURITY UPDATE: Required for proper data isolation between user accounts.",
       "037_create_bill_refunds_table.sql": "Creates the bill_refunds table for tracking refunds against paid vendor bills. Required for the vendor bill refund feature.",
-      "038_add_bill_refund_journal_type.sql": "Adds the 'BR' (Bill Refund) journal type to the journal_types table. Required for properly categorizing bill refund transactions."
+      "038_add_bill_refund_journal_type.sql": "Adds the 'BR' (Bill Refund) journal type to the journal_types table. Required for properly categorizing bill refund transactions.",
+      "039_add_credit_card_journal_types.sql": "Adds the 'CCP' (Credit Card Purchase) and 'CCY' (Credit Card Payment) journal types to the journal_types table. Required for better categorization of credit card transactions.",
+      "040_add_credit_card_refund_journal_type.sql": "Adds the 'CCR' (Credit Card Refund) journal type to the journal_types table. Required for properly categorizing credit card refund transactions."
     };
     return descriptions[filename] || "Run this migration to update your database schema.";
   };
@@ -77,7 +81,12 @@ export default function DatabaseAdminPage() {
 
   return (
     <div className="container mx-auto py-4">
-      <h1 className="text-2xl font-bold mb-4">Database Administration</h1>
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-2xl font-bold">Database Administration</h1>
+        <a href="/dashboard/admin/agent-tests" className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2">
+          Agent Tests
+        </a>
+      </div>
       
       <Tabs defaultValue="migrations" className="w-full">
         <TabsList>

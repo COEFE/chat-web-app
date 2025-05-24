@@ -5,7 +5,8 @@ import {
   createBillPayment,
   deleteBillPayment,
   getBill,
-  BillPayment
+  BillPayment,
+  Bill
 } from '@/lib/accounting/billQueries';
 import { createJournal, Journal, JournalLine } from '@/lib/accounting/journalQueries';
 import { logAuditEvent, AuditLogData } from '@/lib/auditLogger';
@@ -49,7 +50,14 @@ export async function POST(req: NextRequest) {
     
     // Check if bill exists and belongs to the current user
     const billId = typeof payment.bill_id === 'number' ? payment.bill_id : parseInt(payment.bill_id.toString());
-    const bill = await getBill(billId, true, true, userId); // Pass correct parameters: id, includeLines, includePayments, userId
+    
+    // For internal API calls, we skip the user ID check since it's a system operation
+    // This allows the update-status API to create payments for any bill
+    const isInternalApiCall = userId === 'internal-api';
+    console.log(`[Bill Payments] Processing request for bill ${billId}, isInternalApiCall: ${isInternalApiCall}`);
+    
+    // Skip user ID check for internal API calls
+    const bill = await getBill(billId, true, true, isInternalApiCall ? undefined : userId);
     if (!bill) {
       return NextResponse.json({ error: 'Bill not found or you do not have permission to access it' }, { status: 404 });
     }
@@ -86,99 +94,125 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid payment amount format' }, { status: 400 });
     }
 
-    // Journal entry description
-    // Handle vendor_name which might come from the payment object or need to be fetched
-    const vendorName = payment.vendor_name || (bill as any).vendor_name || 'vendor';
-    const journalMemo = `Payment for Bill ${bill.bill_number || bill.id} to ${vendorName}`;
-    const debitDescription = `Payment to ${vendorName} for bill #${bill.bill_number || bill.id}`;
-    const creditDescription = payment.reference_number ? 
-      `Ref: ${payment.reference_number}` : 
-      `Payment for Bill ${bill.bill_number || bill.id}`;
-
-    // Create journal entry via GL agent instead of directly
-    // This routes the GL posting for paid invoices to the GL agent as requested
-    let journalId: number;
+    // Extract the user_id from the bill object (it's added by the getBill function)
+    const billUserId = (bill as any).user_id || userId;
+    
+    // We need to fetch account codes/names for the GL agent
+    // First try to get the accounts with the bill's user ID
+    const accountsQuery = `
+      SELECT id, name, code 
+      FROM accounts 
+      WHERE id IN ($1, $2) AND user_id = $3
+    `;
+    
+    let accounts;
     try {
-      console.log(`[Bill Payments] Creating journal entry via GL agent for bill ${billId} with amount ${amountPaidNum}...`);
+      const accountsResult = await sql.query(accountsQuery, [bill.ap_account_id, payment.payment_account_id, billUserId]);
       
-      // Route the journal creation to the GL agent via the API
-      const host = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || 'localhost:3000';
-      const protocol = host.includes('localhost') ? 'http' : 'https';
-      const baseUrl = host.startsWith('http') ? host : `${protocol}://${host}`;
+      if (accountsResult.rows.length !== 2) {
+        // If we couldn't find both accounts, try without the user_id filter as a fallback
+        console.log(`[Bill Payments] Could not find both accounts with user ID ${billUserId}, trying without user filter`);
+        const fallbackQuery = `
+          SELECT id, name, code 
+          FROM accounts 
+          WHERE id IN ($1, $2)
+        `;
+        
+        const fallbackResult = await sql.query(fallbackQuery, [bill.ap_account_id, payment.payment_account_id]);
+        
+        if (fallbackResult.rows.length !== 2) {
+          throw new Error('Failed to find required accounts for journal entry');
+        }
+        
+        console.log(`[Bill Payments] Found accounts using fallback query without user filter`);
+        accounts = fallbackResult.rows;
+      } else {
+        accounts = accountsResult.rows;
+      }
+    } catch (error) {
+      console.error('[Bill Payments] Error fetching accounts:', error);
+      throw new Error('Failed to find required accounts for journal entry');
+    }
+    
+    // Find the AP and payment accounts
+    const apAccount = accounts.find((a: any) => a.id === bill.ap_account_id);
+    const paymentAccount = accounts.find((a: any) => a.id === payment.payment_account_id);
+    
+    if (!apAccount || !paymentAccount) {
+      throw new Error('Missing required account information for journal entry');
+    }
+    
+    // Create journal entry via GL agent
+    let journalId: number | undefined;
+    
+    try {
+      // Get vendor name from payment data or bill object
+      const vendorName = payment.vendor_name || (bill as any).vendor_name || 'Unknown Vendor';
       
-      // Prepare the journal entry data in AI format expected by GL agent
-      // Use proper typing for the journal entry lines
-      type JournalEntryLine = {
-        account_code_or_name?: string;
-        account_id?: number;
-        description: string;
-        debit: number;
-        credit: number;
-        vendor?: string;
-      };
-
+      // Prepare journal entry data
       const journalEntry = {
-        memo: journalMemo,
+        memo: `Payment for Bill ${bill.bill_number} to ${vendorName}`,
         transaction_date: payment.payment_date,
-        journal_type: 'BP', // BP = Bill Payment
-        reference_number: payment.reference_number || `AUTO-PAY-${billId}-${Date.now()}`,
+        journal_type: 'BP', // Bill Payment
+        reference_number: payment.reference_number || `AUTO-PAY-${Date.now()}`,
         lines: [
+          // Credit the payment account (cash/bank)
           {
-            // For GL agent, we need to fetch the account code/name
-            account_id: bill.ap_account_id,
-            description: debitDescription,
-            debit: amountPaidNum,
-            credit: 0,
-            vendor: vendorName
-          } as JournalEntryLine,
+            account_code_or_name: paymentAccount.code || paymentAccount.name,
+            description: `Payment for bill ${bill.bill_number}`,
+            credit: payment.amount_paid,
+            debit: 0
+          },
+          // Debit the AP account
           {
-            // For GL agent, we need to fetch the account code/name
-            account_id: payment.payment_account_id,
-            description: creditDescription,
-            debit: 0,
-            credit: amountPaidNum
-          } as JournalEntryLine
+            account_code_or_name: apAccount.code || apAccount.name,
+            description: `Payment for bill ${bill.bill_number} to ${vendorName}`,
+            debit: payment.amount_paid,
+            credit: 0
+          }
         ]
       };
       
-      // We need to fetch account codes/names for the GL agent
-      const accountsQuery = `
-        SELECT id, name, code 
-        FROM accounts 
-        WHERE id IN ($1, $2) AND user_id = $3
-      `;
+      // Determine the base URL for the GL agent API call
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      console.log(`[Bill Payments] Base URL for GL agent: ${baseUrl}`);
       
-      const accountsResult = await sql.query(accountsQuery, [bill.ap_account_id, payment.payment_account_id, userId]);
+      // Call the GL agent API to create the journal entry
+      const glAgentUrl = `${baseUrl}/api/gl_agent/journal`;
+      console.log(`[Bill Payments] Calling GL agent journal API at ${glAgentUrl}`);
       
-      if (accountsResult.rows.length !== 2) {
-        throw new Error('Failed to find required accounts for journal entry');
-      }
+      // For bill payments, we need to use the bill's user ID, not the internal-api user ID
+      // This ensures proper data isolation and ownership
+      const effectiveUserId = billUserId !== 'internal-api' ? billUserId : (bill as any).user_id || 'system-bill-payment';
+      console.log(`[Bill Payments] Using userId for journal creation: ${effectiveUserId}`);
       
-      // Find the AP and payment accounts
-      const apAccount = accountsResult.rows.find(a => a.id === bill.ap_account_id);
-      const paymentAccount = accountsResult.rows.find(a => a.id === payment.payment_account_id);
+      // Get the authorization token from the request or use a default for internal API calls
+      const authHeader = req.headers.get('Authorization') || '';
+      const token = authHeader.replace('Bearer ', '') || 'internal-api-call';
       
-      if (!apAccount || !paymentAccount) {
-        throw new Error('Missing required account information for journal entry');
-      }
+      // Log the full journal entry for debugging
+      console.log('[Bill Payments] Journal entry data:', {
+        memo: journalEntry.memo,
+        date: journalEntry.transaction_date,
+        type: journalEntry.journal_type,
+        reference: journalEntry.reference_number,
+        lineCount: journalEntry.lines.length,
+        lines: journalEntry.lines.map(l => ({
+          account: l.account_code_or_name,
+          debit: l.debit,
+          credit: l.credit
+        }))
+      });
       
-      // Update the journal entry with account codes/names
-      journalEntry.lines[0].account_code_or_name = apAccount.code || apAccount.name;
-      delete journalEntry.lines[0].account_id;
-      
-      journalEntry.lines[1].account_code_or_name = paymentAccount.code || paymentAccount.name;
-      delete journalEntry.lines[1].account_id;
-      
-      // Call the GL agent journal API
-      const response = await fetch(`${baseUrl}/api/gl_agent/journal`, {
+      const response = await fetch(glAgentUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${userId}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           journalEntry,
-          userId,
+          userId: effectiveUserId, // Use the bill's user ID instead of internal-api
           originator: 'AP_BILL_PAYMENT'
         })
       });
@@ -191,8 +225,8 @@ export async function POST(req: NextRequest) {
       
       const result = await response.json();
       
-      if (!result.success) {
-        throw new Error(result.message || 'Unknown error from GL agent');
+      if (!result || !result.success) {
+        throw new Error(result?.message || 'Unknown error from GL agent');
       }
       
       journalId = result.journalId;
@@ -212,7 +246,7 @@ export async function POST(req: NextRequest) {
       amount_paid: payment.amount_paid,
       payment_account_id: payment.payment_account_id,
       payment_method: payment.payment_method,
-      reference_number: payment.reference_number,
+      reference_number: payment.reference_number || undefined, // Convert null to undefined if needed
       journal_id: journalId // Link to the created journal entry
     };
     
@@ -226,22 +260,23 @@ export async function POST(req: NextRequest) {
         user_id: userId,
         action_type: 'BILL_PAYMENT_CREATED',
         entity_type: 'BillPayment',
-        entity_id: newPayment.id,
+        entity_id: String(newPayment.id),
         changes_made: [
-          { field: 'bill_id', old_value: null, new_value: newPayment.bill_id },
+          { field: 'bill_id', old_value: null, new_value: String(newPayment.bill_id) },
           { field: 'payment_date', old_value: null, new_value: newPayment.payment_date },
-          { field: 'amount_paid', old_value: null, new_value: newPayment.amount_paid },
-          { field: 'payment_account_id', old_value: null, new_value: newPayment.payment_account_id },
-          { field: 'journal_id', old_value: null, new_value: newPayment.journal_id },
+          { field: 'amount_paid', old_value: null, new_value: String(newPayment.amount_paid) },
+          { field: 'payment_account_id', old_value: null, new_value: String(newPayment.payment_account_id) },
+          { field: 'journal_id', old_value: null, new_value: newPayment.journal_id ? String(newPayment.journal_id) : null },
         ],
         status: 'SUCCESS',
         context: { 
-          related_bill_id: bill.id, // From the bill object fetched earlier
+          related_bill_id: String(bill.id), 
           related_bill_number: bill.bill_number 
         }
       };
+      
       try {
-        logAuditEvent(auditEntry);
+        await logAuditEvent(auditEntry);
       } catch (auditError) {
         console.error("Audit Log Error (BILL_PAYMENT_CREATED):", auditError);
       }
@@ -250,7 +285,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       payment: newPayment,
-      journal_id: journalId
+      journal_id: journalId,
+      message: 'Payment created successfully'
     }, { status: 201 });
   } catch (err: any) {
     console.error('[bill-payments] POST error:', err);
@@ -267,28 +303,26 @@ export async function DELETE(req: NextRequest) {
   if (error) return error;
 
   try {
-    // Get payment ID from query parameter
+    // Get payment ID from query params
     const url = new URL(req.url);
-    const paymentId = url.searchParams.get('id');
+    const id = url.searchParams.get('id');
     
-    if (!paymentId) {
+    if (!id) {
       return NextResponse.json({ error: 'Payment ID is required' }, { status: 400 });
     }
     
-    const id = parseInt(paymentId, 10);
-    if (isNaN(id)) {
-      return NextResponse.json({ error: 'Invalid payment ID' }, { status: 400 });
+    const paymentId = parseInt(id);
+    if (isNaN(paymentId)) {
+      return NextResponse.json({ error: 'Invalid payment ID format' }, { status: 400 });
     }
     
-    // TODO: Consider fetching the bill payment details here before deletion
-    // to provide more context in the audit log (e.g., amount, bill_id).
-    // For now, we proceed without it if getBillPayment(id) is not readily available.
-
-    const result = await deleteBillPayment(id);
-    if (!result) {
-      return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
+    // Delete the payment
+    const success = await deleteBillPayment(paymentId);
+    
+    if (!success) {
+      return NextResponse.json({ error: 'Failed to delete payment' }, { status: 500 });
     }
-
+    
     // Audit Log for Bill Payment Deletion
     if (userId) {
       const auditEntry: AuditLogData = {
@@ -296,13 +330,14 @@ export async function DELETE(req: NextRequest) {
         user_id: userId,
         action_type: 'BILL_PAYMENT_DELETED',
         entity_type: 'BillPayment',
-        entity_id: id,
-        // changes_made: null, // Or log what was known, e.g., just the ID
+        entity_id: String(paymentId),
+        changes_made: [],
         status: 'SUCCESS',
-        context: { note: 'Bill payment record deleted. Associated journal entry may need manual review/reversal if not handled by deleteBillPayment.' }
+        context: { payment_id: String(paymentId) }
       };
+      
       try {
-        logAuditEvent(auditEntry);
+        await logAuditEvent(auditEntry);
       } catch (auditError) {
         console.error(`Audit Log Error (BILL_PAYMENT_DELETED, ID: ${id}):`, auditError);
       }

@@ -66,7 +66,7 @@ describe('excelUtils', () => {
     // Mock bucket().file() path
     mockBucket.file.mockReturnValue(mockStorageFile); 
     // Mock the save() method on the File object
-    mockStorageFile.save.mockResolvedValue(undefined); // save returns void promise
+    mockStorageFile.save.mockResolvedValue(undefined as any); // save returns void promise
 
     // Mock storage.bucket() to return our mock Bucket
     // Need to handle potential default bucket name argument
@@ -101,10 +101,10 @@ describe('excelUtils', () => {
       // 2. findSimilarDocumentByBaseName finds the similar doc
       // Mock the where().get() specifically for the findSimilar logic
       mockQuery.get.mockResolvedValue(querySnapMock); // Ensure query.get returns our specific snapshot
-      querySnapMock.empty = false;
-      querySnapMock.docs = [similarDocSnapMock]; // Return the similar doc snapshot
+      Object.defineProperty(querySnapMock, "empty", { value: false, writable: true });
+      Object.defineProperty(querySnapMock, "docs", { value: [similarDocSnapMock], writable: true }); // Return the similar doc snapshot
       Object.defineProperty(similarDocSnapMock, 'exists', { get: jest.fn(() => true) });
-      similarDocSnapMock.id = similarDocId; // Set the ID of the found doc
+      Object.defineProperty(similarDocSnapMock, "id", { value: similarDocId, writable: true }); // Set the ID of the found doc
       similarDocSnapMock.data.mockReturnValue({
         name: 'Existing Similar Doc',
         storagePath: 'users/userId/some-old-path.xlsx',
@@ -122,7 +122,7 @@ describe('excelUtils', () => {
       // 4. Mock storage upload using the *similar* storage path
       // Ensure bucket.file() is called with the correct path
       mockBucket.file.calledWith(similarStoragePath).mockReturnValue(mockStorageFile);
-      mockStorageFile.save.mockResolvedValue(undefined); // Ensure save() resolves
+      mockStorageFile.save.mockResolvedValue(undefined as any); // Ensure save() resolves
 
       // --- Call Function ---
       const result = await createExcelFile(
@@ -186,14 +186,14 @@ describe('excelUtils', () => {
       // 2. Mock Storage bucket.file().download() for the existing file
       mockBucket.file.calledWith(editStoragePath).mockReturnValue(editStorageFileMock);
       // download() returns a Promise<[Buffer]>
-      editStorageFileMock.download.mockResolvedValue([existingExcelBuffer]);
+      editStorageFileMock.download.mockResolvedValue([existingExcelBuffer] as any);
 
       // 3. Mock Firestore doc().update()
       editDocRefMock.update.mockResolvedValue(mockWriteResult);
 
       // 4. Mock Storage bucket.file().save() for overwriting the *same* file
       // Ensure the same file mock is configured to handle the save call
-      editStorageFileMock.save.mockResolvedValue(undefined);
+      editStorageFileMock.save.mockResolvedValue(undefined as any);
 
       // --- (Optional) Mock xlsx processing if necessary, but often not needed ---
       // jest.spyOn(XLSX, 'read').mockReturnValue(...);

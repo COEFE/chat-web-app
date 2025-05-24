@@ -79,6 +79,7 @@ export default function BillsPage() {
   
   const [showAddBillForm, setShowAddBillForm] = useState<boolean>(false);
   const [editingBill, setEditingBill] = useState<Bill | null>(null);
+  const [isCreditNote, setIsCreditNote] = useState<boolean>(false);
   
   const [pagination, setPagination] = useState({
     page: 1,
@@ -225,6 +226,13 @@ export default function BillsPage() {
 
   const handleAddBill = () => {
     setEditingBill(null);
+    setIsCreditNote(false);
+    setShowAddBillForm(true);
+  };
+
+  const handleAddCredit = () => {
+    setEditingBill(null);
+    setIsCreditNote(true);
     setShowAddBillForm(true);
   };
 
@@ -296,16 +304,23 @@ export default function BillsPage() {
         <TabsList>
           <TabsTrigger value="vendors" onClick={() => router.push('/dashboard/accounts-payable/vendors')}>Vendors</TabsTrigger>
           <TabsTrigger value="bills">Bills</TabsTrigger>
+          <TabsTrigger value="bill-credits" onClick={() => router.push('/dashboard/accounts-payable/bill-credits')}>Bill Credits</TabsTrigger>
           <TabsTrigger value="aging-report" onClick={() => router.push('/dashboard/accounts-payable/aging-report')}>Aging Report</TabsTrigger>
         </TabsList>
       </Tabs>
       
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-semibold">Bills</h2>
-        <Button onClick={handleAddBill}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Bill
-        </Button>
+        <div className="flex space-x-2">
+          <Button onClick={handleAddBill}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Bill
+          </Button>
+          <Button onClick={() => router.push('/dashboard/accounts-payable/bill-credits')} variant="outline">
+            <Plus className="mr-2 h-4 w-4" />
+            Vendor Credits
+          </Button>
+        </div>
       </div>
 
       <Card className="mb-6">
@@ -482,6 +497,8 @@ export default function BillsPage() {
         <BillForm
           bill={editingBill}
           onClose={handleBillFormClose}
+          isCreditNote={isCreditNote}
+          title={isCreditNote ? "Add Vendor Credit" : (editingBill ? "Edit Bill" : "Add Bill")}
         />
       )}
     </div>

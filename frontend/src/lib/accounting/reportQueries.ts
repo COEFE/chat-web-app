@@ -33,7 +33,19 @@ export async function getTrialBalance(
   startDate: string, 
   endDate: string
 ): Promise<TrialBalanceRow[]> {
-  const { rows } = await sql`
+  // First, check which date column exists in the journals table
+  const { rows: schemaRows } = await sql`
+    SELECT 
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transaction_date') as has_transaction_date,
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'date') as has_date
+  `;
+  
+  const schema = schemaRows[0];
+  const dateColumnName = schema.has_transaction_date ? 'transaction_date' : 'date';
+  console.log(`[getTrialBalance] Using date column: ${dateColumnName}`);
+  
+  // Build the dynamic SQL query using the correct date column
+  let query = `
     WITH account_balances AS (
       SELECT 
         a.id,
@@ -51,7 +63,7 @@ export async function getTrialBalance(
       WHERE 
         j.is_posted = TRUE 
         AND j.is_deleted = FALSE
-        AND j.date BETWEEN ${startDate} AND ${endDate}
+        AND j.${dateColumnName} BETWEEN $1 AND $2
       GROUP BY 
         a.id, a.code, a.name, a.account_type
       UNION ALL
@@ -72,7 +84,7 @@ export async function getTrialBalance(
           JOIN journals j ON jl.journal_id = j.id
           WHERE j.is_posted = TRUE 
             AND j.is_deleted = FALSE
-            AND j.date BETWEEN ${startDate} AND ${endDate}
+            AND j.${dateColumnName} BETWEEN $1 AND $2
         )
     )
     SELECT 
@@ -94,6 +106,9 @@ export async function getTrialBalance(
     ORDER BY 
       account_code
   `;
+  
+  // Execute the query with parameters
+  const { rows } = await sql.query(query, [startDate, endDate]);
   
   return rows as TrialBalanceRow[];
 }

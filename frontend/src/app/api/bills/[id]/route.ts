@@ -9,6 +9,91 @@ import {
 import { logAuditEvent, AuditLogData } from '@/lib/auditLogger';
 import { sql } from '@vercel/postgres';
 import { getJournalDateColumn } from '@/lib/accounting/journalColumnUtils';
+import Anthropic from "@anthropic-ai/sdk";
+
+/**
+ * Parse payment terms and calculate the due date using AI
+ * @param billDate The bill date in YYYY-MM-DD format
+ * @param paymentTerms The payment terms (e.g., "Net 30", "2/10 Net 30", "Due on Receipt")
+ * @returns The calculated due date in YYYY-MM-DD format
+ */
+async function calculateDueDateFromTerms(billDate: string, paymentTerms: string): Promise<string> {
+  console.log(`[Bills API] Calculating due date from terms: ${paymentTerms} with bill date: ${billDate}`);
+  
+  try {
+    // First try to parse common terms without AI
+    const netMatch = paymentTerms.match(/net\s*(\d+)/i);
+    if (netMatch && netMatch[1]) {
+      const days = parseInt(netMatch[1], 10);
+      if (!isNaN(days)) {
+        const billDateObj = new Date(billDate);
+        const dueDate = new Date(billDateObj);
+        dueDate.setDate(billDateObj.getDate() + days);
+        return `${dueDate.getFullYear()}-${(dueDate.getMonth() + 1).toString().padStart(2, '0')}-${dueDate.getDate().toString().padStart(2, '0')}`;
+      }
+    }
+    
+    // Check for "Due on Receipt"
+    if (paymentTerms.toLowerCase().includes('due on receipt') || 
+        paymentTerms.toLowerCase().includes('due upon receipt') ||
+        paymentTerms.toLowerCase().includes('cod') ||
+        paymentTerms.toLowerCase().includes('cash on delivery')) {
+      return billDate; // Due immediately
+    }
+    
+    // For more complex terms, use AI
+    try {
+      const anthropic = new Anthropic({
+        apiKey: process.env.ANTHROPIC_API_KEY || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || "",
+      });
+      
+      const response = await anthropic.messages.create({
+        model: "claude-3-5-sonnet-20240620",
+        max_tokens: 100,
+        temperature: 0.1,
+        system: `You are an accounting AI that parses payment terms and calculates due dates.
+        Given a bill date and payment terms, determine the due date in YYYY-MM-DD format.
+        Common payment terms include:
+        - Net X: Payment due X days after invoice date
+        - X/Y Net Z: X% discount if paid within Y days, otherwise full amount due in Z days
+        - EOM: End of month
+        - MFI: Month following invoice
+        - Due on Receipt: Payment due immediately
+        
+        Respond ONLY with the due date in YYYY-MM-DD format. Just the date, nothing else.`,
+        messages: [{ 
+          role: "user", 
+          content: `Bill date: ${billDate}\nPayment terms: ${paymentTerms}\n\nWhat is the due date in YYYY-MM-DD format?`
+        }]
+      });
+      
+      const responseText = typeof response.content[0] === 'object' && 'text' in response.content[0] ? response.content[0].text : '';
+      
+      // Extract date in YYYY-MM-DD format
+      const dateMatch = responseText.match(/(\d{4}-\d{2}-\d{2})/);
+      if (dateMatch && dateMatch[1]) {
+        console.log(`[Bills API] AI calculated due date: ${dateMatch[1]} from terms: ${paymentTerms}`);
+        return dateMatch[1];
+      }
+    } catch (aiError) {
+      console.error('[Bills API] Error using AI for payment terms parsing:', aiError);
+      // Continue to fallback if AI fails
+    }
+    
+    // Fallback: Default to Net 30 if we couldn't parse the terms
+    const billDateObj = new Date(billDate);
+    const dueDate = new Date(billDateObj);
+    dueDate.setDate(billDateObj.getDate() + 30);
+    return `${dueDate.getFullYear()}-${(dueDate.getMonth() + 1).toString().padStart(2, '0')}-${dueDate.getDate().toString().padStart(2, '0')}`;
+  } catch (error) {
+    console.error('[Bills API] Error calculating due date from terms:', error);
+    // Fallback to 30 days from bill date
+    const billDateObj = new Date(billDate);
+    const dueDate = new Date(billDateObj);
+    dueDate.setDate(billDateObj.getDate() + 30);
+    return `${dueDate.getFullYear()}-${(dueDate.getMonth() + 1).toString().padStart(2, '0')}-${dueDate.getDate().toString().padStart(2, '0')}`;
+  }
+}
 
 // Extended interface for bill with additional fields from the database
 interface BillWithDetails {
@@ -462,11 +547,37 @@ export async function PUT(req: NextRequest) {
       );
     }
 
+    // Check if payment terms are being updated but due date is not explicitly provided
+    // If so, calculate the due date based on the new payment terms
+    let billToUpdate = { ...bill };
+    
+    if (bill.terms && (!bill.due_date || bill.due_date === existingBill.due_date)) {
+      // Terms changed but due date not explicitly updated
+      if (bill.terms !== existingBill.terms) {
+        console.log(`[Bills API] Payment terms changed from ${existingBill.terms} to ${bill.terms}, recalculating due date`);
+        
+        // Use the bill date from the update if provided, otherwise use existing bill date
+        const billDate = bill.bill_date || existingBill.bill_date;
+        
+        // Calculate new due date based on the updated terms
+        try {
+          const calculatedDueDate = await calculateDueDateFromTerms(billDate, bill.terms);
+          console.log(`[Bills API] Auto-calculated due date: ${calculatedDueDate} based on terms: ${bill.terms}`);
+          
+          // Update the due date in the bill object
+          billToUpdate.due_date = calculatedDueDate;
+        } catch (calcError) {
+          console.error(`[Bills API] Error calculating due date from terms:`, calcError);
+          // Continue with update even if due date calculation fails
+        }
+      }
+    }
+    
     // Update the bill
     const updatedBill = await updateBill(
       id,
       {
-        ...bill,
+        ...billToUpdate,
         // Fields that should never be updated via API
         amount_paid: undefined, // Never update amount_paid directly, only via payments
         is_deleted: undefined, // Never update is_deleted directly, use DELETE endpoint

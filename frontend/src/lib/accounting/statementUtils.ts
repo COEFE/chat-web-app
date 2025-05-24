@@ -10,7 +10,8 @@ import { findStatementByAccountIdentifiers, isStatementProcessed } from './state
  */
 export async function checkStatementStatus(
   statementNumber: string,
-  userId: string
+  userId: string,
+  lastFourDigits?: string
 ): Promise<{
   isProcessed: boolean;
   accountId?: number;
@@ -19,10 +20,20 @@ export async function checkStatementStatus(
   lastFour: string;
 }> {
   try {
-    // Extract last four digits for fallback identification
-    const lastFour = statementNumber.length >= 4 
-      ? statementNumber.slice(-4) 
-      : statementNumber;
+    // Use provided lastFourDigits if available, otherwise extract from statementNumber
+    let lastFour = lastFourDigits;
+    
+    // If lastFourDigits wasn't provided, try to extract from statementNumber
+    if (!lastFour && statementNumber && statementNumber !== 'unknown') {
+      lastFour = statementNumber.length >= 4 
+        ? statementNumber.slice(-4) 
+        : statementNumber;
+    }
+    
+    // Ensure lastFour has a value
+    if (!lastFour) {
+      lastFour = 'unknown';
+    }
     
     // Try to find the account by statement identifiers
     const existingAccount = await findStatementByAccountIdentifiers(
@@ -67,10 +78,10 @@ export async function checkStatementStatus(
 /**
  * Process a statement via the API
  * 
- * @param statementData Statement data to process
+ * @param params Statement data to process
  * @returns API response
  */
-export async function processStatementViaApi(statementData: {
+export async function processStatementViaApi(params: {
   accountId?: number;
   accountCode?: string;
   accountName?: string;
@@ -86,13 +97,16 @@ export async function processStatementViaApi(statementData: {
   isAlreadyProcessed?: boolean;
   needsAccountCreation?: boolean;
 }> {
+  // CRITICAL DIAGNOSTIC: Log all parameters to see what's being sent
+  console.log(`[StatementUtils] processStatementViaApi called with params:`, JSON.stringify(params, null, 2));
+  
   try {
     const response = await fetch('/api/statements/process', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(statementData),
+      body: JSON.stringify(params),
     });
     
     if (!response.ok) {

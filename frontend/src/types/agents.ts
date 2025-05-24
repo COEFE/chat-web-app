@@ -5,7 +5,34 @@
 export interface AgentResponse {
   success: boolean;
   message: string;
+  agentId?: string;
+  sourceDocuments?: any;
   data?: any;
+}
+
+export interface DocumentContext {
+  type: string; // 'pdf', 'excel', 'image', etc.
+  name: string; // Filename
+  content: string; // Base64 content or text content
+  metadata?: Record<string, any>; // Additional metadata about the document
+  extractedData?: {
+    statementInfo?: {
+      creditCardIssuer?: string;
+      lastFourDigits?: string;
+      statementNumber?: string;
+      statementDate?: string;
+      balance?: number;
+      dueDate?: string;
+      minimumPayment?: number;
+      transactions?: Array<{
+        date: string;
+        description: string;
+        amount: number;
+        category?: string;
+      }>;
+    };
+    [key: string]: any; // Allow for other types of extracted data
+  };
 }
 
 export interface AgentContext {
@@ -13,7 +40,7 @@ export interface AgentContext {
   query: string;
   conversationId?: string;
   previousMessages?: AgentMessage[];
-  documentContext?: any;
+  documentContext?: DocumentContext;
   token?: string; // Authentication token for API requests
   additionalContext?: Record<string, any>; // Additional context like similar conversations
 }

@@ -2,6 +2,9 @@ import { Metadata } from 'next';
 import TestAgentCommunicationButton from '@/components/admin/TestAgentCommunicationButton';
 import CreateGLAccountWithBalanceButton from '@/components/admin/CreateGLAccountWithBalanceButton';
 import TestAPAgentMemoryButton from '@/components/admin/TestAPAgentMemoryButton';
+import TestCreditCardAgentBillCreationButton from '@/components/admin/TestCreditCardAgentBillCreationButton';
+import TestCreditCardAgentFullFlowButton from '@/components/admin/TestCreditCardAgentFullFlowButton';
+import TestCreditCardStatementProcessingButton from '@/components/admin/TestCreditCardStatementProcessingButton';
 import RunMigrationsButton from '@/components/admin/RunMigrationsButton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -41,6 +44,12 @@ export default function AgentTestsPage() {
         <CreateGLAccountWithBalanceButton />
         
         <TestAPAgentMemoryButton />
+
+        <TestCreditCardAgentBillCreationButton />
+        
+        <TestCreditCardAgentFullFlowButton />
+        
+        <TestCreditCardStatementProcessingButton />
         
         <Card>
           <CardHeader>
