@@ -3,6 +3,7 @@ import { EnhancedStatementInfo } from './creditCardStartingBalanceExtractor';
 import { AgentContext } from "@/types/agents";
 import { sql } from "@vercel/postgres";
 import { createGLAccount } from "@/lib/glUtils";
+import { generateIntelligentGLCode } from './aiGLCodeGenerator';
 
 /**
  * Enhanced integration between Credit Card Agent and GL Agent that properly handles starting balances
@@ -240,7 +241,23 @@ export class CreditCardGLIntegration {
     const maxAttempts = 100;
 
     while (attempts < maxAttempts) {
-      const code = `2${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
+      // Generate account code using AI-powered logic
+      console.log('[CreditCardGLIntegration] Using AI-powered code generation for credit card account');
+      const codeResult = await generateIntelligentGLCode({
+        accountName: accountName,
+        accountType: 'liability',
+        description: `Credit card account for ${accountName}`,
+        expenseType: 'credit_card',
+        userId: userId
+      });
+
+      const code = codeResult.success ? codeResult.code : `2${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
+      
+      if (codeResult.success) {
+        console.log(`[CreditCardGLIntegration] AI generated code ${code} with ${codeResult.confidence} confidence`);
+      } else {
+        console.warn('[CreditCardGLIntegration] AI code generation failed, using fallback random code');
+      }
       
       // Check if this code already exists
       const { rows: existing } = await sql`

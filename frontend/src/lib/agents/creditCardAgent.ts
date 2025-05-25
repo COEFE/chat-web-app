@@ -56,6 +56,8 @@ import {
 import { CreditCardTransaction } from "../../types/creditCard";
 import { getEnhancedColumnsCheck, buildEnhancedJournalColumns } from './creditCardAgentPatch';
 import { extractLastFourDigitsWithAI, extractLastFourDigitsFallback } from './aiLastFourDigitsExtractor';
+import { generateIntelligentGLCode } from './aiGLCodeGenerator';
+import { generateAIAccountNotes } from './aiAccountNotesGenerator';
 
 /**
  * Represents credit card statement information extracted from documents
@@ -3547,7 +3549,22 @@ Do not include any other text outside of the JSON object.`;
       }
 
       // Generate a unique account code
-      const accountCode = `EXP${Math.floor(1000 + Math.random() * 9000)}`;
+      // Generate account code using AI-powered logic
+      console.log('[CreditCardAgent] Using AI-powered code generation for expense account');
+      const codeResult = await generateIntelligentGLCode({
+        accountName: 'Miscellaneous Expense',
+        accountType: 'expense',
+        description: 'Miscellaneous business expenses',
+        userId: context.userId
+      });
+
+      const accountCode = codeResult.success ? codeResult.code : `EXP${Math.floor(1000 + Math.random() * 9000)}`;
+      
+      if (codeResult.success) {
+        console.log(`[CreditCardAgent] AI generated expense code ${accountCode} with ${codeResult.confidence} confidence`);
+      } else {
+        console.warn('[CreditCardAgent] AI code generation failed, using fallback random code');
+      }
       const timestamp = new Date().toISOString();
 
       console.log(
@@ -3556,9 +3573,26 @@ Do not include any other text outside of the JSON object.`;
 
       // Create the account directly in the database
       // Note: Using lowercase 'expense' to be consistent with other account types in the database
+      // Generate AI-powered notes for the expense account
+      let expenseAccountNotes = '';
+      try {
+        const aiNotesResult = await generateAIAccountNotes({
+          name: 'Miscellaneous Expense',
+          accountType: 'expense',
+          accountCode: accountCode.toString(),
+          businessContext: 'Miscellaneous business expenses'
+        });
+        expenseAccountNotes = aiNotesResult.notes;
+        console.log(`[CreditCardAgent] AI notes generated for expense account: ${expenseAccountNotes.substring(0, 100)}...`);
+      } catch (error) {
+        console.error('[CreditCardAgent] Error generating AI notes for expense account, using fallback:', error);
+        expenseAccountNotes = 'This expense account tracks miscellaneous business expenses. Used to categorize and monitor general business costs.';
+      }
+
+
       const result = await sql`
-        INSERT INTO accounts (name, code, account_type, user_id, is_active) 
-        VALUES ('Miscellaneous Expense', ${accountCode}, 'expense', ${
+        INSERT INTO accounts (name, code, account_type, notes, user_id, is_active) 
+        VALUES ('Miscellaneous Expense', ${accountCode}, 'expense', ${expenseAccountNotes}, ${
         context.userId || null
       }, true) 
         RETURNING id
@@ -5296,12 +5330,46 @@ Output (just the brief description):`;
       );
       try {
         // Generate a unique account code
-        const accountCode = (20000 + Math.floor(Math.random() * 9999)).toString();
+        // Generate account code using AI-powered logic
+        console.log('[CreditCardAgent] Using AI-powered code generation for credit card account');
+        const codeResult = await generateIntelligentGLCode({
+          accountName: accountName,
+          accountType: 'liability',
+          description: `Credit card account for ${accountName}`,
+          expenseType: 'credit_card',
+          userId: context.userId
+        });
+
+        const accountCode = codeResult.success ? codeResult.code : (20000 + Math.floor(Math.random() * 9999)).toString();
+        
+        if (codeResult.success) {
+          console.log(`[CreditCardAgent] AI generated credit card code ${accountCode} with ${codeResult.confidence} confidence`);
+        } else {
+          console.warn('[CreditCardAgent] AI code generation failed, using fallback random code');
+        }
 
         // Create the account directly
+        // Generate AI-powered notes for the credit card account
+        let creditCardAccountNotes = '';
+        try {
+          const aiNotesResult = await generateAIAccountNotes({
+            name: finalAccountName,
+            accountType: 'liability',
+            accountCode: accountCode.toString(),
+            expenseType: 'credit_card',
+            businessContext: 'Credit card account for business expenses'
+          });
+          creditCardAccountNotes = aiNotesResult.notes;
+          console.log(`[CreditCardAgent] AI notes generated for credit card: ${creditCardAccountNotes.substring(0, 100)}...`);
+        } catch (error) {
+          console.error('[CreditCardAgent] Error generating AI notes for credit card, using fallback:', error);
+          creditCardAccountNotes = `This liability account tracks credit card balances for ${finalAccountName}. Used to record purchases, payments, and interest charges.`;
+        }
+
+
         const insertResult = await sql`
-          INSERT INTO accounts (name, code, account_type, user_id, is_active) 
-          VALUES (${finalAccountName}, ${accountCode}, 'credit_card', ${
+          INSERT INTO accounts (name, code, account_type, notes, user_id, is_active) 
+          VALUES (${finalAccountName}, ${accountCode}, 'credit_card', ${creditCardAccountNotes}, ${
           context.userId || null
         }, true) 
           RETURNING id

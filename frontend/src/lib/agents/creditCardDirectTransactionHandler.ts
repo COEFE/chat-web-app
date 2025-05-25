@@ -10,6 +10,8 @@ import {
 } from "./creditCardBillCreditIntegration";
 import { logAuditEvent } from "@/lib/auditLogger";
 import { sql } from "@vercel/postgres";
+import { generateAIAccountNotes } from './aiAccountNotesGenerator';
+import { generateIntelligentGLCode } from './aiGLCodeGenerator';
 
 /**
  * Handle direct transaction recording requests using AI-powered extraction
@@ -200,18 +202,58 @@ async function findOrCreateCreditCardAccount(
     }
     
     // If no credit card accounts exist at all, create a generic one
+    // Generate account code using AI-powered logic
+    console.log('[CreditCardDirectTransactionHandler] Using AI-powered code generation for credit card account');
+    const codeResult = await generateIntelligentGLCode({
+      accountName: accountName,
+      accountType: 'liability',
+      description: `Credit card account for ${accountName}`,
+      expenseType: 'credit_card',
+      userId: userId
+    });
+
+    const accountCode = codeResult.success ? codeResult.code : (20000 + Math.floor(Math.random() * 9999)).toString();
+    
+    if (codeResult.success) {
+      console.log(`[CreditCardDirectTransactionHandler] AI generated code ${accountCode} with ${codeResult.confidence} confidence`);
+      console.log(`[CreditCardDirectTransactionHandler] AI reasoning: ${codeResult.reasoning}`);
+    } else {
+      console.warn('[CreditCardDirectTransactionHandler] AI code generation failed, using fallback random code');
+    }
+    const accountName = `${issuer || 'Credit Card'} Account ${accountNumber || ''}`.trim();
+    
+    // Generate AI-powered notes for the credit card account
+    let accountNotes = '';
+    try {
+      const aiNotesResult = await generateAIAccountNotes({
+        name: accountName,
+        accountType: 'liability',
+        accountCode: accountCode.toString(),
+        expenseType: 'credit_card',
+        businessContext: 'Credit card account for business expenses'
+      });
+      accountNotes = aiNotesResult.notes;
+      console.log(`[CreditCardDirectTransactionHandler] AI notes generated: ${accountNotes.substring(0, 100)}...`);
+    } catch (error) {
+      console.error('[CreditCardDirectTransactionHandler] Error generating AI notes, using fallback:', error);
+      accountNotes = `This liability account tracks credit card balances for ${accountName}. Used to record purchases, payments, and interest charges.`;
+    }
+
+    // Insert the new credit card account with AI-generated notes
     const newAccount = await sql`
       INSERT INTO accounts (
         code, 
         name, 
         account_type,
+        notes,
         is_active,
         is_deleted,
         user_id
       ) VALUES (
-        ${(20000 + Math.floor(Math.random() * 9999)).toString()},
-        ${`${issuer || 'Credit Card'} Account ${accountNumber || ''}`.trim()},
+        ${accountCode},
+        ${accountName},
         ${'Credit Card'},
+        ${accountNotes},
         ${true},
         ${false},
         ${userId}

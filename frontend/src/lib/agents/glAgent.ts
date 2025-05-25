@@ -26,6 +26,8 @@ import { MessageParam } from "@anthropic-ai/sdk/resources/messages";
 import { sql } from "@vercel/postgres";
 import axios from "axios";
 import FormData from "form-data";
+import { generateAIAccountNotes } from './aiAccountNotesGenerator';
+import { generateIntelligentGLCode } from './aiGLCodeGenerator';
 
 /**
  * GLAgent specializes in handling General Ledger related queries
@@ -274,220 +276,119 @@ export class GLAgent implements Agent {
       // Convert starting balance to number if provided
       const initialBalance = startingBalance ? parseFloat(startingBalance) : undefined;
       
-      // Generate a code for the account based on the type and description
-      let code = '';
-      let name = suggestedName;
+      // Use AI-powered code generation
+      console.log('[GLAgent] Using AI-powered code generation...');
+      const codeResult = await generateIntelligentGLCode({
+        accountName: suggestedName,
+        accountType: accountType as 'asset' | 'liability' | 'equity' | 'revenue' | 'expense',
+        description: description || expenseDescription,
+        expenseType,
+        userId: message.userId
+      });
       
-      // Generate a code based on the account type and description
-      if (accountType === 'expense') {
-        // For expense accounts, use 50000-59999 range
-        // Find an available code in the expense range
-        let startCode = 50000;
-        let endCode = 59999;
-        let availableCode = null;
-        
-        // First, get all existing expense account codes
-        const query = `
-          SELECT code FROM accounts 
-          WHERE LOWER(account_type) = 'expense' AND code ~ '^[0-9]+$'
-          AND CAST(code AS INTEGER) BETWEEN ${startCode} AND ${endCode}
-          ORDER BY CAST(code AS INTEGER) ASC
-        `;
-        
-        const result = await sql.query(query);
-        
-        if (result.rows.length > 0) {
-          // Convert to array of integers for easier processing
-          const existingCodes = result.rows.map(row => parseInt(row.code));
-          
-          // Find the first available code in the range
-          for (let i = startCode; i <= endCode; i++) {
-            if (!existingCodes.includes(i)) {
-              availableCode = i;
-              break;
-            }
-          }
-          
-          // If we found an available code, use it
-          if (availableCode) {
-            code = availableCode.toString();
-            console.log(`[GLAgent] Found available expense account code: ${code}`);
-          } else {
-            // If all codes in range are taken, overflow to equity range
-            code = '30000';
-            console.log(`[GLAgent] All expense account codes in range ${startCode}-${endCode} are taken, using ${code}`);
-          }
-        } else {
-          // No existing expense accounts, start at the beginning of the range
-          code = startCode.toString();
-          console.log(`[GLAgent] No existing expense accounts, using code: ${code}`);
+      if (codeResult.success) {
+        const code = codeResult.code;
+        let name = suggestedName;
+        if (codeResult.suggestedName && codeResult.suggestedName !== suggestedName) {
+          name = codeResult.suggestedName;
+          console.log(`[GLAgent] AI suggested improved name: ${name}`);
         }
-      } else if (accountType === 'liability' && expenseType === 'credit_card') {
-        // Special handling for credit card liability accounts
-        // Use 20000-29999 range for credit card accounts
-        let startCode = 20000;
-        let endCode = 29999;
-        let availableCode = null;
+        console.log(`[GLAgent] AI generated code ${code} with ${codeResult.confidence} confidence using ${codeResult.method}`);
+        console.log(`[GLAgent] AI reasoning: ${codeResult.reasoning}`);
         
-        console.log(`[GLAgent] Finding code for credit card liability account`);
+        // Enhanced notes generation - create detailed, purpose-driven notes
+        let notes = '';
         
-        // Get existing credit card account codes
-        const query = `
-          SELECT code FROM accounts 
-          WHERE LOWER(account_type) = 'liability' AND code ~ '^[0-9]+$'
-          AND CAST(code AS INTEGER) BETWEEN ${startCode} AND ${endCode}
-          ORDER BY CAST(code AS INTEGER) ASC
-        `;
-        
-        const result = await sql.query(query);
-        
-        if (result.rows.length > 0) {
-          // Convert to array of integers for easier processing
-          const existingCodes = result.rows.map(row => parseInt(row.code));
-          
-          // Find the first available code in the range
-          for (let i = startCode; i <= endCode; i++) {
-            if (!existingCodes.includes(i)) {
-              availableCode = i;
-              break;
-            }
-          }
-          
-          // If we found an available code, use it
-          if (availableCode) {
-            code = availableCode.toString();
-            console.log(`[GLAgent] Found available credit card account code: ${code}`);
-          } else {
-            // If all codes in range are taken, overflow to equity range
-            code = '30000';
-            console.log(`[GLAgent] All credit card account codes in range ${startCode}-${endCode} are taken, using ${code}`);
-          }
+        if (description) {
+          // Use the explicit description if provided (e.g., from CreditCardAgent)
+          notes = description;
         } else {
-          // No existing credit card accounts, start at the beginning of the range
-          code = startCode.toString();
-          console.log(`[GLAgent] No existing credit card accounts, using code: ${code}`);
-        }
-      } else {
-        // For other account types, use comprehensive range logic
-        const typeCodeRanges: Record<string, { start: number, end: number }> = {
-          'asset': { start: 10000, end: 19999 },
-          'liability': { start: 20000, end: 29999 },
-          'equity': { start: 30000, end: 39999 },
-          'revenue': { start: 40000, end: 49999 },
-          'expense': { start: 50000, end: 59999 }
-        };
-        
-        const range = typeCodeRanges[accountType.toLowerCase()];
-        if (range) {
-          // Find an available code in the appropriate range
-          const query = `
-            SELECT code FROM accounts 
-            WHERE LOWER(account_type) = '${accountType.toLowerCase()}' AND code ~ '^[0-9]+$'
-            AND CAST(code AS INTEGER) BETWEEN ${range.start} AND ${range.end}
-            ORDER BY CAST(code AS INTEGER) ASC
-          `;
+          // Generate AI-powered enhanced notes based on account context
+          console.log(`[GLAgent] Generating AI-powered notes for account: ${name} (${accountType})`);
           
-          const result = await sql.query(query);
-          let availableCode = null;
-          
-          if (result.rows.length > 0) {
-            // Convert to array of integers for easier processing
-            const existingCodes = result.rows.map(row => parseInt(row.code));
+          try {
+            const aiNotesResult = await generateAIAccountNotes({
+              name,
+              accountType,
+              accountCode: code,
+              expenseDescription,
+              expenseType,
+              businessContext: 'General business operations'
+            });
             
-            // Find the first available code in the range
-            for (let i = range.start; i <= range.end; i++) {
-              if (!existingCodes.includes(i)) {
-                availableCode = i;
-                break;
-              }
-            }
-          } else {
-            // No existing accounts of this type, start at the beginning of the range
-            availableCode = range.start;
+            notes = aiNotesResult.notes;
+            console.log(`[GLAgent] AI notes generated (${aiNotesResult.method}, ${aiNotesResult.confidence} confidence): ${notes.substring(0, 100)}...`);
+            
+          } catch (error) {
+            console.error('[GLAgent] Error generating AI notes, using fallback:', error);
+            // Fallback to basic pattern-based notes
+            notes = generateEnhancedAccountNotes(name, accountType, expenseDescription, expenseType);
           }
-          
-          code = availableCode ? availableCode.toString() : range.start.toString();
-          console.log(`[GLAgent] Using code for ${accountType}: ${code}`);
-        } else {
-          // Fallback for unknown account types
-          code = '90000';
-          console.log(`[GLAgent] Using fallback code for unknown account type ${accountType}: ${code}`);
         }
-      }
-      
-      // Enhanced notes generation - create detailed, purpose-driven notes
-      let notes = '';
-      
-      if (description) {
-        // Use the explicit description if provided (e.g., from CreditCardAgent)
-        notes = description;
-      } else {
-        // Generate enhanced notes based on account type and name patterns
-        notes = generateEnhancedAccountNotes(name, accountType, expenseDescription, expenseType);
-      }
-      
-      console.log(`[GLAgent] Using enhanced notes: ${notes}`);
-      
-      // Create the GL account with optional starting balance
-      const result = await createGLAccount(
-        code, 
-        name, 
-        notes, 
-        message.userId, 
-        initialBalance, 
-        balanceDate
-      );
-      
-      if (result.success) {
-        console.log(`[GLAgent] Successfully created account:`, result.account);
         
-        // Prepare a detailed response payload with all necessary account information
-        const responsePayload = {
-          account: result.account,
-          accountId: result.account?.id,
-          accountName: name,
-          accountCode: code,
-          accountType: accountType,
-          success: true
-        };
-        
-        // Respond with success and include the full account details
-        await respondToAgentMessage(
-          message.id,
-          MessageStatus.COMPLETED,
-          responsePayload,
-          `Successfully created GL account: ${name} (${code})`
+        // Create the GL account with optional starting balance
+        const result = await createGLAccount(
+          code, 
+          name, 
+          notes, 
+          message.userId, 
+          initialBalance, 
+          balanceDate
         );
         
-        // Log the successful account creation
-        await logAuditEvent({
-          user_id: message.userId,
-          action_type: "GL_ACCOUNT_CREATION",
-          entity_type: "ACCOUNT",
-          entity_id: result.account?.id?.toString() || 'unknown',
-          context: { message, account: result.account },
-          status: "SUCCESS",
-          timestamp: new Date().toISOString()
-        });
+        if (result.success) {
+          console.log(`[GLAgent] Successfully created account:`, result.account);
+          
+          // Prepare a detailed response payload with all necessary account information
+          const responsePayload = {
+            account: result.account,
+            accountId: result.account?.id,
+            accountName: name,
+            accountCode: code,
+            accountType: accountType,
+            success: true
+          };
+          
+          // Respond with success and include the full account details
+          await respondToAgentMessage(
+            message.id,
+            MessageStatus.COMPLETED,
+            responsePayload,
+            `Successfully created GL account: ${name} (${code})`
+          );
+          
+          // Log the successful account creation
+          await logAuditEvent({
+            user_id: message.userId,
+            action_type: "GL_ACCOUNT_CREATION",
+            entity_type: "ACCOUNT",
+            entity_id: result.account?.id?.toString() || 'unknown',
+            context: { message, account: result.account },
+            status: "SUCCESS",
+            timestamp: new Date().toISOString()
+          });
+        } else {
+          // Respond with failure
+          await respondToAgentMessage(
+            message.id,
+            MessageStatus.FAILED,
+            { error: result.message },
+            `Failed to create GL account: ${result.message}`
+          );
+          
+          // Log the failed account creation
+          await logAuditEvent({
+            user_id: message.userId,
+            action_type: "GL_ACCOUNT_CREATION",
+            entity_type: "ACCOUNT",
+            entity_id: 'unknown',
+            context: { message, error: result.message },
+            status: "FAILURE",
+            timestamp: new Date().toISOString()
+          });
+        }
       } else {
-        // Respond with failure
-        await respondToAgentMessage(
-          message.id,
-          MessageStatus.FAILED,
-          { error: result.message },
-          `Failed to create GL account: ${result.message}`
-        );
-        
-        // Log the failed account creation
-        await logAuditEvent({
-          user_id: message.userId,
-          action_type: "GL_ACCOUNT_CREATION",
-          entity_type: "ACCOUNT",
-          entity_id: 'unknown',
-          context: { message, error: result.message },
-          status: "FAILURE",
-          timestamp: new Date().toISOString()
-        });
+        throw new Error('Failed to generate account code');
       }
     } catch (error: unknown) {
       console.error('[GLAgent] Error handling GL account creation request:', error);
@@ -930,8 +831,7 @@ Make sure the journal entry is valid - debits must equal credits. Every line mus
           
           // Check if this journal exists and is unposted
           const journalCheck = await sql`
-            SELECT id, is_posted FROM journals 
-            WHERE id = ${specificId} AND is_deleted = false
+            SELECT id, is_posted FROM journals WHERE id = ${specificId}
           `;
           
           if (journalCheck.rows.length === 0) {
@@ -2393,11 +2293,13 @@ First explain the journal entry you're creating with a clear explanation of why 
 
 // Helper function to generate enhanced account notes
 function generateEnhancedAccountNotes(name: string, accountType: string, expenseDescription?: string, expenseType?: string): string {
+  console.log(`[GLAgent] generateEnhancedAccountNotes called with accountType: "${accountType}", name: "${name}"`);
+  
   const lowerName = name.toLowerCase();
   const baseNote = `This ${accountType.toLowerCase()} account tracks`;
   
   // Asset account notes
-  if (accountType === 'Asset') {
+  if (accountType === 'asset') {
     if (lowerName.includes('cash') || lowerName.includes('checking') || lowerName.includes('savings')) {
       return `${baseNote} cash and cash equivalents for ${name}. Used to record deposits, withdrawals, and cash transactions.`;
     }
@@ -2417,7 +2319,7 @@ function generateEnhancedAccountNotes(name: string, accountType: string, expense
   }
   
   // Liability account notes
-  if (accountType === 'Liability') {
+  if (accountType === 'liability') {
     if (lowerName.includes('credit card') || lowerName.includes('amex') || lowerName.includes('visa') || lowerName.includes('mastercard')) {
       return `${baseNote} credit card balances for ${name}. Used to categorize and monitor credit card purchases and fees.`;
     }
@@ -2442,7 +2344,7 @@ function generateEnhancedAccountNotes(name: string, accountType: string, expense
   }
   
   // Equity account notes
-  if (accountType === 'Equity') {
+  if (accountType === 'equity') {
     if (lowerName.includes('capital') || lowerName.includes('investment')) {
       return `${baseNote} owner capital and investments for ${name}. Used to record capital contributions and withdrawals.`;
     }
@@ -2459,7 +2361,7 @@ function generateEnhancedAccountNotes(name: string, accountType: string, expense
   }
   
   // Revenue account notes
-  if (accountType === 'Revenue') {
+  if (accountType === 'revenue') {
     if (lowerName.includes('sales') || lowerName.includes('revenue')) {
       return `${baseNote} sales revenue for ${name}. Used to record income from primary business operations.`;
     }
@@ -2480,7 +2382,7 @@ function generateEnhancedAccountNotes(name: string, accountType: string, expense
   }
   
   // Expense account notes with enhanced context
-  if (accountType === 'Expense') {
+  if (accountType === 'expense') {
     // Use expense type for more specific categorization
     if (expenseType === 'credit_card') {
       return `${baseNote} credit card expenses for ${name}. Used to categorize and monitor credit card purchases and fees.`;
