@@ -9,7 +9,6 @@ import {
   waitForAgentResponse,
 } from "@/lib/agentCommunication";
 import { logAuditEvent } from "@/lib/auditLogger";
-import { CreditCardAgentBeginningBalanceExtension } from "./creditCardAgentBeginningBalanceExtension";
 import Anthropic from "@anthropic-ai/sdk";
 import { MessageParam } from "@anthropic-ai/sdk/resources/messages";
 import {
@@ -102,7 +101,6 @@ export class CreditCardAgent implements Agent {
   > = {};
 
   private anthropic: Anthropic;
-  private beginningBalanceExtension: CreditCardAgentBeginningBalanceExtension;
 
   constructor() {
     this.anthropic = new Anthropic({
@@ -111,7 +109,6 @@ export class CreditCardAgent implements Agent {
         process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY ||
         "",
     });
-    this.beginningBalanceExtension = new CreditCardAgentBeginningBalanceExtension();
   }
 
   /**
@@ -6929,48 +6926,6 @@ Important guidelines:
         message: `Error clearing extraction cache: ${
           error instanceof Error ? (error as Error).message : "Unknown error"
         }`,
-      };
-    }
-  }
-
-  /**
-   * Process statement with beginning balance integration
-   * This method uses the extension to handle enhanced statement processing
-   */
-  async processStatementWithBeginningBalance(
-    context: AgentContext,
-    query: string,
-    documentContext?: any
-  ): Promise<{
-    success: boolean;
-    message: string;
-    accountId?: number;
-    accountName?: string;
-    beginningBalanceRecorded?: boolean;
-    beginningBalanceMessage?: string;
-  }> {
-    try {
-      console.log("[CreditCardAgent] Processing statement with beginning balance integration");
-      
-      const result = await this.beginningBalanceExtension.findOrCreateCreditCardAccountWithBeginningBalance(
-        context,
-        query,
-        documentContext
-      );
-      
-      return {
-        success: result.success,
-        message: result.message,
-        accountId: result.accountId,
-        accountName: result.accountName,
-        beginningBalanceRecorded: result.beginningBalanceRecorded,
-        beginningBalanceMessage: result.beginningBalanceMessage
-      };
-    } catch (error) {
-      console.error("[CreditCardAgent] Error in processStatementWithBeginningBalance:", error);
-      return {
-        success: false,
-        message: `Error processing statement with beginning balance: ${error instanceof Error ? error.message : "Unknown error"}`
       };
     }
   }

@@ -244,11 +244,11 @@ export class CreditCardGLIntegration {
       // Generate account code using AI-powered logic
       console.log('[CreditCardGLIntegration] Using AI-powered code generation for credit card account');
       const codeResult = await generateIntelligentGLCode({
-        accountName: accountName,
+        accountName: 'Credit Card Account',
         accountType: 'liability',
-        description: `Credit card account for ${accountName}`,
+        description: `Credit card account for business expenses`,
         expenseType: 'credit_card',
-        userId: userId
+        userId: undefined
       });
 
       const code = codeResult.success ? codeResult.code : `2${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;

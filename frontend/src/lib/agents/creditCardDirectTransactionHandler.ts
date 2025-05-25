@@ -201,6 +201,7 @@ async function findOrCreateCreditCardAccount(
       };
     }
     
+    const accountName = `${issuer || "Credit Card"} Account ${accountNumber || ""}`.trim();
     // If no credit card accounts exist at all, create a generic one
     // Generate account code using AI-powered logic
     console.log('[CreditCardDirectTransactionHandler] Using AI-powered code generation for credit card account');
@@ -220,7 +221,6 @@ async function findOrCreateCreditCardAccount(
     } else {
       console.warn('[CreditCardDirectTransactionHandler] AI code generation failed, using fallback random code');
     }
-    const accountName = `${issuer || 'Credit Card'} Account ${accountNumber || ''}`.trim();
     
     // Generate AI-powered notes for the credit card account
     let accountNotes = '';
