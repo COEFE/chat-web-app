@@ -58,7 +58,15 @@ CRITICAL: Pay special attention to balance fields on the statement. Credit card 
 
 Extract the following information from the statement:
 1. Credit card issuer (e.g., Visa, Mastercard, American Express, Chase, Capital One)
-2. Last four digits of the card - ONLY use digits that are explicitly shown in the document
+2. **LAST FOUR DIGITS OF THE CARD** - Look for these in multiple locations:
+   - Account number section (usually shows as XXXX-XXXX-XXXX-1234)
+   - Card number references (often partially masked like ****1234)
+   - Account summary section
+   - Header or footer of the statement
+   - Payment coupon section
+   - CRITICAL: Extract ONLY the actual 4-digit number, not any other reference numbers
+   - CRITICAL: Do NOT use statement numbers, reference numbers, or any other identifiers
+   - CRITICAL: The last four digits should be exactly 4 numeric digits from the actual credit card number
 3. Statement number or account number - extract EXACTLY as shown
 4. Statement date (in YYYY-MM-DD format)
 5. **PREVIOUS BALANCE** - This is the starting balance from the previous statement period (look for "Previous Balance", "Prior Balance", "Balance Forward", "Starting Balance")
@@ -76,6 +84,13 @@ For American Express statements, look for sections like:
 - "Payments: $X,XXX.XX"
 - "Other Credits: $X.XX"
 - "New Balance: $XXX.XX"
+
+IMPORTANT FOR LAST FOUR DIGITS:
+- Look for the actual credit card number, which is usually displayed as XXXX-XXXX-XXXX-1234 or ****1234
+- Do NOT confuse with account numbers, statement numbers, or reference numbers
+- The last four digits should be from the physical credit card number
+- If you see multiple 4-digit numbers, prioritize the one that appears with the card number or account number
+- Common locations: account summary, payment information, card details section
 
 Format your response as a JSON object with the following structure:
 {
@@ -200,6 +215,23 @@ Important guidelines:
         minimumPayment: extractedInfo.minimumPayment || undefined,
         transactions: extractedInfo.transactions || [],
       };
+
+      // Validate last four digits
+      if (result.lastFourDigits) {
+        if (!/^\d{4}$/.test(result.lastFourDigits)) {
+          console.error("[CreditCardStartingBalanceExtractor] Invalid last four digits:", result.lastFourDigits);
+          result.lastFourDigits = undefined;
+        }
+      }
+
+      console.log(`[CreditCardStartingBalanceExtractor] Extracted statement info:`, {
+        creditCardIssuer: result.creditCardIssuer,
+        lastFourDigits: result.lastFourDigits,
+        statementNumber: result.statementNumber,
+        statementDate: result.statementDate,
+        previousBalance: result.previousBalance,
+        balance: result.balance
+      });
 
       console.log("[CreditCardStartingBalanceExtractor] Enhanced extraction result:");
       console.log(`- Previous Balance: $${result.previousBalance?.toFixed(2) || "Not found"}`);

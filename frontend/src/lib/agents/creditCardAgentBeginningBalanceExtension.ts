@@ -14,14 +14,13 @@ export class CreditCardAgentBeginningBalanceExtension {
   }
 
   /**
-   * Enhanced account creation that handles beginning balances
-   * This method should be called instead of the standard findOrCreateCreditCardAccountForTransactions
-   * when processing the first statement for an account
+   * Enhanced account creation that includes beginning balance processing
    */
-  async findOrCreateCreditCardAccountWithBeginningBalance(
+  async createOrFindAccountWithBeginningBalance(
     context: AgentContext,
     query: string,
-    documentContext?: any
+    documentContext?: any,
+    existingStatementInfo?: EnhancedStatementInfo
   ): Promise<{
     success: boolean;
     message: string;
@@ -30,16 +29,26 @@ export class CreditCardAgentBeginningBalanceExtension {
     statementInfo?: EnhancedStatementInfo;
     beginningBalanceRecorded?: boolean;
     beginningBalanceMessage?: string;
+    isFirstStatement?: boolean;
   }> {
+    console.log('[CreditCardAgentBeginningBalanceExtension] Starting enhanced account creation with beginning balance');
+    
     try {
-      console.log('[CreditCardAgentBeginningBalanceExtension] Starting enhanced account creation with beginning balance');
-
-      // Step 1: Extract enhanced statement information including beginning balance
-      const statementInfo = await this.beginningBalanceIntegration.processStatementWithBeginningBalance(
-        query,
-        context,
-        documentContext
-      );
+      let statementInfo;
+      
+      // Use existing statement info if provided, otherwise extract fresh
+      if (existingStatementInfo) {
+        console.log('[CreditCardAgentBeginningBalanceExtension] Using existing statement info to avoid re-extraction');
+        statementInfo = existingStatementInfo;
+      } else {
+        console.log('[CreditCardAgentBeginningBalanceExtension] No existing statement info provided, extracting fresh');
+        // Step 1: Extract enhanced statement information including beginning balance
+        statementInfo = await this.beginningBalanceIntegration.processStatementWithBeginningBalance(
+          query,
+          context,
+          documentContext
+        );
+      }
 
       if (!statementInfo.success) {
         return {
@@ -61,7 +70,17 @@ export class CreditCardAgentBeginningBalanceExtension {
       // We'll need to call the original CreditCardAgent method here
       // For now, we'll simulate the account creation logic
       
+      console.log(`[CreditCardAgentBeginningBalanceExtension] Processing statement info:`, {
+        creditCardIssuer: statementInfo.creditCardIssuer,
+        lastFourDigits: statementInfo.lastFourDigits,
+        statementNumber: statementInfo.statementNumber,
+        statementDate: statementInfo.statementDate,
+        previousBalance: statementInfo.previousBalance
+      });
+      
       const accountName = `${statementInfo.creditCardIssuer || 'Credit Card'} ${statementInfo.lastFourDigits || 'unknown'}`;
+      
+      console.log(`[CreditCardAgentBeginningBalanceExtension] Generated account name: "${accountName}"`);
       
       // Import and use the original CreditCardAgent
       const { CreditCardAgent } = await import('./creditCardAgent');
@@ -101,6 +120,7 @@ export class CreditCardAgentBeginningBalanceExtension {
       // Step 3: Handle beginning balance if present and this is the first statement
       let beginningBalanceRecorded = false;
       let beginningBalanceMessage = 'No beginning balance to record';
+      let isFirstStatement = false;
 
       if (statementInfo.previousBalance && statementInfo.previousBalance !== 0 && accountResult.accountId) {
         console.log(`[CreditCardAgentBeginningBalanceExtension] Processing beginning balance: $${statementInfo.previousBalance}`);
@@ -115,10 +135,12 @@ export class CreditCardAgentBeginningBalanceExtension {
 
         beginningBalanceRecorded = balanceIntegrationResult.beginningBalanceRecorded;
         beginningBalanceMessage = balanceIntegrationResult.beginningBalanceMessage || 'Unknown status';
+        isFirstStatement = balanceIntegrationResult.isFirstStatement || false;
 
         console.log('[CreditCardAgentBeginningBalanceExtension] Beginning balance processing result:', {
           recorded: beginningBalanceRecorded,
-          message: beginningBalanceMessage
+          message: beginningBalanceMessage,
+          isFirstStatement: isFirstStatement
         });
       }
 
@@ -129,7 +151,8 @@ export class CreditCardAgentBeginningBalanceExtension {
         accountName: accountResult.accountName,
         statementInfo,
         beginningBalanceRecorded,
-        beginningBalanceMessage
+        beginningBalanceMessage,
+        isFirstStatement
       };
 
     } catch (error) {

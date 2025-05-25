@@ -62,7 +62,22 @@ export class CreditCardBeginningBalanceIntegration {
     try {
       console.log(`[CreditCardBeginningBalanceIntegration] Checking if this is first statement for account ${accountId}`);
       
-      // Check if there are any existing journal entries for this credit card account
+      // FIRST: Check statement_trackers table - if any statements have been processed for this account, it's not the first
+      const { rows: trackerRows } = await sql`
+        SELECT COUNT(*) as tracker_count
+        FROM statement_trackers
+        WHERE account_id = ${accountId}
+        AND user_id = ${context.userId}
+      `;
+
+      const trackerCount = parseInt(trackerRows[0]?.tracker_count || '0');
+      
+      if (trackerCount > 0) {
+        console.log(`[CreditCardBeginningBalanceIntegration] Account ${accountId} has ${trackerCount} processed statements in tracker. Not first statement.`);
+        return false;
+      }
+      
+      // SECOND: Check if there are any existing journal entries for this credit card account
       const { rows } = await sql`
         SELECT COUNT(*) as entry_count
         FROM journal_lines jl
@@ -76,13 +91,45 @@ export class CreditCardBeginningBalanceIntegration {
       const entryCount = parseInt(rows[0]?.entry_count || '0');
       const isFirstStatement = entryCount === 0;
       
-      console.log(`[CreditCardBeginningBalanceIntegration] Account ${accountId} has ${entryCount} existing entries. Is first statement: ${isFirstStatement}`);
+      console.log(`[CreditCardBeginningBalanceIntegration] Account ${accountId} has ${entryCount} existing journal entries. Is first statement: ${isFirstStatement}`);
       
       return isFirstStatement;
     } catch (error) {
       console.error('[CreditCardBeginningBalanceIntegration] Error checking first statement status:', error);
       // If we can't determine, assume it's not the first to avoid duplicate entries
       return false;
+    }
+  }
+
+  /**
+   * Check if a beginning balance has already been recorded for this account
+   */
+  async hasBeginningBalanceBeenRecorded(
+    context: AgentContext,
+    accountId: number
+  ): Promise<boolean> {
+    try {
+      console.log(`[CreditCardBeginningBalanceIntegration] Checking if beginning balance exists for account ${accountId}`);
+      
+      const { rows } = await sql`
+        SELECT COUNT(*) as balance_count
+        FROM journal_lines jl
+        JOIN accounts a ON jl.account_id = a.id
+        WHERE a.id = ${accountId}
+        AND a.user_id = ${context.userId}
+        AND (jl.description LIKE '%starting balance%' OR jl.description LIKE '%beginning balance%')
+      `;
+
+      const balanceCount = parseInt(rows[0]?.balance_count || '0');
+      const hasBeginningBalance = balanceCount > 0;
+      
+      console.log(`[CreditCardBeginningBalanceIntegration] Account ${accountId} has ${balanceCount} beginning balance entries. Has beginning balance: ${hasBeginningBalance}`);
+      
+      return hasBeginningBalance;
+    } catch (error) {
+      console.error('[CreditCardBeginningBalanceIntegration] Error checking beginning balance status:', error);
+      // If we can't determine, assume it exists to avoid duplicate entries
+      return true;
     }
   }
 
@@ -173,6 +220,7 @@ export class CreditCardBeginningBalanceIntegration {
     statementInfo: EnhancedStatementInfo;
     beginningBalanceRecorded: boolean;
     beginningBalanceMessage?: string;
+    isFirstStatement?: boolean;
   }> {
     try {
       console.log(`[CreditCardBeginningBalanceIntegration] Starting complete integration for account ${accountName} (${accountId})`);
@@ -188,7 +236,8 @@ export class CreditCardBeginningBalanceIntegration {
         return {
           statementInfo,
           beginningBalanceRecorded: false,
-          beginningBalanceMessage: 'Failed to extract statement information'
+          beginningBalanceMessage: 'Failed to extract statement information',
+          isFirstStatement: false
         };
       }
 
@@ -198,7 +247,8 @@ export class CreditCardBeginningBalanceIntegration {
         return {
           statementInfo,
           beginningBalanceRecorded: false,
-          beginningBalanceMessage: 'No beginning balance found in statement'
+          beginningBalanceMessage: 'No beginning balance found in statement',
+          isFirstStatement: false
         };
       }
 
@@ -214,11 +264,28 @@ export class CreditCardBeginningBalanceIntegration {
         return {
           statementInfo,
           beginningBalanceRecorded: false,
-          beginningBalanceMessage: 'Beginning balance not recorded - not the first statement for this account'
+          beginningBalanceMessage: 'Beginning balance not recorded - not the first statement for this account',
+          isFirstStatement
         };
       }
 
-      // Step 4: Record the beginning balance
+      // Step 4: Check if a beginning balance has already been recorded for this account
+      const hasBeginningBalanceBeenRecorded = await this.hasBeginningBalanceBeenRecorded(
+        context,
+        accountId
+      );
+
+      if (hasBeginningBalanceBeenRecorded) {
+        console.log('[CreditCardBeginningBalanceIntegration] Beginning balance already recorded, skipping');
+        return {
+          statementInfo,
+          beginningBalanceRecorded: false,
+          beginningBalanceMessage: 'Beginning balance already recorded',
+          isFirstStatement
+        };
+      }
+
+      // Step 5: Record the beginning balance
       console.log(`[CreditCardBeginningBalanceIntegration] Recording beginning balance: $${statementInfo.previousBalance}`);
       
       const balanceResult = await this.recordBeginningBalance(
@@ -233,7 +300,8 @@ export class CreditCardBeginningBalanceIntegration {
       return {
         statementInfo,
         beginningBalanceRecorded: balanceResult.success,
-        beginningBalanceMessage: balanceResult.message
+        beginningBalanceMessage: balanceResult.message,
+        isFirstStatement
       };
 
     } catch (error) {
@@ -245,7 +313,8 @@ export class CreditCardBeginningBalanceIntegration {
           message: `Error in beginning balance integration: ${error instanceof Error ? error.message : "Unknown error"}`
         },
         beginningBalanceRecorded: false,
-        beginningBalanceMessage: `Error: ${error instanceof Error ? error.message : "Unknown error"}`
+        beginningBalanceMessage: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
+        isFirstStatement: false
       };
     }
   }

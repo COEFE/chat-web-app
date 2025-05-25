@@ -292,10 +292,9 @@ export class CreditCardAgent implements Agent {
         try {
           // Find or create a credit card account for these transactions
           const accountResult =
-            await this.enhancedProcessing.findOrCreateCreditCardAccountWithBeginningBalance(
+            await this.enhancedProcessing.processStatementWithBeginningBalance(
               context,
               statementInfo,
-              query
             );
 
           if (
@@ -495,10 +494,9 @@ export class CreditCardAgent implements Agent {
             try {
               // Find or create a credit card account for these transactions
               const accountResult =
-                await this.enhancedProcessing.findOrCreateCreditCardAccountWithBeginningBalance(
+                await this.enhancedProcessing.processStatementWithBeginningBalance(
                   context,
                   statementInfo,
-                  query
                 );
 
               if (
@@ -631,10 +629,9 @@ export class CreditCardAgent implements Agent {
         try {
           // Find or create a credit card account for these transactions
           const accountResult =
-            await this.enhancedProcessing.findOrCreateCreditCardAccountWithBeginningBalance(
+            await this.enhancedProcessing.processStatementWithBeginningBalance(
               context,
               statementInfo,
-              query
             );
 
           if (
@@ -1028,9 +1025,8 @@ export class CreditCardAgent implements Agent {
               `[CreditCardAgent] [${accountTimestamp}] Calling findOrCreateCreditCardAccountForTransactions with userId: ${context.userId}...`
             );
             const accountResult =
-              await this.enhancedProcessing.findOrCreateCreditCardAccountWithBeginningBalance(
+              await this.enhancedProcessing.processStatementWithBeginningBalance(
                 context,
-                processableStatementInfo,
                 query
               );
 
@@ -1195,10 +1191,9 @@ export class CreditCardAgent implements Agent {
           );
           // Find or create a credit card account for these transactions
           const accountResult =
-            await this.enhancedProcessing.findOrCreateCreditCardAccountWithBeginningBalance(
+            await this.enhancedProcessing.processStatementWithBeginningBalance(
               context,
               statementInfo,
-              query
             );
 
           console.log(
@@ -5023,7 +5018,7 @@ Output (just the brief description):`;
    * @param statementInfo The statement information
    * @returns Promise with the account information
    */
-  private async findOrCreateCreditCardAccountForTransactions(
+  public async findOrCreateCreditCardAccountForTransactions(
     context: AgentContext,
     statementInfo: any
   ): Promise<{
@@ -6956,11 +6951,12 @@ Important guidelines:
     accountName?: string;
     beginningBalanceRecorded?: boolean;
     beginningBalanceMessage?: string;
+    isFirstStatement?: boolean;
   }> {
     try {
       console.log("[CreditCardAgent] Processing statement with beginning balance integration");
       
-      const result = await this.beginningBalanceExtension.findOrCreateCreditCardAccountWithBeginningBalance(
+      const result = await this.beginningBalanceExtension.createOrFindAccountWithBeginningBalance(
         context,
         query,
         documentContext
@@ -6972,13 +6968,15 @@ Important guidelines:
         accountId: result.accountId,
         accountName: result.accountName,
         beginningBalanceRecorded: result.beginningBalanceRecorded,
-        beginningBalanceMessage: result.beginningBalanceMessage
+        beginningBalanceMessage: result.beginningBalanceMessage,
+        isFirstStatement: result.isFirstStatement
       };
     } catch (error) {
       console.error("[CreditCardAgent] Error in processStatementWithBeginningBalance:", error);
       return {
         success: false,
-        message: `Error processing statement with beginning balance: ${error instanceof Error ? error.message : "Unknown error"}`
+        message: `Error processing statement with beginning balance: ${error instanceof Error ? error.message : "Unknown error"}`,
+        isFirstStatement: false
       };
     }
   }
