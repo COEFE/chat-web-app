@@ -9,6 +9,7 @@ import {
   waitForAgentResponse,
 } from "@/lib/agentCommunication";
 import { logAuditEvent } from "@/lib/auditLogger";
+import { CreditCardAgentEnhancedProcessing } from "./creditCardAgentEnhancedProcessing";
 import { CreditCardAgentBeginningBalanceExtension } from "./creditCardAgentBeginningBalanceExtension";
 import Anthropic from "@anthropic-ai/sdk";
 import { MessageParam } from "@anthropic-ai/sdk/resources/messages";
@@ -103,6 +104,7 @@ export class CreditCardAgent implements Agent {
 
   private anthropic: Anthropic;
   private beginningBalanceExtension: CreditCardAgentBeginningBalanceExtension;
+  private enhancedProcessing: CreditCardAgentEnhancedProcessing;
 
   constructor() {
     this.anthropic = new Anthropic({
@@ -112,6 +114,7 @@ export class CreditCardAgent implements Agent {
         "",
     });
     this.beginningBalanceExtension = new CreditCardAgentBeginningBalanceExtension();
+    this.enhancedProcessing = new CreditCardAgentEnhancedProcessing(this);
   }
 
   /**
@@ -146,10 +149,10 @@ export class CreditCardAgent implements Agent {
           `[CreditCardAgent] Processing PDF document: ${context.documentContext.name}`
         );
 
-        // Extract the PDF content and use it as the query
+        // Extract the PDF content and use it as the statementInfo,
         const enhancedQuery = `Credit card statement from PDF: ${context.documentContext.name}\n\n${query}`;
 
-        // Process the statement with the enhanced query
+        // Process the statement with the enhanced statementInfo,
         return this.processStatement(context, enhancedQuery);
       }
 
@@ -177,9 +180,9 @@ export class CreditCardAgent implements Agent {
   }
 
   /**
-   * Check if this agent can handle the given query
-   * @param query The user query
-   * @returns Promise with boolean indicating if this agent can handle the query
+   * Check if this agent can handle the given statementInfo,
+   * @param query The user statementInfo,
+   * @returns Promise with boolean indicating if this agent can handle the statementInfo,
    */
   async canHandle(query: string): Promise<boolean> {
     return this.isCreditCardStatement(query);
@@ -187,7 +190,7 @@ export class CreditCardAgent implements Agent {
 
   /**
    * Check if the query is about a credit card statement
-   * @param query The user query
+   * @param query The user statementInfo,
    * @returns Boolean indicating if this is a credit card statement
    */
   private isCreditCardStatement(query: string): boolean {
@@ -289,9 +292,10 @@ export class CreditCardAgent implements Agent {
         try {
           // Find or create a credit card account for these transactions
           const accountResult =
-            await this.findOrCreateCreditCardAccountForTransactions(
+            await this.enhancedProcessing.findOrCreateCreditCardAccountWithBeginningBalance(
               context,
-              statementInfo
+              statementInfo,
+              query
             );
 
           if (
@@ -361,7 +365,7 @@ export class CreditCardAgent implements Agent {
       directAccountId = context.additionalContext.accountId;
       directAccountName = context.additionalContext.accountName;
     } else {
-      // More inclusive check for transaction processing requests in query
+      // More inclusive check for transaction processing requests in statementInfo,
       forceTransactionProcessing =
         lowerQuery.includes("process") ||
         lowerQuery.includes("record") ||
@@ -391,7 +395,7 @@ export class CreditCardAgent implements Agent {
 
         // If we have cached extraction data, use it directly
         if (
-          context.additionalContext.documentContext.extractedData.statementInfo
+          context.additionalContext.documentContext.extractedData.query
         ) {
           console.log(
             `[CreditCardAgent] Using cached extraction data from additionalContext.documentContext.extractedData.statementInfo`
@@ -491,9 +495,10 @@ export class CreditCardAgent implements Agent {
             try {
               // Find or create a credit card account for these transactions
               const accountResult =
-                await this.findOrCreateCreditCardAccountForTransactions(
+                await this.enhancedProcessing.findOrCreateCreditCardAccountWithBeginningBalance(
                   context,
-                  statementInfo
+                  statementInfo,
+                  query
                 );
 
               if (
@@ -626,9 +631,10 @@ export class CreditCardAgent implements Agent {
         try {
           // Find or create a credit card account for these transactions
           const accountResult =
-            await this.findOrCreateCreditCardAccountForTransactions(
+            await this.enhancedProcessing.findOrCreateCreditCardAccountWithBeginningBalance(
               context,
-              statementInfo
+              statementInfo,
+              query
             );
 
           if (
@@ -726,7 +732,7 @@ export class CreditCardAgent implements Agent {
         (statementInfo.transactions && !statementInfo.success) ||
         context.additionalContext?.documentContext?.extractedData
           ?.statementInfo ||
-        context.documentContext?.extractedData?.statementInfo
+        context.documentContext?.extractedData?.query
       ) {
         console.log(
           `[CreditCardAgent] [${timestamp}] Statement info appears to be in raw extraction format, converting to expected format`
@@ -914,13 +920,13 @@ export class CreditCardAgent implements Agent {
         processableStatementInfo = {
           success: true,
           statementNumber:
-            context.documentContext.extractedData.statementInfo
+            context.documentContext.extractedData.query
               .statementNumber || "XXXX-XXXXX1-92009",
           creditCardIssuer:
-            context.documentContext.extractedData.statementInfo
+            context.documentContext.extractedData.query
               .creditCardIssuer || "American Express",
           lastFourDigits:
-            context.documentContext.extractedData.statementInfo
+            context.documentContext.extractedData.query
               .lastFourDigits || "2009",
           statementDate:
             context.documentContext.extractedData.statementInfo.statementDate ||
@@ -1022,9 +1028,10 @@ export class CreditCardAgent implements Agent {
               `[CreditCardAgent] [${accountTimestamp}] Calling findOrCreateCreditCardAccountForTransactions with userId: ${context.userId}...`
             );
             const accountResult =
-              await this.findOrCreateCreditCardAccountForTransactions(
+              await this.enhancedProcessing.findOrCreateCreditCardAccountWithBeginningBalance(
                 context,
-                processableStatementInfo
+                processableStatementInfo,
+                query
               );
 
             console.log(
@@ -1136,7 +1143,7 @@ export class CreditCardAgent implements Agent {
         // Use Claude 3.5 to analyze the query and provide an appropriate response
         const aiResponse = await this.analyzeStatementQuery(
           questionAnalysis.extractedQuestion,
-          statementInfo
+          query
         );
         console.log(`[CreditCardAgent] AI response to question: ${aiResponse}`);
 
@@ -1188,9 +1195,10 @@ export class CreditCardAgent implements Agent {
           );
           // Find or create a credit card account for these transactions
           const accountResult =
-            await this.findOrCreateCreditCardAccountForTransactions(
+            await this.enhancedProcessing.findOrCreateCreditCardAccountWithBeginningBalance(
               context,
-              statementInfo
+              statementInfo,
+              query
             );
 
           console.log(
@@ -2650,7 +2658,7 @@ export class CreditCardAgent implements Agent {
           placeholders.push(`$${paramIndex++}`);
         }
         
-        // We already checked for debit_amount and credit_amount in the columnsCheck query
+        // We already checked for debit_amount and credit_amount in the columnsCheck statementInfo,
         
         if (hasDebitAmount) {
           columns.push('debit_amount');
@@ -2722,7 +2730,7 @@ export class CreditCardAgent implements Agent {
           
           // Last resort fallback - create a minimal journal entry with required fields
           try {
-            // Build a minimal but compliant insert query
+            // Build a minimal but compliant insert statementInfo,
             let fallbackColumns = ['user_id', 'source'];
             let fallbackValues = [context.userId || null, 'credit_card_statement_fallback'];
             let fallbackPlaceholders = ['$1', '$2'];
@@ -2904,7 +2912,7 @@ export class CreditCardAgent implements Agent {
             // Build dynamic SQL for journal lines based on schema
             let line1Query, line1Values, line2Query, line2Values;
             
-            // Determine if we need to include user_id in the query
+            // Determine if we need to include user_id in the statementInfo,
             if (hasUserId) {
               if (hasLineNumber) {
                 // Include both user_id and line_number
@@ -5927,7 +5935,7 @@ Respond with ONLY the extracted question, nothing else.`;
       const isQuestion =
         extractedQuestion.length > 0 && extractedQuestion !== query;
 
-      // If Claude couldn't extract a question, use the original query
+      // If Claude couldn't extract a question, use the original statementInfo,
       if (!isQuestion) {
         extractedQuestion = query;
       }
@@ -5941,7 +5949,7 @@ Respond with ONLY the extracted question, nothing else.`;
         "[CreditCardAgent] Error extracting question with AI:",
         error
       );
-      // Fall back to using the original query
+      // Fall back to using the original statementInfo,
       return {
         isQuestion: false,
         extractedQuestion: query,
@@ -5953,7 +5961,7 @@ Respond with ONLY the extracted question, nothing else.`;
    * Analyze a user query about a statement using AI and provide a natural language response
    * @param query The user's query about the statement
    * @param statementInfo The extracted statement information
-   * @returns Promise with a natural language response to the query
+   * @returns Promise with a natural language response to the statementInfo,
    */
   private async analyzeStatementQuery(
     query: string,
@@ -5999,7 +6007,7 @@ If asked about specific transactions, provide details from the transactions list
 
 Keep your responses concise and focused on answering the specific question asked.`;
 
-      // Call Claude 3.5 to analyze the query
+      // Call Claude 3.5 to analyze the statementInfo,
       const response = await this.anthropic.messages.create({
         model: "claude-3-5-sonnet-20240620",
         max_tokens: 1000,
