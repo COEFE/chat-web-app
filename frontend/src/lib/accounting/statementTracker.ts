@@ -38,17 +38,21 @@ export async function isStatementProcessed(
     console.log(`Checking if statement ${statementNumber} (last four: ${lastFour}) has been processed for account ${accountId}`);
     
     // Check if the statement has already been processed
-    // Note the parentheses to ensure proper logic evaluation
+    // Only consider it processed if BOTH statement number AND account match
+    // This prevents false positives from different statements for the same card
     const { rows } = await sql`
-      SELECT id FROM statement_trackers 
-      WHERE 
-        ((account_id = ${accountId} AND statement_number = ${statementNumber})
-        OR (account_id = ${accountId} AND last_four = ${lastFour}))
-        AND user_id = ${userId}
+      SELECT id, statement_number, statement_date FROM statement_trackers 
+      WHERE account_id = ${accountId} 
+      AND statement_number = ${statementNumber}
+      AND user_id = ${userId}
+      AND statement_number != 'unknown'
     `;
     
     const isProcessed = rows.length > 0;
     console.log(`Statement processed check result: ${isProcessed ? 'Already processed' : 'Not yet processed'}`);
+    if (isProcessed && rows[0]) {
+      console.log(`Found existing statement: ${rows[0].statement_number} (${rows[0].statement_date})`);
+    }
     
     return isProcessed;
   } catch (error) {

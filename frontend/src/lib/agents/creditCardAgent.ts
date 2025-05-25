@@ -23,6 +23,7 @@ import {
   checkStatementStatus,
   processStatementViaApi,
 } from "@/lib/accounting/statementUtils";
+import { CreditCardStartingBalanceExtractor } from "./creditCardStartingBalanceExtractor";
 // Import createBill function directly from the module
 import * as billQueries from "@/lib/accounting/billQueries";
 
@@ -106,7 +107,12 @@ export class CreditCardAgent implements Agent {
   private beginningBalanceExtension: CreditCardAgentBeginningBalanceExtension;
   private enhancedProcessing: CreditCardAgentEnhancedProcessing;
 
+  private enhancedExtractor: CreditCardStartingBalanceExtractor;
+
+
+
   constructor() {
+        this.enhancedExtractor = new CreditCardStartingBalanceExtractor();
     this.anthropic = new Anthropic({
       apiKey:
         process.env.ANTHROPIC_API_KEY ||
@@ -413,11 +419,68 @@ export class CreditCardAgent implements Agent {
           `[CreditCardAgent] No cached extraction data found, extracting from document...`
         );
         // Extract statement information, passing both the query and document context
-        statementInfo = await this.extractStatementInfo(
+        // Use enhanced extractor to get previousBalance for beginning balance processing
+
+        console.log('[CreditCardAgent] Using enhanced extractor to get previousBalance information');
+
+        const enhancedResult = await this.enhancedExtractor.extractEnhancedStatementInfo(
+
           query,
-          context.userId,
+
           context.documentContext
+
         );
+
+
+        if (enhancedResult.success && enhancedResult.previousBalance !== undefined) {
+
+          console.log(`[CreditCardAgent] Enhanced extraction successful with previousBalance: ${enhancedResult.previousBalance}`);
+
+          // Use enhanced extraction result
+
+          statementInfo = {
+
+            success: true,
+
+            message: enhancedResult.message,
+
+            creditCardIssuer: enhancedResult.creditCardIssuer,
+
+            lastFourDigits: enhancedResult.lastFourDigits,
+
+            statementNumber: enhancedResult.statementNumber,
+
+            statementDate: enhancedResult.statementDate,
+
+            previousBalance: enhancedResult.previousBalance, // This is the key field we need!
+
+            balance: enhancedResult.balance,
+
+            dueDate: enhancedResult.dueDate,
+
+            minimumPayment: enhancedResult.minimumPayment,
+
+            transactions: enhancedResult.transactions || []
+
+          };
+
+        } else {
+
+          console.log('[CreditCardAgent] Enhanced extraction failed or no previousBalance, falling back to standard extraction');
+
+          // Fallback to standard extraction
+
+          statementInfo = await this.extractStatementInfo(
+
+            query,
+
+            context.userId,
+
+            context.documentContext
+
+          );
+
+        }
 
         // After extraction, store the data in the exact structure used by the test implementation
         if (statementInfo.success) {

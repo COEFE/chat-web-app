@@ -134,7 +134,7 @@ export class CreditCardBeginningBalanceIntegration {
   }
 
   /**
-   * Record beginning balance through GL Agent
+   * Record beginning balance through direct journal entry creation
    */
   async recordBeginningBalance(
     context: AgentContext,
@@ -147,62 +147,105 @@ export class CreditCardBeginningBalanceIntegration {
     try {
       console.log(`[CreditCardBeginningBalanceIntegration] Recording beginning balance for ${accountName}: $${beginningBalance}`);
       
-      // Import GL Agent dynamically to avoid circular dependencies
-      const { GLAgent } = await import('./glAgent');
-      const glAgent = new GLAgent();
-      
-      // Create GL Agent message for beginning balance
-      const glMessage = {
-        id: `beginning-balance-${Date.now()}`,
-        userId: context.userId,
-        sender: 'CreditCardAgent',
-        type: 'GL_ACCOUNT_CREATION' as const,
-        payload: {
-          suggestedName: accountName,
-          accountType: accountType,
-          description: `Beginning balance entry for ${accountName}`,
-          expenseType: 'credit_card',
-          startingBalance: beginningBalance.toString(),
-          balanceDate: statementDate,
-          isBeginningBalance: true
-        }
-      };
-
-      console.log('[CreditCardBeginningBalanceIntegration] Sending beginning balance request to GL Agent:', glMessage);
-      
-      // Send to GL Agent
-      const glResponse = await glAgent.processRequest(context);
-      
-      if (glResponse && typeof glResponse === 'object' && 'payload' in glResponse) {
-        const responsePayload = glResponse.payload as any;
-        
-        if (responsePayload?.success) {
-          console.log('[CreditCardBeginningBalanceIntegration] GL Agent successfully recorded beginning balance');
-          
-          return {
-            success: true,
-            message: `Beginning balance of $${beginningBalance.toFixed(2)} recorded for ${accountName} as of ${statementDate}`
-          };
-        } else {
-          console.error('[CreditCardBeginningBalanceIntegration] GL Agent failed to record beginning balance:', responsePayload?.message);
-          return {
-            success: false,
-            message: `Failed to record beginning balance: ${responsePayload?.message || 'Unknown error'}`
-          };
-        }
-      } else {
-        console.error('[CreditCardBeginningBalanceIntegration] Invalid response from GL Agent:', glResponse);
+      if (!accountId) {
         return {
           success: false,
-          message: 'Invalid response from GL Agent when recording beginning balance'
+          message: 'Account ID is required to record beginning balance'
         };
       }
+
+      // Create journal entry directly for beginning balance
+      const memo = `Beginning balance for ${accountName} as of ${statementDate}`;
+      
+      // Create journal header
+      const journalInsertQuery = `
+        INSERT INTO journals (
+          transaction_date, memo, journal_type, is_posted, created_by, source, user_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
+      `;
+
+      const journalResult = await sql.query(journalInsertQuery, [
+        statementDate,
+        memo,
+        "BB", // journal_type for Beginning Balance
+        true, // is_posted = true
+        context.userId, // created_by
+        "cc_agent", // source
+        context.userId, // user_id for proper data isolation
+      ]);
+
+      const journalId = journalResult.rows[0].id;
+      console.log(`[CreditCardBeginningBalanceIntegration] Created journal header with ID: ${journalId}`);
+
+      // Find or create Opening Balance Equity account
+      let equityAccountId: number;
+      
+      const equityAccountResult = await sql`
+        SELECT id FROM accounts 
+        WHERE name ILIKE '%opening balance equity%' 
+        AND user_id = ${context.userId}
+        AND is_active = true
+        LIMIT 1
+      `;
+
+      if (equityAccountResult.rows.length > 0) {
+        equityAccountId = equityAccountResult.rows[0].id;
+        console.log(`[CreditCardBeginningBalanceIntegration] Found existing Opening Balance Equity account: ${equityAccountId}`);
+      } else {
+        // Create Opening Balance Equity account
+        const createEquityResult = await sql`
+          INSERT INTO accounts (name, code, account_type, notes, user_id, is_active) 
+          VALUES ('Opening Balance Equity', '30000', 'equity', 'Equity account for beginning balances', ${context.userId}, true) 
+          RETURNING id
+        `;
+        equityAccountId = createEquityResult.rows[0].id;
+        console.log(`[CreditCardBeginningBalanceIntegration] Created Opening Balance Equity account: ${equityAccountId}`);
+      }
+
+      // Create journal lines for beginning balance
+      // Credit Card Liability: Credit (increase liability)
+      // Opening Balance Equity: Debit (decrease equity)
+      
+      const journalLinesInsertQuery = `
+        INSERT INTO journal_lines (
+          journal_id, account_id, description, debit, credit, user_id
+        )
+        VALUES 
+          ($1, $2, $3, $4, $5, $6),
+          ($7, $8, $9, $10, $11, $12)
+      `;
+
+      await sql.query(journalLinesInsertQuery, [
+        // Credit Card Account - Credit (increase liability)
+        journalId,
+        accountId,
+        `Beginning balance - ${accountName}`,
+        0, // debit
+        beginningBalance, // credit
+        context.userId,
+        // Opening Balance Equity - Debit (decrease equity)
+        journalId,
+        equityAccountId,
+        `Beginning balance offset - ${accountName}`,
+        beginningBalance, // debit
+        0, // credit
+        context.userId
+      ]);
+
+      console.log(`[CreditCardBeginningBalanceIntegration] Successfully created beginning balance journal entry`);
+      
+      return {
+        success: true,
+        message: `Beginning balance of $${beginningBalance.toFixed(2)} recorded for ${accountName} as of ${statementDate}`
+      };
       
     } catch (error) {
       console.error('[CreditCardBeginningBalanceIntegration] Error recording beginning balance:', error);
       return {
         success: false,
-        message: `Error recording beginning balance: ${error instanceof Error ? error.message : "Unknown error"}`
+        message: `Error recording beginning balance: ${error instanceof Error ? error.message : 'Unknown error'}`
       };
     }
   }

@@ -45,7 +45,8 @@ export default function DatabaseAdminPage() {
       "037_create_bill_refunds_table.sql",
       "038_add_bill_refund_journal_type.sql",
       "039_add_credit_card_journal_types.sql",
-      "040_add_credit_card_refund_journal_type.sql"
+      "040_add_credit_card_refund_journal_type.sql",
+      "041_add_beginning_balance_journal_type.sql"
     ];
     setAvailableMigrations(migrations);
   }, []);
