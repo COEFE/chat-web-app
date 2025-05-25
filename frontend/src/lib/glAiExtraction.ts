@@ -41,9 +41,8 @@ export async function extractGLAccountInfoWithAI(query: string): Promise<GLAccou
          - 20000-29999: Liability accounts
          - 30000-39999: Equity accounts
          - 40000-49999: Revenue accounts
-         - 50000-59999: Cost of Goods Sold accounts
-         - 60000-69999: Expense accounts
-      3. Place accounts logically within their ranges (e.g., 61000-61999 for office expenses)
+         - 50000-59999: Expense accounts
+      3. Place accounts logically within their ranges (e.g., 50000-50999 for office expenses)
       4. Use your accounting expertise to choose appropriate numbers
       
       If any information is missing, omit that field entirely rather than guessing. If the account_type is provided but no code is specified, generate an appropriate 5-digit code based on accounting standards.
@@ -58,10 +57,10 @@ export async function extractGLAccountInfoWithAI(query: string): Promise<GLAccou
       
       Examples:
       1. "Create a new GL account for Office Supplies, it's an expense account"
-         {"code": "61500", "name": "Office Supplies", "account_type": "expense"}
+         {"code": "50000", "name": "Office Supplies", "account_type": "expense"}
       
       2. "I need to add Marketing Expense account"
-         {"code": "62000", "name": "Marketing Expense", "account_type": "expense"}
+         {"code": "51000", "name": "Marketing Expense", "account_type": "expense"}
          
       3. "Create account 12345 for Company Vehicle"
          {"code": "12345", "name": "Company Vehicle", "account_type": "asset"}

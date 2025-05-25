@@ -175,7 +175,7 @@ export default function BankTransactionList({
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Statuses</SelectItem>
+                    <SelectItem value="all">All Statuses</SelectItem>
                     <SelectItem value="unmatched">Unmatched</SelectItem>
                     <SelectItem value="matched">Matched</SelectItem>
                     <SelectItem value="reconciled">Reconciled</SelectItem>

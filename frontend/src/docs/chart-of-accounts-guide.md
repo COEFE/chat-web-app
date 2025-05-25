@@ -7,266 +7,265 @@ This document outlines the standardized chart of accounts structure for the acco
 Our chart of accounts follows a standard numbering convention that organizes accounts logically by type and purpose:
 
 ```
-1000-1999: ASSETS
-2000-2999: LIABILITIES
-3000-3999: EQUITY
-4000-4999: REVENUE
-5000-5999: COST OF GOODS SOLD
-6000-6999: OPERATING EXPENSES
+10000-19999: ASSETS
+20000-29999: LIABILITIES
+30000-39999: EQUITY
+40000-49999: REVENUE
+50000-59999: EXPENSES
 ```
 
 ## Detailed Structure
 
-### 1000-1999: ASSETS
+### 10000-19999: ASSETS
 
 Assets are resources owned or controlled by the company that have future economic value.
 
-#### 1000-1499: Current Assets
+#### 10000-14999: Current Assets
 Assets expected to be converted to cash within one year.
 
-- **1000-1099: Cash & Cash Equivalents**
-  - 1010: Cash & Cash Equivalents
-  - 1011: Operating Account
-  - 1012: Savings Account
-  - 1013: Petty Cash
-  - 1015: Money Market
-  - 1020: Undeposited Funds
+- **10000-10999: Cash & Cash Equivalents**
+  - 10010: Cash & Cash Equivalents
+  - 10011: Operating Account
+  - 10012: Savings Account
+  - 10013: Petty Cash
+  - 10015: Money Market
+  - 10020: Undeposited Funds
 
-- **1100-1199: Accounts Receivable**
-  - 1110: Accounts Receivable - Trade
-  - 1120: Allowance for Doubtful Accounts
+- **11000-11999: Accounts Receivable**
+  - 11010: Accounts Receivable - Trade
+  - 11020: Allowance for Doubtful Accounts
 
-- **1200-1299: Inventory**
-  - 1210: Raw Materials
-  - 1220: Work in Process
-  - 1230: Finished Goods
+- **12000-12999: Inventory**
+  - 12010: Raw Materials
+  - 12020: Work in Process
+  - 12030: Finished Goods
 
-- **1300-1399: Prepaid Expenses**
-  - 1310: Prepaid Insurance
-  - 1320: Prepaid Rent
-  - 1330: Prepaid Subscriptions
+- **13000-13999: Prepaid Expenses**
+  - 13010: Prepaid Insurance
+  - 13020: Prepaid Rent
+  - 13030: Prepaid Subscriptions
 
-- **1400-1499: Other Current Assets**
-  - 1410: Employee Advances
-  - 1420: Notes Receivable - Current
-  - 1430: Tax Refunds Receivable
+- **14000-14999: Other Current Assets**
+  - 14010: Employee Advances
+  - 14020: Notes Receivable - Current
+  - 14030: Tax Refunds Receivable
 
-#### 1500-1999: Non-Current Assets
+#### 15000-19999: Non-Current Assets
 Assets not expected to be converted to cash within one year.
 
-- **1500-1599: Fixed Assets**
-  - 1510: Property, Plant & Equipment
-  - 1511: Buildings
-  - 1512: Furniture & Fixtures
-  - 1513: Equipment
-  - 1514: Vehicles
-  - 1515: Leasehold Improvements
-  - 1516: Computer Equipment
+- **15000-15999: Fixed Assets**
+  - 15010: Property, Plant & Equipment
+  - 15011: Buildings
+  - 15012: Furniture & Fixtures
+  - 15013: Equipment
+  - 15014: Vehicles
+  - 15015: Leasehold Improvements
+  - 15016: Computer Equipment
 
-- **1600-1699: Accumulated Depreciation**
-  - 1611: Accum. Depr. - Buildings
-  - 1612: Accum. Depr. - Furniture & Fixtures
-  - 1613: Accum. Depr. - Equipment
-  - 1614: Accum. Depr. - Vehicles
-  - 1615: Accum. Depr. - Leasehold Improvements
-  - 1616: Accum. Depr. - Computer Equipment
+- **16000-16999: Accumulated Depreciation**
+  - 16011: Accum. Depr. - Buildings
+  - 16012: Accum. Depr. - Furniture & Fixtures
+  - 16013: Accum. Depr. - Equipment
+  - 16014: Accum. Depr. - Vehicles
+  - 16015: Accum. Depr. - Leasehold Improvements
+  - 16016: Accum. Depr. - Computer Equipment
 
-- **1700-1799: Intangible Assets**
-  - 1710: Goodwill
-  - 1720: Patents
-  - 1730: Trademarks
-  - 1740: Copyrights
-  - 1750: Software
+- **17000-17999: Intangible Assets**
+  - 17010: Goodwill
+  - 17020: Patents
+  - 17030: Trademarks
+  - 17040: Copyrights
+  - 17050: Software
 
-- **1800-1899: Long-term Investments**
-  - 1810: Investment Securities
-  - 1820: Investment in Subsidiaries
+- **18000-18999: Long-term Investments**
+  - 18010: Investment Securities
+  - 18020: Investment in Subsidiaries
 
-- **1900-1999: Other Non-current Assets**
-  - 1910: Deposits
-  - 1920: Notes Receivable - Non-current
+- **19000-19999: Other Non-current Assets**
+  - 19010: Deposits
+  - 19020: Notes Receivable - Non-current
 
-### 2000-2999: LIABILITIES
+### 20000-29999: LIABILITIES
 
 Liabilities are obligations that the company owes to others.
 
-#### 2000-2499: Current Liabilities
+#### 20000-24999: Current Liabilities
 Obligations due within one year.
 
-- **2000-2099: Accounts Payable**
-  - 2010: Accounts Payable
-  - 2020: Accounts Payable - Trade
-  - 2030: Credit Card Payable
+- **20000-20999: Accounts Payable**
+  - 20010: Accounts Payable
+  - 20020: Accounts Payable - Trade
+  - 20030: Credit Card Payable
 
-- **2100-2199: Short-term Loans**
-  - 2110: Line of Credit
-  - 2120: Current Portion of Long-term Debt
+- **21000-21999: Short-term Loans**
+  - 21010: Line of Credit
+  - 21020: Current Portion of Long-term Debt
 
-- **2200-2299: Payroll Liabilities**
-  - 2210: Wages Payable
-  - 2220: FICA Payable
-  - 2230: Federal Income Tax Payable
-  - 2240: State Income Tax Payable
-  - 2250: Health Insurance Payable
-  - 2260: Retirement Contributions Payable
+- **22000-22999: Payroll Liabilities**
+  - 22010: Wages Payable
+  - 22020: FICA Payable
+  - 22030: Federal Income Tax Payable
+  - 22040: State Income Tax Payable
+  - 22050: Health Insurance Payable
+  - 22060: Retirement Contributions Payable
 
-- **2300-2399: Taxes Payable**
-  - 2310: Sales Tax Payable
-  - 2320: Federal Income Tax Payable - Business
-  - 2330: State Income Tax Payable - Business
-  - 2340: Property Tax Payable
+- **23000-23999: Taxes Payable**
+  - 23010: Sales Tax Payable
+  - 23020: Federal Income Tax Payable - Business
+  - 23030: State Income Tax Payable - Business
+  - 23040: Property Tax Payable
 
-- **2400-2499: Other Current Liabilities**
-  - 2410: Customer Deposits
-  - 2420: Deferred Revenue
-  - 2430: Accrued Expenses
+- **24000-24999: Other Current Liabilities**
+  - 24010: Customer Deposits
+  - 24020: Deferred Revenue
+  - 24030: Accrued Expenses
 
-#### 2500-2999: Non-Current Liabilities
+#### 25000-29999: Non-Current Liabilities
 Obligations due after one year.
 
-- **2500-2599: Long-term Loans**
-  - 2510: Long-term Loans
-  - 2520: Mortgage Payable
-  - 2530: Equipment Loans
+- **25000-25999: Long-term Loans**
+  - 25010: Long-term Loans
+  - 25020: Mortgage Payable
+  - 25030: Equipment Loans
 
-- **2600-2699: Bonds Payable**
-  - 2600: Bonds Payable
+- **26000-26999: Bonds Payable**
+  - 26000: Bonds Payable
 
-- **2700-2999: Other Non-current Liabilities**
-  - 2710: Deferred Tax Liabilities
-  - 2720: Long-term Deferred Revenue
+- **27000-29999: Other Non-current Liabilities**
+  - 27010: Deferred Tax Liabilities
+  - 27020: Long-term Deferred Revenue
 
-### 3000-3999: EQUITY
+### 30000-39999: EQUITY
 
 Equity represents the owner's or shareholders' interest in the business.
 
-- **3000-3099: Capital Contributions**
-  - 3010: Owner Equity
-  - 3020: Capital Stock
-  - 3030: Additional Paid-in Capital
+- **30000-30999: Capital Contributions**
+  - 30010: Owner Equity
+  - 30020: Capital Stock
+  - 30030: Additional Paid-in Capital
 
-- **3100-3199: Retained Earnings**
-  - 3100: Retained Earnings
-  - 3200: Retained Earnings - Prior Years
+- **31000-31999: Retained Earnings**
+  - 31000: Retained Earnings
+  - 32000: Retained Earnings - Prior Years
 
-- **3200-3299: Dividends & Distributions**
-  - 3210: Dividends
-  - 3220: Owner Withdrawals
+- **32000-32999: Dividends & Distributions**
+  - 32010: Dividends
+  - 32020: Owner Withdrawals
 
-- **3900-3999: Current Year Earnings**
-  - 3900: Current Year Earnings
+- **39000-39999: Current Year Earnings**
+  - 39000: Current Year Earnings
 
-### 4000-4999: REVENUE
+### 40000-49999: REVENUE
 
 Revenue is income generated from normal business operations.
 
-- **4000-4099: Primary Product/Service Revenue**
-  - 4010: Product Sales
-  - 4020: Product Sales - Category A
-  - 4030: Product Sales - Category B
+- **40000-40999: Primary Product/Service Revenue**
+  - 40010: Product Sales
+  - 40020: Product Sales - Category A
+  - 40030: Product Sales - Category B
 
-- **4100-4199: Secondary Product/Service Revenue**
-  - 4100: Service Revenue
-  - 4110: Service Revenue - Type A
-  - 4120: Service Revenue - Type B
+- **41000-41999: Secondary Product/Service Revenue**
+  - 41000: Service Revenue
+  - 41010: Service Revenue - Type A
+  - 41020: Service Revenue - Type B
 
-- **4900-4999: Other Income**
-  - 4900: Other Income
-  - 4910: Interest Income
-  - 4920: Rental Income
-  - 4930: Gain on Sale of Assets
+- **49000-49999: Other Income**
+  - 49000: Other Income
+  - 49010: Interest Income
+  - 49020: Rental Income
+  - 49030: Gain on Sale of Assets
 
-### 5000-5999: COST OF GOODS SOLD
+### 50000-59999: EXPENSES
 
 Direct costs attributable to the production of goods or services sold.
 
-- **5000-5099: Materials & Direct Costs**
-  - 5010: Materials Cost
-  - 5020: Purchase Discounts
-  - 5030: Freight In
+- **50000-50999: Materials & Direct Costs**
+  - 50010: Materials Cost
+  - 50020: Purchase Discounts
+  - 50030: Freight In
 
-- **5100-5199: Direct Labor**
-  - 5100: Direct Labor
-  - 5110: Production Wages
-  - 5120: Production Benefits
+- **51000-51999: Direct Labor**
+  - 51000: Direct Labor
+  - 51010: Production Wages
+  - 51020: Production Benefits
 
-- **5900-5999: Other COGS**
-  - 5900: Other COGS
-  - 5910: Manufacturing Overhead
-  - 5920: Inventory Adjustments
+- **59000-59999: Other EXPENSES**
+  - 59000: Other EXPENSES
+  - 59010: Manufacturing Overhead
+  - 59020: Inventory Adjustments
 
-### 6000-6999: OPERATING EXPENSES
+### 60000-69999: OPERATING EXPENSES
 
 Expenses incurred in the normal course of business.
 
-- **6000-6099: Rent & Occupancy**
-  - 6010: Rent & Occupancy
-  - 6020: Rent Expense
-  - 6030: Property Taxes
-  - 6040: Maintenance & Repairs
+- **60000-60999: Rent & Occupancy**
+  - 60010: Rent & Occupancy
+  - 60020: Rent Expense
+  - 60030: Property Taxes
+  - 60040: Maintenance & Repairs
 
-- **6100-6199: Utilities**
-  - 6100: Utilities
-  - 6110: Electricity
-  - 6120: Water & Sewer
-  - 6130: Gas
-  - 6140: Internet & Telecommunications
+- **61000-61999: Utilities**
+  - 61000: Utilities
+  - 61010: Electricity
+  - 61020: Water & Sewer
+  - 61030: Gas
+  - 61040: Internet & Telecommunications
 
-- **6200-6299: Payroll & Benefits**
-  - 6200: Payroll & Benefits
-  - 6210: Salaries & Wages
-  - 6220: Payroll Taxes
-  - 6230: Employee Benefits
-  - 6240: Retirement Plan Contributions
+- **62000-62999: Payroll & Benefits**
+  - 62000: Payroll & Benefits
+  - 62010: Salaries & Wages
+  - 62020: Payroll Taxes
+  - 62030: Employee Benefits
+  - 62040: Retirement Plan Contributions
 
-- **6300-6399: Office Expenses**
-  - 6300: Office Expenses
-  - 6310: Office Supplies
-  - 6320: Postage & Shipping
-  - 6330: Printing & Reproduction
-  - 6340: Software Subscriptions
+- **63000-63999: Office Expenses**
+  - 63000: Office Expenses
+  - 63010: Office Supplies
+  - 63020: Postage & Shipping
+  - 63030: Printing & Reproduction
+  - 63040: Software Subscriptions
 
-- **6400-6499: Marketing & Advertising**
-  - 6400: Marketing & Advertising
-  - 6410: Advertising
-  - 6420: Digital Marketing
-  - 6430: Public Relations
-  - 6440: Marketing Materials
+- **64000-64999: Marketing & Advertising**
+  - 64000: Marketing & Advertising
+  - 64010: Advertising
+  - 64020: Digital Marketing
+  - 64030: Public Relations
+  - 64040: Marketing Materials
 
-- **6500-6599: Professional Services**
-  - 6500: Professional Services
-  - 6510: Legal Fees
-  - 6520: Accounting Fees
-  - 6530: Consulting Fees
-  - 6540: IT Services
+- **65000-65999: Professional Services**
+  - 65000: Professional Services
+  - 65010: Legal Fees
+  - 65020: Accounting Fees
+  - 65030: Consulting Fees
+  - 65040: IT Services
 
-- **6600-6699: Travel & Entertainment**
-  - 6600: Travel & Entertainment
-  - 6610: Travel - Transportation
-  - 6620: Travel - Lodging
-  - 6630: Travel - Meals
-  - 6640: Entertainment
+- **66000-66999: Travel & Entertainment**
+  - 66000: Travel & Entertainment
+  - 66010: Travel - Transportation
+  - 66020: Travel - Lodging
+  - 66030: Travel - Meals
+  - 66040: Entertainment
 
-- **6700-6799: Depreciation & Amortization**
-  - 6700: Depreciation & Amortization
-  - 6710: Depreciation Expense
-  - 6720: Amortization Expense
+- **67000-67999: Depreciation & Amortization**
+  - 67000: Depreciation & Amortization
+  - 67010: Depreciation Expense
+  - 67020: Amortization Expense
 
-- **6800-6899: Insurance**
-  - 6800: Insurance
-  - 6810: Liability Insurance
-  - 6820: Property Insurance
-  - 6830: Workers Compensation
-  - 6840: Professional Liability Insurance
+- **68000-68999: Insurance**
+  - 68000: Insurance
+  - 68010: Liability Insurance
+  - 68020: Property Insurance
+  - 68030: Workers Compensation
+  - 68040: Professional Liability Insurance
 
-- **6900-6999: Miscellaneous Expenses**
-  - 6900: Miscellaneous Expenses
-  - 6910: Bank Charges
-  - 6920: Interest Expense
-  - 6930: Dues & Subscriptions
-  - 6940: Licenses & Permits
-  - 6950: Bad Debt Expense
-  - 6960: Charitable Contributions
+- **69000-69999: Miscellaneous Expenses**
+  - 69000: Miscellaneous Expenses
+  - 69010: Bank Charges
+  - 69020: Interest Expense
+  - 69030: Dues & Subscriptions
+  - 69040: Licenses & Permits
+  - 69050: Bad Debt Expense
+  - 69060: Charitable Contributions
 
 ## Best Practices
 

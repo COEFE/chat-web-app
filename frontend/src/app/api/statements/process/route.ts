@@ -6,6 +6,7 @@ import { CreditCardAgent } from '@/lib/agents/creditCardAgent';
 import { AgentContext } from '@/types/agents';
 import { CreditCardTransaction } from '@/types/creditCard';
 import { createBill } from '@/lib/accounting/billQueries';
+import { storeStatementEmbedding } from '@/lib/statementEmbeddings';
 
 /**
  * API endpoint to process a bank or credit card statement
@@ -146,6 +147,16 @@ export async function POST(request: NextRequest) {
       isStartingBalance,
       userId
     );
+
+    // Store the statement embedding
+    await storeStatementEmbedding({
+      user_id: userId,
+      account_id: existingAccountId,
+      account_number: lastFour,
+      statement_date: statementDate || new Date().toISOString().split('T')[0],
+      statement_number: statementNumber,
+      statement_content: `Credit card statement ${statementNumber} dated ${statementDate || new Date().toISOString().split('T')[0]} for account ending in ${lastFour}${balance !== undefined ? ` with balance ${balance}` : ''}${accountName ? ` for ${accountName}` : ''}${accountCode ? ` (${accountCode})` : ''}`
+    });
 
     // If this is a starting balance, update the account's starting balance
     if (isStartingBalance && balance !== undefined) {

@@ -209,7 +209,7 @@ async function findOrCreateCreditCardAccount(
         is_deleted,
         user_id
       ) VALUES (
-        ${'CC-' + Math.floor(1000 + Math.random() * 9000)},
+        ${(20000 + Math.floor(Math.random() * 9999)).toString()},
         ${`${issuer || 'Credit Card'} Account ${accountNumber || ''}`.trim()},
         ${'Credit Card'},
         ${true},

@@ -356,16 +356,10 @@ export default function GLCodesPage() {
                                     <AlertDialogContent>
                                       <AlertDialogHeader>
                                         <AlertDialogTitle>Delete Account</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                          Are you sure you want to delete the account "{acc.code} - {acc.name}"?
-                                          {!acc.is_custom && (
-                                            <div className="mt-2 p-2 bg-yellow-100 text-yellow-800 rounded-md flex items-center gap-2">
-                                              <AlertCircle className="h-4 w-4" />
-                                              <span>This is a default account. Deletion may be restricted.</span>
-                                            </div>
-                                          )}
-                                        </AlertDialogDescription>
                                       </AlertDialogHeader>
+                                      <AlertDialogDescription>
+                                        Are you sure you want to delete the account "{acc.code} - {acc.name}"?
+                                      </AlertDialogDescription>
                                       <AlertDialogFooter>
                                         <AlertDialogCancel>Cancel</AlertDialogCancel>
                                         <AlertDialogAction

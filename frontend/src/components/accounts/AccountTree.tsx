@@ -139,7 +139,7 @@ function AccountTreeItem({
             </Button>
           )}
           
-          {onDeleteAccount && account.is_custom && (
+          {onDeleteAccount && (
             <Button
               variant="ghost"
               size="icon"

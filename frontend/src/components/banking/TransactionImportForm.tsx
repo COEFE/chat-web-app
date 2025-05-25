@@ -506,7 +506,7 @@ export default function TransactionImportForm({
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="">None (use amount sign)</SelectItem>
+                            <SelectItem value="none_sign">None (use amount sign)</SelectItem>
                             {csvHeaders.map((header) => (
                               <SelectItem key={header} value={header}>
                                 {header}
@@ -538,7 +538,7 @@ export default function TransactionImportForm({
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="">None</SelectItem>
+                            <SelectItem value="none">None</SelectItem>
                             {csvHeaders.map((header) => (
                               <SelectItem key={header} value={header}>
                                 {header}

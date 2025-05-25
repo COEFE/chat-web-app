@@ -63,20 +63,17 @@ export async function DELETE(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // Check if this is a default account (non-custom)
+    // Check if the account exists
     const { rows: accountRows } = await sql`
-      SELECT is_custom FROM accounts WHERE id = ${id}
+      SELECT id FROM accounts WHERE id = ${id}
     `;
     
     if (accountRows.length === 0) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 });
     }
     
-    if (!accountRows[0].is_custom) {
-      return NextResponse.json({ 
-        error: 'Cannot delete default accounts. Only custom accounts can be deleted.' 
-      }, { status: 400 });
-    }
+    // Note: Previously restricted deletion to custom accounts only
+    // This restriction has been removed to allow deletion of any account
 
     // Delete the account
     const { rows } = await sql`

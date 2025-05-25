@@ -181,7 +181,7 @@ async function getCreditCardAccountIdByName(accountName: string, userId: string,
         addToLog(`No Credit Card account found using any strategy. Creating a new one...`);
         
         // Generate a unique account code
-        const accountCode = `CC${Math.floor(1000 + Math.random() * 9000)}`;
+        const accountCode = (20000 + Math.floor(Math.random() * 9999)).toString();
         
         // Create a name that includes the last four digits if available
         const newAccountName = lastFourDigits ? 

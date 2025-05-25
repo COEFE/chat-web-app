@@ -422,7 +422,7 @@ export default function DuplicateJournalPage() {
                         <SelectItem key={account.id} value={account.id.toString()}>
                           {account.code} - {account.name}
                         </SelectItem>
-                      )) : <SelectItem value="">No accounts available</SelectItem>}
+                      )) : <SelectItem value="no_accounts">No accounts available</SelectItem>}
                     </SelectContent>
                   </Select>
                 </div>

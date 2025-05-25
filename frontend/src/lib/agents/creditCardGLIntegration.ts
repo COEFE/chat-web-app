@@ -234,13 +234,13 @@ export class CreditCardGLIntegration {
    * Generate a unique account code for credit card accounts
    */
   private async generateCreditCardAccountCode(): Promise<string> {
-    // Credit card accounts are liabilities (2000-2999 range)
-    // Use 2100-2199 for credit card accounts
+    // Credit card accounts are liabilities (20000-29999 range)
+    // Use 20000-29999 for credit card accounts
     let attempts = 0;
     const maxAttempts = 100;
 
     while (attempts < maxAttempts) {
-      const code = `21${String(Math.floor(Math.random() * 100)).padStart(2, '0')}`;
+      const code = `2${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
       
       // Check if this code already exists
       const { rows: existing } = await sql`
@@ -256,7 +256,7 @@ export class CreditCardGLIntegration {
 
     // Fallback to timestamp-based code if all random attempts fail
     const timestamp = Date.now().toString().slice(-3);
-    return `21${timestamp}`;
+    return `2${timestamp}`;
   }
 
   /**
@@ -279,7 +279,7 @@ export class CreditCardGLIntegration {
         FROM accounts 
         WHERE account_type = 'liability' 
         AND name ILIKE ${searchPattern}
-        AND code LIKE '21%'
+        AND code LIKE '2%'
         LIMIT 1
       `;
 

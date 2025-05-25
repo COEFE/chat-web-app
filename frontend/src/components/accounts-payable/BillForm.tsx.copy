@@ -390,7 +390,7 @@ export function BillPaymentForm({ bill, onClose }: BillPaymentFormProps) {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
+                        <SelectItem value="none">None</SelectItem>
                         <SelectItem value="Check">Check</SelectItem>
                         <SelectItem value="Credit Card">Credit Card</SelectItem>
                         <SelectItem value="ACH">ACH</SelectItem>

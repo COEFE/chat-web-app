@@ -76,7 +76,7 @@ async function getCreditCardAccountIdByName(accountName: string, userId: string,
         addToLog(`Credit Card account '${accountName}' not found. Creating it...`);
         
         // Generate a unique account code
-        const accountCode = `CC${Math.floor(1000 + Math.random() * 9000)}`;
+        const accountCode = (20000 + Math.floor(Math.random() * 9999)).toString();
         
         // Create the account
         const insertResult = await query(

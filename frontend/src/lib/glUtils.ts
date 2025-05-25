@@ -458,24 +458,24 @@ export function extractGLAccountInfoFromQuery(message: string): { code?: string;
 function getAccountTypeFromCode(code: string): 'asset' | 'liability' | 'equity' | 'revenue' | 'expense' {
   const accountCode = parseInt(code);
   
-  // Asset accounts (1000-1999)
-  if (accountCode >= 1000 && accountCode < 2000) {
+  // Asset accounts (10000-19999)
+  if (accountCode >= 10000 && accountCode < 20000) {
     return 'asset';
   }
-  // Liability accounts (2000-2999)
-  else if (accountCode >= 2000 && accountCode < 3000) {
+  // Liability accounts (20000-29999)
+  else if (accountCode >= 20000 && accountCode < 30000) {
     return 'liability';
   }
-  // Equity accounts (3000-3999)
-  else if (accountCode >= 3000 && accountCode < 4000) {
+  // Equity accounts (30000-39999)
+  else if (accountCode >= 30000 && accountCode < 40000) {
     return 'equity';
   }
-  // Revenue accounts (4000-4999)
-  else if (accountCode >= 4000 && accountCode < 5000) {
+  // Revenue accounts (40000-49999)
+  else if (accountCode >= 40000 && accountCode < 50000) {
     return 'revenue';
   }
-  // Expense accounts (5000-5999)
-  else if (accountCode >= 5000 && accountCode < 6000) {
+  // Expense accounts (50000-59999)
+  else if (accountCode >= 50000 && accountCode < 60000) {
     return 'expense';
   }
   

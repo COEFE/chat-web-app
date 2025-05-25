@@ -280,10 +280,10 @@ export class GLAgent implements Agent {
       
       // Generate a code based on the account type and description
       if (accountType === 'expense') {
-        // For expense accounts, use a 5000-5999 range
+        // For expense accounts, use 50000-59999 range
         // Find an available code in the expense range
-        let startCode = 5000;
-        let endCode = 5999;
+        let startCode = 50000;
+        let endCode = 59999;
         let availableCode = null;
         
         // First, get all existing expense account codes
@@ -313,8 +313,8 @@ export class GLAgent implements Agent {
             code = availableCode.toString();
             console.log(`[GLAgent] Found available expense account code: ${code}`);
           } else {
-            // If all codes in range are taken, use a different range
-            code = '6000';
+            // If all codes in range are taken, overflow to equity range
+            code = '30000';
             console.log(`[GLAgent] All expense account codes in range ${startCode}-${endCode} are taken, using ${code}`);
           }
         } else {
@@ -324,9 +324,9 @@ export class GLAgent implements Agent {
         }
       } else if (accountType === 'liability' && expenseType === 'credit_card') {
         // Special handling for credit card liability accounts
-        // Use 2100-2199 range for credit card accounts
-        let startCode = 2100;
-        let endCode = 2199;
+        // Use 20000-29999 range for credit card accounts
+        let startCode = 20000;
+        let endCode = 29999;
         let availableCode = null;
         
         console.log(`[GLAgent] Finding code for credit card liability account`);
@@ -358,8 +358,8 @@ export class GLAgent implements Agent {
             code = availableCode.toString();
             console.log(`[GLAgent] Found available credit card account code: ${code}`);
           } else {
-            // If all codes in range are taken, use a different range
-            code = '2200';
+            // If all codes in range are taken, overflow to equity range
+            code = '30000';
             console.log(`[GLAgent] All credit card account codes in range ${startCode}-${endCode} are taken, using ${code}`);
           }
         } else {
@@ -368,35 +368,65 @@ export class GLAgent implements Agent {
           console.log(`[GLAgent] No existing credit card accounts, using code: ${code}`);
         }
       } else {
-        // For other account types, generate a code based on the type
-        // This is a simplified approach - in a real system, you'd have more logic here
-        const typeCodeMap: Record<string, string> = {
-          'asset': '1000',
-          'liability': '2000',
-          'equity': '3000',
-          'revenue': '4000',
-          'expense': '5000'
+        // For other account types, use comprehensive range logic
+        const typeCodeRanges: Record<string, { start: number, end: number }> = {
+          'asset': { start: 10000, end: 19999 },
+          'liability': { start: 20000, end: 29999 },
+          'equity': { start: 30000, end: 39999 },
+          'revenue': { start: 40000, end: 49999 },
+          'expense': { start: 50000, end: 59999 }
         };
         
-        code = typeCodeMap[accountType.toLowerCase()] || '9000';
-        console.log(`[GLAgent] Using default code for ${accountType}: ${code}`);
+        const range = typeCodeRanges[accountType.toLowerCase()];
+        if (range) {
+          // Find an available code in the appropriate range
+          const query = `
+            SELECT code FROM accounts 
+            WHERE LOWER(account_type) = '${accountType.toLowerCase()}' AND code ~ '^[0-9]+$'
+            AND CAST(code AS INTEGER) BETWEEN ${range.start} AND ${range.end}
+            ORDER BY CAST(code AS INTEGER) ASC
+          `;
+          
+          const result = await sql.query(query);
+          let availableCode = null;
+          
+          if (result.rows.length > 0) {
+            // Convert to array of integers for easier processing
+            const existingCodes = result.rows.map(row => parseInt(row.code));
+            
+            // Find the first available code in the range
+            for (let i = range.start; i <= range.end; i++) {
+              if (!existingCodes.includes(i)) {
+                availableCode = i;
+                break;
+              }
+            }
+          } else {
+            // No existing accounts of this type, start at the beginning of the range
+            availableCode = range.start;
+          }
+          
+          code = availableCode ? availableCode.toString() : range.start.toString();
+          console.log(`[GLAgent] Using code for ${accountType}: ${code}`);
+        } else {
+          // Fallback for unknown account types
+          code = '90000';
+          console.log(`[GLAgent] Using fallback code for unknown account type ${accountType}: ${code}`);
+        }
       }
       
-      // Create notes from the description if available
+      // Enhanced notes generation - create detailed, purpose-driven notes
       let notes = '';
       
       if (description) {
         // Use the explicit description if provided (e.g., from CreditCardAgent)
         notes = description;
-      } else if (expenseDescription) {
-        // Fall back to expense description if available
-        notes = `Account created for: ${expenseDescription}${expenseType ? ` (${expenseType})` : ''}`;
       } else {
-        // Default note
-        notes = `Account created by ${message.sender} agent`;
+        // Generate enhanced notes based on account type and name patterns
+        notes = generateEnhancedAccountNotes(name, accountType, expenseDescription, expenseType);
       }
       
-      console.log(`[GLAgent] Using notes: ${notes}`);
+      console.log(`[GLAgent] Using enhanced notes: ${notes}`);
       
       // Create the GL account with optional starting balance
       const result = await createGLAccount(
@@ -1571,8 +1601,8 @@ Make sure the journal entry is valid - debits must equal credits. Every line mus
             (SELECT SUM(credit) FROM journal_lines WHERE journal_id = j.id), 
             0
           )) as total_credits,
-          MIN(j.date) as earliest_date,
-          MAX(j.date) as latest_date,
+          MIN(j.date) as earliestDate,
+          MAX(j.date) as latestDate,
           COUNT(DISTINCT journal_type) as journal_type_count,
           ARRAY_AGG(DISTINCT journal_type) as journal_types,
           ARRAY_AGG(j.id) as journal_ids
@@ -1611,8 +1641,8 @@ Make sure the journal entry is valid - debits must equal credits. Every line mus
           totalCount: parseInt(result.rows[0]?.total_count) || 0,
           totalDebits: parseFloat(result.rows[0]?.total_debits) || 0,
           totalCredits: parseFloat(result.rows[0]?.total_credits) || 0,
-          earliestDate: result.rows[0]?.earliest_date,
-          latestDate: result.rows[0]?.latest_date,
+          earliestDate: result.rows[0]?.earliestDate,
+          latestDate: result.rows[0]?.latestDate,
           journalTypes: result.rows[0]?.journal_types || [],
           averageAmount: parseInt(result.rows[0]?.total_count) > 0 
             ? (parseFloat(result.rows[0]?.total_debits) / parseInt(result.rows[0]?.total_count)).toFixed(2) 
@@ -1982,13 +2012,13 @@ First explain the journal entry you're creating with a clear explanation of why 
             SELECT file_path, file_url FROM journal_attachments 
             WHERE id = ${attachmentId} AND journal_id = ${journalId}
           `;
-
+          
           // Delete from database first
           await sql`
             DELETE FROM journal_attachments 
             WHERE id = ${attachmentId} AND journal_id = ${journalId}
           `;
-
+          
           // Try to delete from storage if file_path exists
           if (filePathRows.length > 0 && filePathRows[0].file_path) {
             try {
@@ -2359,4 +2389,156 @@ First explain the journal entry you're creating with a clear explanation of why 
       };
     }
   }
+}
+
+// Helper function to generate enhanced account notes
+function generateEnhancedAccountNotes(name: string, accountType: string, expenseDescription?: string, expenseType?: string): string {
+  const lowerName = name.toLowerCase();
+  const baseNote = `This ${accountType.toLowerCase()} account tracks`;
+  
+  // Asset account notes
+  if (accountType === 'Asset') {
+    if (lowerName.includes('cash') || lowerName.includes('checking') || lowerName.includes('savings')) {
+      return `${baseNote} cash and cash equivalents for ${name}. Used to record deposits, withdrawals, and cash transactions.`;
+    }
+    if (lowerName.includes('receivable') || lowerName.includes('ar')) {
+      return `${baseNote} amounts owed to the company by customers for ${name}. Used to record sales on credit and customer payments.`;
+    }
+    if (lowerName.includes('inventory')) {
+      return `${baseNote} inventory and stock for ${name}. Used to record purchases, sales, and inventory adjustments.`;
+    }
+    if (lowerName.includes('equipment') || lowerName.includes('asset') || lowerName.includes('property')) {
+      return `${baseNote} fixed assets for ${name}. Used to record asset purchases, depreciation, and disposals.`;
+    }
+    if (lowerName.includes('prepaid')) {
+      return `${baseNote} prepaid expenses for ${name}. Used to record advance payments and their amortization.`;
+    }
+    return `${baseNote} asset values for ${name}. Used to record asset transactions and value changes.`;
+  }
+  
+  // Liability account notes
+  if (accountType === 'Liability') {
+    if (lowerName.includes('credit card') || lowerName.includes('amex') || lowerName.includes('visa') || lowerName.includes('mastercard')) {
+      return `${baseNote} credit card balances for ${name}. Used to categorize and monitor credit card purchases and fees.`;
+    }
+    
+    if (lowerName.includes('payable') || lowerName.includes('ap')) {
+      return `${baseNote} amounts owed to vendors for ${name}. Used to record bills received and payments made.`;
+    }
+    
+    if (lowerName.includes('loan') || lowerName.includes('debt') || lowerName.includes('mortgage')) {
+      return `${baseNote} loan balances for ${name}. Used to record loan proceeds, payments, and interest.`;
+    }
+    
+    if (lowerName.includes('tax') || lowerName.includes('payroll')) {
+      return `${baseNote} tax and payroll liabilities for ${name}. Used to record withholdings and tax obligations.`;
+    }
+    
+    if (lowerName.includes('accrued')) {
+      return `${baseNote} accrued expenses for ${name}. Used to record expenses incurred but not yet paid.`;
+    }
+    
+    return `${baseNote} liability obligations for ${name}. Used to record debts and amounts owed.`;
+  }
+  
+  // Equity account notes
+  if (accountType === 'Equity') {
+    if (lowerName.includes('capital') || lowerName.includes('investment')) {
+      return `${baseNote} owner capital and investments for ${name}. Used to record capital contributions and withdrawals.`;
+    }
+    
+    if (lowerName.includes('retained') || lowerName.includes('earnings')) {
+      return `${baseNote} retained earnings for ${name}. Used to record accumulated profits and losses.`;
+    }
+    
+    if (lowerName.includes('draw') || lowerName.includes('distribution')) {
+      return `${baseNote} owner draws and distributions for ${name}. Used to record money taken out by owners.`;
+    }
+    
+    return `${baseNote} equity balances for ${name}. Used to record ownership interests and equity changes.`;
+  }
+  
+  // Revenue account notes
+  if (accountType === 'Revenue') {
+    if (lowerName.includes('sales') || lowerName.includes('revenue')) {
+      return `${baseNote} sales revenue for ${name}. Used to record income from primary business operations.`;
+    }
+    
+    if (lowerName.includes('service') || lowerName.includes('consulting')) {
+      return `${baseNote} service revenue for ${name}. Used to record income from services provided.`;
+    }
+    
+    if (lowerName.includes('interest') || lowerName.includes('investment')) {
+      return `${baseNote} investment and interest income for ${name}. Used to record passive income sources.`;
+    }
+    
+    if (lowerName.includes('other') || lowerName.includes('misc')) {
+      return `${baseNote} miscellaneous income for ${name}. Used to record other revenue sources.`;
+    }
+    
+    return `${baseNote} income and revenue for ${name}. Used to record money earned from business activities.`;
+  }
+  
+  // Expense account notes with enhanced context
+  if (accountType === 'Expense') {
+    // Use expense type for more specific categorization
+    if (expenseType === 'credit_card') {
+      return `${baseNote} credit card expenses for ${name}. Used to categorize and monitor credit card purchases and fees.`;
+    }
+    
+    // Pattern-based expense categorization
+    if (lowerName.includes('office') || lowerName.includes('supplies')) {
+      return `${baseNote} office and supply costs for ${name}. Used to record purchases of materials and supplies.`;
+    }
+    
+    if (lowerName.includes('travel') || lowerName.includes('meal') || lowerName.includes('entertainment')) {
+      return `${baseNote} travel and entertainment expenses for ${name}. Used to record business travel and meal costs.`;
+    }
+    
+    if (lowerName.includes('professional') || lowerName.includes('legal') || lowerName.includes('accounting')) {
+      return `${baseNote} professional service fees for ${name}. Used to record legal, accounting, and consulting expenses.`;
+    }
+    
+    if (lowerName.includes('marketing') || lowerName.includes('advertising')) {
+      return `${baseNote} marketing and advertising costs for ${name}. Used to record promotional and marketing expenses.`;
+    }
+    
+    if (lowerName.includes('rent') || lowerName.includes('lease')) {
+      return `${baseNote} rent and lease payments for ${name}. Used to record facility and equipment rental costs.`;
+    }
+    
+    if (lowerName.includes('utility') || lowerName.includes('phone') || lowerName.includes('internet')) {
+      return `${baseNote} utility and communication expenses for ${name}. Used to record monthly service costs.`;
+    }
+    
+    if (lowerName.includes('insurance')) {
+      return `${baseNote} insurance premiums for ${name}. Used to record business insurance costs.`;
+    }
+    
+    if (lowerName.includes('depreciation')) {
+      return `${baseNote} depreciation expenses for ${name}. Used to record asset depreciation over time.`;
+    }
+    
+    if (lowerName.includes('interest')) {
+      return `${baseNote} interest expenses for ${name}. Used to record loan and credit interest costs.`;
+    }
+    
+    if (lowerName.includes('tax')) {
+      return `${baseNote} tax expenses for ${name}. Used to record business tax obligations.`;
+    }
+    
+    if (lowerName.includes('misc') || lowerName.includes('other') || lowerName.includes('general')) {
+      return `${baseNote} miscellaneous business expenses for ${name}. Used to categorize and monitor general business costs.`;
+    }
+    
+    // Use expense description if available
+    if (expenseDescription) {
+      return `${baseNote} expenses for ${expenseDescription}. Used to categorize and monitor related business costs.`;
+    }
+    
+    return `${baseNote} business expenses for ${name}. Used to categorize and monitor operational costs.`;
+  }
+  
+  // Default fallback
+  return `${baseNote} transactions for ${name}. Used to record and monitor related financial activities.`;
 }

@@ -1,4 +1,5 @@
 import { sql } from "@vercel/postgres";
+import { generateCreditCardAccountCode } from "./creditCardAccountCodeFix";
 import {
   sendAgentMessage,
   respondToAgentMessage,
@@ -55,7 +56,6 @@ import {
 } from './creditCardBillCreditIntegration';
 import { CreditCardTransaction } from "../../types/creditCard";
 import { getEnhancedColumnsCheck, buildEnhancedJournalColumns } from './creditCardAgentPatch';
-import { extractLastFourDigitsWithAI, extractLastFourDigitsFallback } from './aiLastFourDigitsExtractor';
 
 /**
  * Represents credit card statement information extracted from documents
@@ -1724,7 +1724,7 @@ export class CreditCardAgent implements Agent {
       const accountType = "liability";
 
       // Find an appropriate account code
-      // Typically credit card liabilities are in the 20000-29999 range
+      // Typically credit card liabilities are in the 2100-2199 range
       const { rows: existingCreditCardAccounts } = await sql`
         SELECT code FROM accounts 
         WHERE account_type = ${accountType} 
@@ -1734,8 +1734,8 @@ export class CreditCardAgent implements Agent {
         LIMIT 1
       `;
 
-      // Start with 20000 if no existing credit card accounts, or increment from the highest existing code
-      let accountCode = "20000";
+      // Start with 2100 if no existing credit card accounts, or increment from the highest existing code
+      let accountCode = "2100";
       if (existingCreditCardAccounts.length > 0) {
         const highestCode = parseInt(existingCreditCardAccounts[0].code);
         accountCode = (highestCode + 1).toString();
@@ -3418,6 +3418,10 @@ Do not include any other text outside of the JSON object.`;
         return accountId;
       }
 
+      // Generate a unique account code
+      const accountCode = `EXP${Math.floor(1000 + Math.random() * 9000)}`;
+
+
       // If no miscellaneous expense account, look for any general expenses account
       const generalExpenseResult = await sql`
         SELECT id FROM accounts 
@@ -3435,6 +3439,10 @@ Do not include any other text outside of the JSON object.`;
         return accountId;
       }
 
+      // Generate a unique account code
+      const accountCode = `EXP${Math.floor(1000 + Math.random() * 9000)}`;
+
+
       // If still no account, look for ANY expense account as a fallback
       const anyExpenseResult = await sql`
         SELECT id FROM accounts 
@@ -3450,6 +3458,10 @@ Do not include any other text outside of the JSON object.`;
         );
         return accountId;
       }
+
+      // Generate a unique account code
+      const accountCode = `EXP${Math.floor(1000 + Math.random() * 9000)}`;
+
 
       // If no expense account is found, try to create a default one via GL agent
       try {
@@ -3496,7 +3508,7 @@ Do not include any other text outside of the JSON object.`;
               `[CreditCardAgent] Successfully created expense account with ID: ${accountId}`
             );
             return accountId;
-          }
+      }
         }
 
         // If we couldn't extract the account ID, try to create it directly
@@ -3548,6 +3560,8 @@ Do not include any other text outside of the JSON object.`;
 
       // Generate a unique account code
       const accountCode = `EXP${Math.floor(1000 + Math.random() * 9000)}`;
+
+
       const timestamp = new Date().toISOString();
 
       console.log(
@@ -3557,8 +3571,8 @@ Do not include any other text outside of the JSON object.`;
       // Create the account directly in the database
       // Note: Using lowercase 'expense' to be consistent with other account types in the database
       const result = await sql`
-        INSERT INTO accounts (name, code, account_type, user_id, is_active) 
-        VALUES ('Miscellaneous Expense', ${accountCode}, 'expense', ${
+        INSERT INTO accounts (name, code, account_type, notes, user_id, is_active) 
+        VALUES ('Miscellaneous Expense', ${accountCode}, 'expense', 'This expense account tracks miscellaneous business expenses. Used to categorize and monitor general business costs.', ${
         context.userId || null
       }, true) 
         RETURNING id
@@ -3597,6 +3611,10 @@ Do not include any other text outside of the JSON object.`;
 
         return accountId;
       }
+
+      // Generate a unique account code
+      const accountCode = `EXP${Math.floor(1000 + Math.random() * 9000)}`;
+
 
       console.log(
         `[CreditCardAgent] [${timestamp}] Failed to create default expense account directly`
@@ -3656,8 +3674,7 @@ Do not include any other text outside of the JSON object.`;
 
       // Try to create the account directly first
       try {
-        // Generate a unique account code
-        const accountCode = `${accountCategory
+        const accountCode = `${(accountCategory || "ACC")
           .substring(0, 3)
           .toUpperCase()}${Math.floor(1000 + Math.random() * 9000)}`;
         const timestamp = new Date().toISOString();
@@ -3667,8 +3684,7 @@ Do not include any other text outside of the JSON object.`;
         );
 
         const { rows: newAccountRows } = await sql`
-          INSERT INTO accounts (
-            name, code, account_type, user_id
+          INSERT INTO accounts (            name, code, account_type, user_id
           ) VALUES (
             ${accountNameOrDescription}, ${accountCode}, ${accountCategory}, ${
           context.userId || null
@@ -3851,17 +3867,14 @@ Do not include any other text outside of the JSON object.`;
         `[CreditCardAgent] Could not extract account ID from GL agent response, creating account directly`
       );
       try {
-        // Generate a unique account code
-        const accountCode = `${accountCategory
+        const accountCode = `${(accountCategory || "ACC")
           .substring(0, 3)
           .toUpperCase()}${Math.floor(1000 + Math.random() * 9000)}`;
         const timestamp = new Date().toISOString();
 
         console.log(
           `[CreditCardAgent] [${timestamp}] Last resort: Creating ${accountCategory} account directly: ${accountNameOrDescription}`
-        );
-
-        const { rows: lastResortRows } = await sql`
+        );        const { rows: lastResortRows } = await sql`
           INSERT INTO accounts (
             name, code, account_type, user_id, created_at, updated_at
           ) VALUES (
@@ -5025,45 +5038,56 @@ Output (just the brief description):`;
         };
       }
 
-      // AI-powered extraction of last four digits
+      // More robust extraction of last four digits
       let lastFourDigits = "unknown";
-      let extractionConfidence = "low";
-      
-      console.log(`[CreditCardAgent] [${timestamp}] Starting AI-powered last four digits extraction`);
-      
-      try {
-        // First try AI extraction
-        const aiResult = await extractLastFourDigitsWithAI(statementInfo);
-        
-        if (aiResult.lastFourDigits && aiResult.confidence !== 'low') {
-          lastFourDigits = aiResult.lastFourDigits;
-          extractionConfidence = aiResult.confidence;
-          console.log(
-            `[CreditCardAgent] [${timestamp}] AI extracted last four digits: ${lastFourDigits} (confidence: ${aiResult.confidence}, method: ${aiResult.extractionMethod})`
-          );
-        } else {
-          // Fallback to regex patterns
-          console.log(`[CreditCardAgent] [${timestamp}] AI extraction failed or low confidence, using fallback`);
-          const fallbackResult = extractLastFourDigitsFallback(statementInfo);
-          
-          if (fallbackResult.lastFourDigits) {
-            lastFourDigits = fallbackResult.lastFourDigits;
-            extractionConfidence = fallbackResult.confidence;
-            console.log(
-              `[CreditCardAgent] [${timestamp}] Fallback extracted last four digits: ${lastFourDigits} (confidence: ${fallbackResult.confidence}, method: ${fallbackResult.extractionMethod})`
-            );
+      if (statementInfo.lastFourDigits) {
+        lastFourDigits = statementInfo.lastFourDigits;
+        console.log(
+          `[CreditCardAgent] [${timestamp}] Using provided lastFourDigits from statement info: ${lastFourDigits}`
+        );
+      } else if (typeof statementInfo === "object" && statementInfo !== null) {
+        // Try to find last four digits in any field that might contain it
+        const statementStr = JSON.stringify(statementInfo);
+
+        // Special handling for American Express statement numbers
+        if (statementInfo.statementNumber) {
+          // For American Express statements with format XXXX-XXXXX1-92009
+          if (statementInfo.statementNumber.includes("XXXX-XXXXX")) {
+            // For American Express statements, the last four digits are often at the end of the statement number
+            const amexMatch =
+              statementInfo.statementNumber.match(/-([\d]{5})$/);
+            if (amexMatch && amexMatch[1]) {
+              // Use the last 4 digits of the 5-digit number at the end
+              lastFourDigits = amexMatch[1].slice(1);
+              console.log(
+                `[CreditCardAgent] [${timestamp}] Extracted last four digits from American Express statement number: ${lastFourDigits}`
+              );
+            }
           } else {
-            console.log(`[CreditCardAgent] [${timestamp}] Both AI and fallback extraction failed`);
+            // Try to extract last four from other statement number formats
+            const digitMatches = statementInfo.statementNumber.match(/\d+/g);
+            if (digitMatches && digitMatches.length > 0) {
+              // Use the last group of digits if it's 4 digits long
+              const lastDigitGroup = digitMatches[digitMatches.length - 1];
+              if (lastDigitGroup.length === 4) {
+                lastFourDigits = lastDigitGroup;
+                console.log(
+                  `[CreditCardAgent] [${timestamp}] Extracted last four digits from statement number: ${lastFourDigits}`
+                );
+              }
+            }
           }
         }
-      } catch (error) {
-        console.error(`[CreditCardAgent] [${timestamp}] Error in last four digits extraction:`, error);
-        
-        // Emergency fallback to simple extraction
-        if (statementInfo.lastFourDigits && /^\d{4}$/.test(statementInfo.lastFourDigits)) {
-          lastFourDigits = statementInfo.lastFourDigits;
-          extractionConfidence = "medium";
-          console.log(`[CreditCardAgent] [${timestamp}] Using provided lastFourDigits as emergency fallback: ${lastFourDigits}`);
+
+        // If we still don't have last four digits, try a generic pattern match
+        if (lastFourDigits === "unknown") {
+          const lastFourMatch = statementStr.match(/\b([\d]{4})\b/);
+          if (lastFourMatch && lastFourMatch[1]) {
+            lastFourDigits = lastFourMatch[1];
+            console.log(
+              `[CreditCardAgent] [${timestamp}] Extracted last four digits from statement JSON: ${lastFourDigits}`
+            );
+          }
         }
       }
 
@@ -5295,13 +5319,14 @@ Output (just the brief description):`;
         `[CreditCardAgent] GL Agent account creation failed, creating account directly in database`
       );
       try {
-        // Generate a unique account code
-        const accountCode = (20000 + Math.floor(Math.random() * 9999)).toString();
+        const accountCode = await generateCreditCardAccountCode();
 
+        // Generate notes for the account
+        const accountNotes = `This liability account tracks credit card balances for ${finalAccountName}. Used to record purchases, payments, and interest charges.`;
         // Create the account directly
         const insertResult = await sql`
-          INSERT INTO accounts (name, code, account_type, user_id, is_active) 
-          VALUES (${finalAccountName}, ${accountCode}, 'credit_card', ${
+          INSERT INTO accounts (name, code, account_type, notes, user_id, is_active) 
+          VALUES (${finalAccountName}, ${accountCode}, 'credit_card', ${accountNotes}, ${
           context.userId || null
         }, true) 
           RETURNING id
@@ -6440,34 +6465,19 @@ Important guidelines:
             );
             extractedInfo.lastFourDigits = null;
 
-            // AI-powered extraction of last four digits from statement number
-            try {
-              const aiResult = await extractLastFourDigitsWithAI({ statementNumber: extractedInfo.statementNumber });
-              
-              if (aiResult.lastFourDigits && aiResult.confidence !== 'low') {
-                extractedInfo.lastFourDigits = aiResult.lastFourDigits;
-                console.log(
-                  `[CreditCardAgent] AI extracted last four digits from statement number: ${aiResult.lastFourDigits} (confidence: ${aiResult.confidence})`
-                );
-              } else {
-                // Fallback to simple extraction
-                const fallbackResult = extractLastFourDigitsFallback({ statementNumber: extractedInfo.statementNumber });
-                if (fallbackResult.lastFourDigits) {
-                  extractedInfo.lastFourDigits = fallbackResult.lastFourDigits;
-                  console.log(
-                    `[CreditCardAgent] Fallback extracted last four digits: ${fallbackResult.lastFourDigits}`
-                  );
-                }
-              }
-            } catch (error) {
-              console.error('[CreditCardAgent] Error in AI last four digits extraction:', error);
-              // Keep the original simple extraction as final fallback
-              const digits = extractedInfo.statementNumber.replace(/[^0-9]/g, "");
+            // Try to extract last four digits from the statement number if available
+            if (extractedInfo.statementNumber) {
+              const digits = extractedInfo.statementNumber.replace(
+                /[^0-9]/g,
+                ""
+              );
               if (digits.length >= 4) {
                 const lastFour = digits.slice(-4);
                 if (/^\d{4}$/.test(lastFour)) {
                   extractedInfo.lastFourDigits = lastFour;
-                  console.log(`[CreditCardAgent] Emergency fallback extracted: ${lastFour}`);
+                  console.log(
+                    `[CreditCardAgent] Extracted last four digits from statement number: ${lastFour}`
+                  );
                 }
               }
             }
