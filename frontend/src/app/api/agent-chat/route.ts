@@ -6,6 +6,7 @@ import { APAgent } from '@/lib/agents/apAgent';
 import { InvoiceAgent } from '@/lib/agents/invoiceAgent';
 import { ReconciliationAgent } from '@/lib/agents/reconciliationAgent';
 import { CreditCardAgent } from '@/lib/agents/creditCardAgent';
+import { ReceiptAgent } from '@/lib/agents/ReceiptAgent';
 import { logAuditEvent } from '@/lib/auditLogger';
 import Anthropic from '@anthropic-ai/sdk';
 import { isExcelFile, parseExcelToText } from '@/lib/excelParser';
@@ -49,6 +50,10 @@ orchestrator.registerAgent(reconciliationAgent);
 // Register the Credit Card Agent
 const creditCardAgent = new CreditCardAgent();
 orchestrator.registerAgent(creditCardAgent);
+
+// Register the Receipt Agent
+const receiptAgent = new ReceiptAgent();
+orchestrator.registerAgent(receiptAgent);
 
 /**
  * API Route: /api/agent-chat
@@ -94,10 +99,22 @@ export async function POST(req: NextRequest) {
     
     // Extract fields
     query = body.query || '';
-    conversationId = body.conversationId || `user-${userId}-${Date.now()}`;
-    messages = Array.isArray(body.messages) ? body.messages : [];
-    documentContext = body.documentContext || null;
+    conversationId = body.conversationId || `conv-${Date.now()}`;
+    messages = body.messages;
+    documentContext = body.documentContext;
     attachments = body.attachments;
+    
+    console.log(`[Agent-Chat API] Request details:`);
+    console.log(`[Agent-Chat API] - Query: "${query}"`);
+    console.log(`[Agent-Chat API] - ConversationId: ${conversationId}`);
+    console.log(`[Agent-Chat API] - Has attachments: ${!!attachments && attachments.length > 0}`);
+    if (attachments && attachments.length > 0) {
+      console.log(`[Agent-Chat API] - Attachment details: ${attachments[0].name} (${attachments[0].type})`);
+    }
+    console.log(`[Agent-Chat API] - Has documentContext: ${!!documentContext}`);
+    if (documentContext) {
+      console.log(`[Agent-Chat API] - DocumentContext type: ${documentContext.type}`);
+    }
     
     if (!query.trim() && !attachments?.length) {
       return NextResponse.json(
@@ -369,9 +386,12 @@ export async function POST(req: NextRequest) {
               conversationId: conversationId,
               previousMessages: enhancedMessages,
               documentContext: {
-                type: 'pdf',
+                type: attachments[0].type, // Use actual MIME type like 'image/jpeg'
                 name: attachments[0].name,
-                content: attachments[0].base64Data
+                content: attachments[0].base64Data,
+                metadata: {
+                  mimeType: attachments[0].type
+                }
               },
               additionalContext: {
                 forceTransactionProcessing: true,
@@ -410,9 +430,12 @@ export async function POST(req: NextRequest) {
             conversationId,
             previousMessages: enhancedMessages,
             documentContext: {
-              type: 'pdf',
+              type: attachments[0].type, // Use actual MIME type like 'image/jpeg'
               name: attachments[0].name,
-              content: attachments[0].base64Data
+              content: attachments[0].base64Data,
+              metadata: {
+                mimeType: attachments[0].type
+              }
             },
             token: authorizationHeader ? authorizationHeader.split('Bearer ')[1] : ''
           });
@@ -497,7 +520,35 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(result);
       }
     } else if (attachments && attachments.length > 0) {
-      // Process attachments with Claude's API
+      // Check if this is a receipt processing request
+      const isReceiptRequest = query.toLowerCase().includes('receipt') || 
+                              query.toLowerCase().includes('process') ||
+                              query.toLowerCase().includes('analyze') ||
+                              query.toLowerCase().includes('extract');
+      
+      // If it's a receipt-related query with image attachment, route to orchestrator
+      if (isReceiptRequest && attachments.some(att => att.type.startsWith('image/'))) {
+        console.log(`[Agent-Chat API] Receipt query with image detected, routing to orchestrator`);
+        result = await orchestrator.processRequest({
+          userId,
+          query,
+          conversationId,
+          previousMessages: enhancedMessages,
+          documentContext: {
+            type: attachments[0].type, // Use actual MIME type like 'image/jpeg'
+            name: attachments[0].name,
+            content: attachments[0].base64Data,
+            metadata: {
+              mimeType: attachments[0].type
+            }
+          },
+          token: authorizationHeader ? authorizationHeader.split('Bearer ')[1] : ''
+        });
+        
+        return NextResponse.json(result);
+      }
+      
+      // Process other attachments with Claude's API
       try {
         // Configure Anthropic client
         const anthropic = new Anthropic({
@@ -549,7 +600,7 @@ export async function POST(req: NextRequest) {
                   conversationId: conversationId,
                   previousMessages: enhancedMessages,
                   documentContext: {
-                    type: 'pdf',
+                    type: attachments[0].type, // Use actual MIME type like 'image/jpeg'
                     name: attachment.name,
                     content: attachment.base64Data
                   },
@@ -605,7 +656,7 @@ export async function POST(req: NextRequest) {
             // For images, we can use document vision
             console.log(`[Agent-Chat API] Processing as image: ${attachment.name}`);
             contentBlocks.push({
-              type: "document",
+              type: "image",
               source: {
                 type: "base64",
                 media_type: attachment.type,

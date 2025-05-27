@@ -1,6 +1,8 @@
 {
   "projects": {
-    "default": "web-chat-app-fa7f0"
+    "default": "expense-ai-production",
+    "development": "web-chat-app-fa7f0",
+    "production": "expense-ai-production"
   },
   "targets": {},
   "etags": {

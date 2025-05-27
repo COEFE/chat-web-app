@@ -1,4 +1,4 @@
-import { sql } from '@vercel/postgres';
+import { sql } from "@vercel/postgres";
 
 /**
  * Interface for Bill objects
@@ -19,6 +19,8 @@ export interface Bill {
   updated_at?: string;
   is_deleted?: boolean;
   deleted_at?: string;
+  journal_type?: string; // Add journal_type to the Bill interface
+  journal_id?: number; // Add journal_id to track associated journal entry
 }
 
 /**
@@ -76,7 +78,7 @@ export interface BillRefund {
  * Get a list of bills with optional filtering and pagination
  */
 export interface BillWithVendor extends Bill {
-  vendor_name?: string; 
+  vendor_name?: string;
   ap_account_name?: string;
 }
 
@@ -89,62 +91,64 @@ export async function getBills(
   status?: string | string[],
   includeDeleted: boolean = false,
   userId?: string
-): Promise<{ bills: Bill[], total: number }> {
+): Promise<{ bills: Bill[]; total: number }> {
   try {
     // Build the query dynamically based on filters
-    let whereClause = includeDeleted ? '' : 'WHERE b.is_deleted = false';
+    let whereClause = includeDeleted ? "" : "WHERE b.is_deleted = false";
     const values: any[] = [];
     let paramIndex = 1;
-    
+
     if (vendorId) {
-      whereClause += whereClause ? ' AND' : ' WHERE';
+      whereClause += whereClause ? " AND" : " WHERE";
       whereClause += ` vendor_id = $${paramIndex++}`;
       values.push(vendorId);
     }
-    
+
     if (startDate) {
-      whereClause += whereClause ? ' AND' : ' WHERE';
+      whereClause += whereClause ? " AND" : " WHERE";
       whereClause += ` bill_date >= $${paramIndex++}`;
       values.push(startDate);
     }
-    
+
     if (endDate) {
-      whereClause += whereClause ? ' AND' : ' WHERE';
+      whereClause += whereClause ? " AND" : " WHERE";
       whereClause += ` bill_date <= $${paramIndex++}`;
       values.push(endDate);
     }
-    
+
     if (status) {
       if (Array.isArray(status) && status.length > 0) {
         // Handle multiple status values
-        whereClause += whereClause ? ' AND' : ' WHERE';
-        const statusPlaceholders = status.map((_, i) => `$${paramIndex + i}`).join(', ');
+        whereClause += whereClause ? " AND" : " WHERE";
+        const statusPlaceholders = status
+          .map((_, i) => `$${paramIndex + i}`)
+          .join(", ");
         whereClause += ` status IN (${statusPlaceholders})`;
         values.push(...status);
         paramIndex += status.length;
-      } else if (typeof status === 'string') {
+      } else if (typeof status === "string") {
         // Handle single status value
-        whereClause += whereClause ? ' AND' : ' WHERE';
+        whereClause += whereClause ? " AND" : " WHERE";
         whereClause += ` status = $${paramIndex++}`;
         values.push(status);
       }
     }
-    
+
     // Filter by user_id if provided (for proper data isolation)
     if (userId) {
-      whereClause += whereClause ? ' AND' : ' WHERE';
+      whereClause += whereClause ? " AND" : " WHERE";
       whereClause += ` b.user_id = $${paramIndex++}`;
       values.push(userId);
     }
-    
+
     // Get total count for pagination
     const countQuery = `
       SELECT COUNT(*) FROM bills b ${whereClause}
     `;
-    
+
     const countResult = await sql.query(countQuery, values);
     const total = parseInt(countResult.rows[0].count);
-    
+
     // Get bills with pagination
     const offset = (page - 1) * limit;
     const billsQuery = `
@@ -159,20 +163,20 @@ export async function getBills(
       ORDER BY b.bill_date DESC, b.id DESC
       LIMIT $${paramIndex++} OFFSET $${paramIndex++}
     `;
-    
+
     values.push(limit);
     values.push(offset);
-    
+
     const billsResult = await sql.query(billsQuery, values);
-    
+
     const bills = billsResult.rows;
-    
+
     return {
       bills,
-      total
+      total,
     };
   } catch (error) {
-    console.error('Error getting bills:', error);
+    console.error("Error getting bills:", error);
     throw error;
   }
 }
@@ -187,15 +191,20 @@ export async function getBillStatuses(): Promise<string[]> {
     `);
     return result.rows.map((row: any) => row.status);
   } catch (error) {
-    console.error('Error getting bill statuses:', error);
-    return ['Open', 'Partially Paid', 'Paid', 'Overdue'];
+    console.error("Error getting bill statuses:", error);
+    return ["Open", "Partially Paid", "Paid", "Overdue"];
   }
 }
 
 /**
  * Get a specific bill by ID including its line items
  */
-export async function getBill(id: number, includeLines: boolean = true, includePayments: boolean = true, userId?: string): Promise<Bill | null> {
+export async function getBill(
+  id: number,
+  includeLines: boolean = true,
+  includePayments: boolean = true,
+  userId?: string
+): Promise<Bill | null> {
   try {
     // Get the bill
     let billQuery = `
@@ -208,23 +217,26 @@ export async function getBill(id: number, includeLines: boolean = true, includeP
       LEFT JOIN accounts a ON b.ap_account_id = a.id
       WHERE b.id = $1 AND b.is_deleted = false
     `;
-    
+
     // Add user_id filter if provided (for proper data isolation)
     if (userId) {
-      billQuery = billQuery.replace('WHERE b.id = $1', 'WHERE b.id = $1 AND b.user_id = $2');
+      billQuery = billQuery.replace(
+        "WHERE b.id = $1",
+        "WHERE b.id = $1 AND b.user_id = $2"
+      );
     }
-    
+
     const queryParams: (number | string)[] = [id];
     if (userId) queryParams.push(userId);
-    
+
     const billResult = await sql.query(billQuery, queryParams);
-    
+
     if (billResult.rows.length === 0) {
       return null;
     }
-    
+
     const bill = billResult.rows[0];
-    
+
     // Get bill lines if requested
     if (includeLines) {
       const linesQuery = `
@@ -236,14 +248,14 @@ export async function getBill(id: number, includeLines: boolean = true, includeP
         WHERE bl.bill_id = $1
         ORDER BY bl.id
       `;
-      
+
       const linesResult = await sql.query(linesQuery, [id]);
-      console.log('Bill lines raw result:', linesResult.rows);
-      
+      console.log("Bill lines raw result:", linesResult.rows);
+
       // Attach lines to bill object
       bill.lines = linesResult.rows;
     }
-    
+
     // Get bill payments if requested
     if (includePayments) {
       // Check if bill_payments table exists
@@ -253,7 +265,7 @@ export async function getBill(id: number, includeLines: boolean = true, includeP
           WHERE table_name = 'bill_payments'
         ) as exists;
       `;
-      
+
       if (tableCheck.rows[0].exists) {
         const paymentsQuery = `
           SELECT 
@@ -264,18 +276,18 @@ export async function getBill(id: number, includeLines: boolean = true, includeP
           WHERE bp.bill_id = $1
           ORDER BY bp.payment_date, bp.id
         `;
-        
+
         const paymentsResult = await sql.query(paymentsQuery, [id]);
-        
+
         // Attach payments to bill object
         bill.payments = paymentsResult.rows;
       }
     }
-    
-    console.log('Bill object with lines:', bill);
+
+    console.log("Bill object with lines:", bill);
     return bill;
   } catch (error) {
-    console.error('Error getting bill:', error);
+    console.error("Error getting bill:", error);
     throw error;
   }
 }
@@ -283,10 +295,14 @@ export async function getBill(id: number, includeLines: boolean = true, includeP
 /**
  * Create a new bill with its line items
  */
-export async function createBill(bill: Bill, lines: BillLine[], userId?: string): Promise<Bill> {
+export async function createBill(
+  bill: Bill,
+  lines: BillLine[],
+  userId?: string
+): Promise<Bill> {
   // Start a transaction
-  await sql.query('BEGIN');
-  
+  await sql.query("BEGIN");
+
   try {
     // Insert the bill
     const billQuery = `
@@ -305,21 +321,31 @@ export async function createBill(bill: Bill, lines: BillLine[], userId?: string)
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *
     `;
-    
+
     // Calculate total from line items
-    const totalAmount = lines.reduce((sum, line) => sum + parseFloat(line.amount), 0);
-    
+    const totalAmount = lines.reduce(
+      (sum, line) => sum + parseFloat(line.amount),
+      0
+    );
+
     // Determine the bill status - use the provided status or default to 'Open'
     // This ensures we use the same status value for both the bill and journal entry
-    const billStatus = bill.status || 'Open';
+    const billStatus = bill.status || "Open";
     console.log(`[Bill Create] Creating bill with status: ${billStatus}`);
-    
+
+    // Determine journal type - use AI-generated type or fallback to 'AP'
+    const journalType = bill.journal_type || "AP";
+    console.log(`[Bill Create] Using journal type: ${journalType}`);
+
     // For credit card transactions that are already paid, we need to set amount_paid correctly
     // If the bill status is 'Paid', set amount_paid to the total amount
     // Otherwise, use the provided amount_paid or default to 0
-    const amountPaid = billStatus === 'Paid' ? totalAmount : (bill.amount_paid || 0);
-    console.log(`[Bill Create] Setting amount_paid to ${amountPaid} for bill with status: ${billStatus}`);
-    
+    const amountPaid =
+      billStatus === "Paid" ? totalAmount : bill.amount_paid || 0;
+    console.log(
+      `[Bill Create] Setting amount_paid to ${amountPaid} for bill with status: ${billStatus}`
+    );
+
     const billResult = await sql.query(billQuery, [
       bill.vendor_id,
       bill.bill_number || null,
@@ -331,11 +357,11 @@ export async function createBill(bill: Bill, lines: BillLine[], userId?: string)
       bill.terms || null,
       bill.memo || null,
       bill.ap_account_id,
-      userId || null // Include user_id for proper data isolation
+      userId || null, // Include user_id for proper data isolation
     ]);
-    
+
     const newBill = billResult.rows[0];
-    
+
     // Insert the bill lines
     for (const line of lines) {
       const lineQuery = `
@@ -352,7 +378,7 @@ export async function createBill(bill: Bill, lines: BillLine[], userId?: string)
           user_id
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       `;
-      
+
       await sql.query(lineQuery, [
         newBill.id,
         line.expense_account_id,
@@ -363,26 +389,30 @@ export async function createBill(bill: Bill, lines: BillLine[], userId?: string)
         line.category || null,
         line.location || null,
         line.funder || null,
-        userId || null // Include user_id for proper data isolation
+        userId || null, // Include user_id for proper data isolation
       ]);
     }
-    
+
     // Only create a journal entry if the bill status is Open
-    if (billStatus === 'Open') {
+    if (billStatus === "Open") {
       try {
-        console.log(`[Bill Create] Creating journal entry for new bill ${newBill.id} with Open status`);
-        
+        console.log(
+          `[Bill Create] Creating journal entry for new bill ${newBill.id} with Open status`
+        );
+
         // Check if journals table has transaction_date or date column
         const schemaCheck = await sql.query(`
           SELECT 
             EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transaction_date') as has_transaction_date,
             EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journal_lines' AND column_name = 'line_number') as has_line_number
         `);
-        
+
         const schema = schemaCheck.rows[0];
-        const dateColumnName = schema.has_transaction_date ? 'transaction_date' : 'date';
+        const dateColumnName = schema.has_transaction_date
+          ? "transaction_date"
+          : "date";
         const hasLineNumber = schema.has_line_number;
-        
+
         // Create journal entry header
         const journalInsertQuery = `
           INSERT INTO journals (
@@ -391,99 +421,124 @@ export async function createBill(bill: Bill, lines: BillLine[], userId?: string)
           VALUES ($1, $2, $3, $4, $5, $6, $7)
           RETURNING id
         `;
-        
+
         const billNumber = newBill.bill_number || `Bill #${newBill.id}`;
         const memo = `${billNumber} - ${newBill.vendor_id}`;
-        
+
         const journalResult = await sql.query(journalInsertQuery, [
           bill.bill_date,
           memo,
-          'AP',           // journal_type for Accounts Payable
-          true,           // is_posted = true for Open bills
-          'system',       // created_by
-          'bill_create',  // source
-          userId          // user_id for proper data isolation
+          journalType, // Use the determined journal type
+          true, // is_posted = true for Open bills
+          "system", // created_by
+          "bill_create", // source
+          userId, // user_id for proper data isolation
         ]);
-        
+
         const journalId = journalResult.rows[0].id;
-        console.log(`[Bill Create] Created journal header with ID: ${journalId}`);
-        
+        console.log(
+          `[Bill Create] Created journal header with ID: ${journalId}`
+        );
+
+        // Set the journal_id on the bill object for return
+        newBill.journal_id = journalId;
+
         // Get AP account name for better description
-        const apAccountResult = await sql.query(`SELECT name FROM accounts WHERE id = $1`, [bill.ap_account_id]);
-        const apAccountName = apAccountResult.rows[0]?.name || 'Accounts Payable';
-        
+        const apAccountResult = await sql.query(
+          `SELECT name FROM accounts WHERE id = $1`,
+          [bill.ap_account_id]
+        );
+        const apAccountName =
+          apAccountResult.rows[0]?.name || "Accounts Payable";
+
         // Create the AP journal line (credit to AP account)
         if (hasLineNumber) {
-          await sql.query(`
+          await sql.query(
+            `
             INSERT INTO journal_lines (journal_id, line_number, account_id, description, debit, credit, user_id)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-          `, [
-            journalId,
-            1,                      // line number
-            bill.ap_account_id,
-            `AP - ${apAccountName}`,
-            0,                      // debit
-            totalAmount,            // credit AP account
-            userId                  // user_id for proper data isolation
-          ]);
+          `,
+            [
+              journalId,
+              1, // line number
+              bill.ap_account_id,
+              `AP - ${apAccountName}`,
+              0, // debit
+              totalAmount, // credit AP account
+              userId, // user_id for proper data isolation
+            ]
+          );
         } else {
-          await sql.query(`
+          await sql.query(
+            `
             INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, user_id)
             VALUES ($1, $2, $3, $4, $5, $6)
-          `, [
-            journalId,
-            bill.ap_account_id,
-            `AP - ${apAccountName}`,
-            0,                      // debit
-            totalAmount,            // credit AP account
-            userId                  // user_id for proper data isolation
-          ]);
+          `,
+            [
+              journalId,
+              bill.ap_account_id,
+              `AP - ${apAccountName}`,
+              0, // debit
+              totalAmount, // credit AP account
+              userId, // user_id for proper data isolation
+            ]
+          );
         }
-        
+
         console.log(`[Bill Create] Created AP journal line (credit)`);
-        
+
         // Insert debit entries for each expense account
         let lineNumber = 2;
-        
+
         for (const line of lines) {
           const accountId = line.expense_account_id;
           const amount = parseFloat(line.amount);
-          
+
           // Get expense account name
-          const expenseAccountResult = await sql.query(`SELECT name FROM accounts WHERE id = $1`, [accountId]);
-          const expenseAccountName = expenseAccountResult.rows[0]?.name || 'Expense';
-          
+          const expenseAccountResult = await sql.query(
+            `SELECT name FROM accounts WHERE id = $1`,
+            [accountId]
+          );
+          const expenseAccountName =
+            expenseAccountResult.rows[0]?.name || "Expense";
+
           // Create expense journal line
           if (hasLineNumber) {
-            await sql.query(`
+            await sql.query(
+              `
               INSERT INTO journal_lines (journal_id, line_number, account_id, description, debit, credit, user_id)
               VALUES ($1, $2, $3, $4, $5, $6, $7)
-            `, [
-              journalId,
-              lineNumber++,
-              accountId,
-              `${expenseAccountName} - ${line.description || 'Expense'}`,
-              amount,                // debit expense account
-              0,                     // credit
-              userId                 // user_id for proper data isolation
-            ]);
+            `,
+              [
+                journalId,
+                lineNumber++,
+                accountId,
+                `${expenseAccountName} - ${line.description || "Expense"}`,
+                amount, // debit expense account
+                0, // credit
+                userId, // user_id for proper data isolation
+              ]
+            );
           } else {
-            await sql.query(`
+            await sql.query(
+              `
               INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, user_id)
               VALUES ($1, $2, $3, $4, $5, $6)
-            `, [
-              journalId,
-              accountId,
-              `${expenseAccountName} - ${line.description || 'Expense'}`,
-              amount,                // debit expense account
-              0,                     // credit
-              userId                 // user_id for proper data isolation
-            ]);
+            `,
+              [
+                journalId,
+                accountId,
+                `${expenseAccountName} - ${line.description || "Expense"}`,
+                amount, // debit expense account
+                0, // credit
+                userId, // user_id for proper data isolation
+              ]
+            );
           }
         }
-        
+
         console.log(`[Bill Create] Created expense journal lines (debits)`);
-        
+
         // Link the journal to the bill if journal_id column exists in bills table
         try {
           const columnCheck = await sql.query(`
@@ -492,31 +547,43 @@ export async function createBill(bill: Bill, lines: BillLine[], userId?: string)
               WHERE table_name = 'bills' AND column_name = 'journal_id'
             ) as has_journal_id
           `);
-          
+
           if (columnCheck.rows[0].has_journal_id) {
-            await sql.query(`UPDATE bills SET journal_id = $1 WHERE id = $2`, [journalId, newBill.id]);
-            console.log(`[Bill Create] Linked journal ${journalId} to bill ${newBill.id}`);
+            await sql.query(`UPDATE bills SET journal_id = $1 WHERE id = $2`, [
+              journalId,
+              newBill.id,
+            ]);
+            console.log(
+              `[Bill Create] Linked journal ${journalId} to bill ${newBill.id}`
+            );
           }
         } catch (linkErr) {
-          console.error(`[Bill Create] Error linking journal to bill:`, linkErr);
+          console.error(
+            `[Bill Create] Error linking journal to bill:`,
+            linkErr
+          );
           // Continue without linking - the journal is still created successfully
         }
       } catch (journalError) {
-        console.error(`[Bill Create] Error creating journal entry for bill ${newBill.id}:`, journalError);
+        console.error(
+          `[Bill Create] Error creating journal entry for bill ${newBill.id}:`,
+          journalError
+        );
         // Continue without creating journal - the bill was created successfully
       }
     } else {
-      console.log(`[Bill Create] Bill ${newBill.id} created with ${billStatus} status, no journal entry needed`);
+      console.log(
+        `[Bill Create] Bill ${newBill.id} created with ${billStatus} status, no journal entry needed`
+      );
     }
 
-    
     // Commit the transaction
-    await sql.query('COMMIT');
-    
+    await sql.query("COMMIT");
+
     return newBill;
   } catch (error) {
     // Rollback in case of error
-    await sql.query('ROLLBACK');
+    await sql.query("ROLLBACK");
     throw error;
   }
 }
@@ -524,87 +591,95 @@ export async function createBill(bill: Bill, lines: BillLine[], userId?: string)
 /**
  * Update an existing bill
  */
-export async function updateBill(id: number, bill: Partial<Bill>, lines?: BillLine[], userId?: string): Promise<Bill | null> {
+export async function updateBill(
+  id: number,
+  bill: Partial<Bill>,
+  lines?: BillLine[],
+  userId?: string
+): Promise<Bill | null> {
   // Start a transaction
-  await sql.query('BEGIN');
-  
+  await sql.query("BEGIN");
+
   try {
     // Get the current bill to check status
     const currentBillQuery = `
       SELECT * FROM bills WHERE id = $1 AND is_deleted = false
     `;
-    
+
     const currentBillResult = await sql.query(currentBillQuery, [id]);
-    
+
     if (currentBillResult.rows.length === 0) {
-      await sql.query('ROLLBACK');
+      await sql.query("ROLLBACK");
       return null;
     }
-    
+
     const currentBill = currentBillResult.rows[0];
-    
+
     // Don't allow updates to fully paid bills
-    if (currentBill.status === 'Paid') {
-      throw new Error('Cannot update a paid bill');
+    if (currentBill.status === "Paid") {
+      throw new Error("Cannot update a paid bill");
     }
-    
+
     // Build the update query dynamically
-    let setClause = '';
+    let setClause = "";
     const values: any[] = [];
     let paramIndex = 1;
-    
+
     if (bill.vendor_id !== undefined) {
       setClause += `vendor_id = $${paramIndex++}, `;
       values.push(bill.vendor_id);
     }
-    
+
     if (bill.bill_number !== undefined) {
       setClause += `bill_number = $${paramIndex++}, `;
       values.push(bill.bill_number || null);
     }
-    
+
     if (bill.bill_date !== undefined) {
       setClause += `bill_date = $${paramIndex++}, `;
       values.push(bill.bill_date);
     }
-    
+
     if (bill.due_date !== undefined) {
       setClause += `due_date = $${paramIndex++}, `;
       values.push(bill.due_date);
     }
-    
+
     if (bill.terms !== undefined) {
       setClause += `terms = $${paramIndex++}, `;
       values.push(bill.terms || null);
     }
-    
+
     if (bill.memo !== undefined) {
       setClause += `memo = $${paramIndex++}, `;
       values.push(bill.memo || null);
     }
-    
+
     if (bill.ap_account_id !== undefined) {
       setClause += `ap_account_id = $${paramIndex++}, `;
       values.push(bill.ap_account_id);
     }
-    
+
     if (bill.status !== undefined) {
       setClause += `status = $${paramIndex++}, `;
       values.push(bill.status);
       console.log(`[updateBill] Updating status to: ${bill.status}`);
     }
-    
+
     // Update line items if provided
     if (lines && lines.length > 0) {
       // Calculate new total amount from line items
-      const totalAmount = lines.reduce((sum, line) => sum + parseFloat(line.amount), 0);
-      
+      const totalAmount = lines.reduce(
+        (sum, line) => sum + parseFloat(line.amount),
+        0
+      );
+
       setClause += `total_amount = $${paramIndex++}, `;
       values.push(totalAmount);
-      
+
       // Delete existing line items
       await sql.query(`DELETE FROM bill_lines WHERE bill_id = $1`, [id]);
-      
+
       // Insert new line items
       for (const line of lines) {
         const lineQuery = `
@@ -621,7 +696,7 @@ export async function updateBill(id: number, bill: Partial<Bill>, lines?: BillLi
             user_id
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         `;
-        
+
         await sql.query(lineQuery, [
           id,
           line.expense_account_id,
@@ -632,37 +707,37 @@ export async function updateBill(id: number, bill: Partial<Bill>, lines?: BillLi
           line.category || null,
           line.location || null,
           line.funder || null,
-          userId || null // Include user_id for proper data isolation
+          userId || null, // Include user_id for proper data isolation
         ]);
       }
     }
-    
+
     // Only update if there are changes
     if (setClause) {
       // Add updated_at timestamp
       setClause += `updated_at = CURRENT_TIMESTAMP`;
-      
+
       // Add ID to values
       values.push(id);
-      
+
       const updateQuery = `
         UPDATE bills
         SET ${setClause}
         WHERE id = $${paramIndex}
         RETURNING *
       `;
-      
+
       await sql.query(updateQuery, values);
     }
-    
+
     // Commit the transaction
-    await sql.query('COMMIT');
-    
+    await sql.query("COMMIT");
+
     // Return the updated bill
     return getBill(id);
   } catch (error) {
     // Rollback in case of error
-    await sql.query('ROLLBACK');
+    await sql.query("ROLLBACK");
     throw error;
   }
 }
@@ -676,25 +751,25 @@ export async function deleteBill(id: number): Promise<boolean> {
     const checkQuery = `
       SELECT * FROM bills WHERE id = $1 AND is_deleted = false
     `;
-    
+
     const checkResult = await sql.query(checkQuery, [id]);
-    
+
     if (checkResult.rows.length === 0) {
       return false;
     }
-    
+
     // Soft delete the bill
     const deleteQuery = `
       UPDATE bills
       SET is_deleted = true, deleted_at = CURRENT_TIMESTAMP
       WHERE id = $1
     `;
-    
+
     await sql.query(deleteQuery, [id]);
-    
+
     return true;
   } catch (error) {
-    console.error('Error deleting bill:', error);
+    console.error("Error deleting bill:", error);
     throw error;
   }
 }
@@ -702,33 +777,40 @@ export async function deleteBill(id: number): Promise<boolean> {
 /**
  * Create a bill payment
  */
-export async function createBillPayment(payment: BillPayment, userId?: string): Promise<BillPayment> {
+export async function createBillPayment(
+  payment: BillPayment,
+  userId?: string
+): Promise<BillPayment> {
   // Ensure we have a userId for proper data isolation
   if (!userId) {
-    console.warn('[createBillPayment] No userId provided, data isolation may be compromised');
+    console.warn(
+      "[createBillPayment] No userId provided, data isolation may be compromised"
+    );
   }
   // Start a transaction
-  await sql.query('BEGIN');
-  
+  await sql.query("BEGIN");
+
   try {
     // Get the bill to check status and remaining amount
     const billQuery = `
       SELECT * FROM bills WHERE id = $1 AND is_deleted = false
     `;
-    
+
     const billResult = await sql.query(billQuery, [payment.bill_id]);
-    
+
     if (billResult.rows.length === 0) {
       throw new Error(`Bill with ID ${payment.bill_id} not found`);
     }
-    
+
     const bill = billResult.rows[0];
     const remainingAmount = bill.total_amount - bill.amount_paid;
-    
+
     if (payment.amount_paid > remainingAmount) {
-      throw new Error(`Payment amount ${payment.amount_paid} exceeds remaining bill amount ${remainingAmount}`);
+      throw new Error(
+        `Payment amount ${payment.amount_paid} exceeds remaining bill amount ${remainingAmount}`
+      );
     }
-    
+
     // Insert the payment
     const paymentQuery = `
       INSERT INTO bill_payments (
@@ -743,7 +825,7 @@ export async function createBillPayment(payment: BillPayment, userId?: string): 
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
     `;
-    
+
     const paymentResult = await sql.query(paymentQuery, [
       payment.bill_id,
       payment.payment_date,
@@ -752,43 +834,61 @@ export async function createBillPayment(payment: BillPayment, userId?: string): 
       payment.payment_method || null,
       payment.reference_number || null,
       payment.journal_id || null,
-      userId || null // Include user_id for proper data isolation
+      userId || null, // Include user_id for proper data isolation
     ]);
-    
+
     const newPayment = paymentResult.rows[0];
-    
+
     // Update the bill's amount_paid and status
     // Ensure both values are converted to numbers to avoid string concatenation
-    const currentAmountPaid = typeof bill.amount_paid === 'string' ? parseFloat(bill.amount_paid) : Number(bill.amount_paid) || 0;
-    const paymentAmount = typeof payment.amount_paid === 'number' ? payment.amount_paid : parseFloat(String(payment.amount_paid)) || 0;
-    const totalAmount = typeof bill.total_amount === 'string' ? parseFloat(bill.total_amount) : Number(bill.total_amount) || 0;
-    
+    const currentAmountPaid =
+      typeof bill.amount_paid === "string"
+        ? parseFloat(bill.amount_paid)
+        : Number(bill.amount_paid) || 0;
+    const paymentAmount =
+      typeof payment.amount_paid === "number"
+        ? payment.amount_paid
+        : parseFloat(String(payment.amount_paid)) || 0;
+    const totalAmount =
+      typeof bill.total_amount === "string"
+        ? parseFloat(bill.total_amount)
+        : Number(bill.total_amount) || 0;
+
     // Round to 2 decimal places to avoid floating point issues
-    const newAmountPaid = Math.round((currentAmountPaid + paymentAmount) * 100) / 100;
+    const newAmountPaid =
+      Math.round((currentAmountPaid + paymentAmount) * 100) / 100;
     let newStatus = bill.status;
-    
-    console.log(`Updating bill payment: Current: ${currentAmountPaid}, Payment: ${paymentAmount}, New Total: ${newAmountPaid}, Bill Total: ${totalAmount}`);
-    
-    if (newAmountPaid >= totalAmount || Math.abs(newAmountPaid - totalAmount) < 0.01) {
-      newStatus = 'Paid';
+
+    console.log(
+      `Updating bill payment: Current: ${currentAmountPaid}, Payment: ${paymentAmount}, New Total: ${newAmountPaid}, Bill Total: ${totalAmount}`
+    );
+
+    if (
+      newAmountPaid >= totalAmount ||
+      Math.abs(newAmountPaid - totalAmount) < 0.01
+    ) {
+      newStatus = "Paid";
     } else if (newAmountPaid > 0) {
-      newStatus = 'Partially Paid';
+      newStatus = "Partially Paid";
     }
-    
+
     // Convert amount to string for PostgreSQL
-    await sql.query(`
+    await sql.query(
+      `
       UPDATE bills
       SET amount_paid = $1, status = $2, updated_at = CURRENT_TIMESTAMP
       WHERE id = $3
-    `, [newAmountPaid.toString(), newStatus, payment.bill_id]);
-    
+    `,
+      [newAmountPaid.toString(), newStatus, payment.bill_id]
+    );
+
     // Commit the transaction
-    await sql.query('COMMIT');
-    
+    await sql.query("COMMIT");
+
     return newPayment;
   } catch (error) {
     // Rollback in case of error
-    await sql.query('ROLLBACK');
+    await sql.query("ROLLBACK");
     throw error;
   }
 }
@@ -799,12 +899,17 @@ export async function createBillPayment(payment: BillPayment, userId?: string): 
 /**
  * Create a bill refund
  */
-export async function createBillRefund(refund: BillRefund, userId?: string): Promise<BillRefund> {
+export async function createBillRefund(
+  refund: BillRefund,
+  userId?: string
+): Promise<BillRefund> {
   // Ensure we have a userId for proper data isolation
   if (!userId) {
-    console.warn('[createBillRefund] No userId provided, data isolation may be compromised');
+    console.warn(
+      "[createBillRefund] No userId provided, data isolation may be compromised"
+    );
   }
-  
+
   try {
     // Insert the refund
     const refundQuery = `
@@ -821,7 +926,7 @@ export async function createBillRefund(refund: BillRefund, userId?: string): Pro
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `;
-    
+
     const refundResult = await sql.query(refundQuery, [
       refund.bill_id,
       refund.refund_date,
@@ -830,13 +935,13 @@ export async function createBillRefund(refund: BillRefund, userId?: string): Pro
       refund.refund_method || null,
       refund.reference_number || null,
       refund.journal_id || null,
-      refund.reason || 'Vendor refund',
-      userId || null // Include user_id for proper data isolation
+      refund.reason || "Vendor refund",
+      userId || null, // Include user_id for proper data isolation
     ]);
-    
+
     return refundResult.rows[0] as BillRefund;
   } catch (error) {
-    console.error('Error creating bill refund:', error);
+    console.error("Error creating bill refund:", error);
     throw error;
   }
 }
@@ -844,42 +949,56 @@ export async function createBillRefund(refund: BillRefund, userId?: string): Pro
 /**
  * Delete a bill refund
  */
-export async function deleteBillRefund(id: number, userId?: string): Promise<boolean> {
+export async function deleteBillRefund(
+  id: number,
+  userId?: string
+): Promise<boolean> {
   // Ensure we have a userId for proper data isolation
   if (!userId) {
-    console.warn('[deleteBillRefund] No userId provided, data isolation may be compromised');
+    console.warn(
+      "[deleteBillRefund] No userId provided, data isolation may be compromised"
+    );
   }
-  
+
   try {
     // Get the refund details first
     const refundQuery = `
-      SELECT * FROM bill_refunds WHERE id = $1 ${userId ? 'AND user_id = $2' : ''}
+      SELECT * FROM bill_refunds WHERE id = $1 ${
+        userId ? "AND user_id = $2" : ""
+      }
     `;
-    
-    const refundResult = await sql.query(refundQuery, userId ? [id, userId] : [id]);
-    
+
+    const refundResult = await sql.query(
+      refundQuery,
+      userId ? [id, userId] : [id]
+    );
+
     if (refundResult.rows.length === 0) {
       return false;
     }
-    
+
     const refund = refundResult.rows[0];
-    
+
     // Delete the refund
     const deleteQuery = `
-      DELETE FROM bill_refunds WHERE id = $1 ${userId ? 'AND user_id = $2' : ''}
+      DELETE FROM bill_refunds WHERE id = $1 ${userId ? "AND user_id = $2" : ""}
     `;
-    
+
     const result = await sql.query(deleteQuery, userId ? [id, userId] : [id]);
-    
+
     // If the refund has a journal ID, delete the journal entry as well
     if (refund.journal_id) {
-      await sql.query(`DELETE FROM journal_lines WHERE journal_id = $1`, [refund.journal_id]);
-      await sql.query(`DELETE FROM journals WHERE id = $1`, [refund.journal_id]);
+      await sql.query(`DELETE FROM journal_lines WHERE journal_id = $1`, [
+        refund.journal_id,
+      ]);
+      await sql.query(`DELETE FROM journals WHERE id = $1`, [
+        refund.journal_id,
+      ]);
     }
-    
+
     return result.rowCount !== null && result.rowCount > 0;
   } catch (error) {
-    console.error('Error deleting bill refund:', error);
+    console.error("Error deleting bill refund:", error);
     throw error;
   }
 }
@@ -889,83 +1008,96 @@ export async function deleteBillRefund(id: number, userId?: string): Promise<boo
  */
 export async function deleteBillPayment(id: number): Promise<boolean> {
   // Start a transaction
-  await sql.query('BEGIN');
-  
+  await sql.query("BEGIN");
+
   try {
     // Get the payment info
     const paymentQuery = `
       SELECT * FROM bill_payments WHERE id = $1
     `;
-    
+
     const paymentResult = await sql.query(paymentQuery, [id]);
-    
+
     if (paymentResult.rows.length === 0) {
-      await sql.query('ROLLBACK');
+      await sql.query("ROLLBACK");
       return false;
     }
-    
+
     const payment = paymentResult.rows[0];
-    
+
     // Get the bill
     const billQuery = `
       SELECT * FROM bills WHERE id = $1
     `;
-    
+
     const billResult = await sql.query(billQuery, [payment.bill_id]);
-    
+
     if (billResult.rows.length === 0) {
-      await sql.query('ROLLBACK');
+      await sql.query("ROLLBACK");
       return false;
     }
-    
+
     const bill = billResult.rows[0];
-    
+
     // Calculate new amount paid
     // Ensure both values are parsed as numbers to avoid string concatenation
     const currentAmountPaid = parseFloat(bill.amount_paid) || 0;
     const paymentAmount = parseFloat(payment.amount_paid) || 0;
-    
+
     // Round to 2 decimal places to avoid floating point issues
-    const newAmountPaid = Math.round((currentAmountPaid - paymentAmount) * 100) / 100;
-    
+    const newAmountPaid =
+      Math.round((currentAmountPaid - paymentAmount) * 100) / 100;
+
     let newStatus = bill.status;
-    
+
     if (newAmountPaid <= 0) {
-      newStatus = 'Open';
+      newStatus = "Open";
     } else if (newAmountPaid < bill.total_amount) {
-      newStatus = 'Partially Paid';
+      newStatus = "Partially Paid";
     }
-    
+
     // Update the bill
-    await sql.query(`
+    await sql.query(
+      `
       UPDATE bills
       SET amount_paid = $1, status = $2, updated_at = CURRENT_TIMESTAMP
       WHERE id = $3
-    `, [newAmountPaid.toString(), newStatus, payment.bill_id]);
-    
+    `,
+      [newAmountPaid.toString(), newStatus, payment.bill_id]
+    );
+
     // Delete associated journal entry if it exists
     if (payment.journal_id) {
-      await sql.query(`
+      await sql.query(
+        `
         DELETE FROM journal_lines WHERE journal_id = $1
-      `, [payment.journal_id]);
-      
-      await sql.query(`
+      `,
+        [payment.journal_id]
+      );
+
+      await sql.query(
+        `
         DELETE FROM journals WHERE id = $1
-      `, [payment.journal_id]);
+      `,
+        [payment.journal_id]
+      );
     }
-    
+
     // Delete the payment
-    await sql.query(`
+    await sql.query(
+      `
       DELETE FROM bill_payments WHERE id = $1
-    `, [id]);
-    
+    `,
+      [id]
+    );
+
     // Commit the transaction
-    await sql.query('COMMIT');
-    
+    await sql.query("COMMIT");
+
     return true;
   } catch (error) {
     // Rollback in case of error
-    await sql.query('ROLLBACK');
+    await sql.query("ROLLBACK");
     throw error;
   }
 }

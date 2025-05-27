@@ -21,15 +21,11 @@ async function createJournalEntryForBill(
 ): Promise<boolean> {
   // Only create journal entries for bills with Open status
   if (bill.status !== 'Open') {
-    console.log(`[Bill Journal] Skipping journal entry creation for bill ${billId} with status ${bill.status}`);
     return false;
   }
   try {
-    console.log(`[Bill Journal] Creating journal entry for bill ${billId} with status ${bill.status}`);
-    
     // Get the date column name (transaction_date or date) used in the journals table
     const dateColumnName = await getJournalDateColumn();
-    console.log(`[Bill Journal] Using ${dateColumnName} for journal date column`);
     
     // Check all the columns that may or may not exist in the journals table
     const columnCheck = await sql`
@@ -40,7 +36,6 @@ async function createJournalEntryForBill(
     `;
     
     const schema = columnCheck.rows[0];
-    console.log(`[Bill Journal] Schema check result:`, schema);
     
     // Get valid journal types from the journal_types table
     let journalType = 'GJ'; // Default to General Journal
@@ -56,7 +51,6 @@ async function createJournalEntryForBill(
       if (typesTableCheck.rows[0].has_journal_types) {
         // Fetch all valid journal types for logging
         const typesResult = await sql`SELECT code, name FROM journal_types ORDER BY code`;
-        console.log(`[Bill Journal] Available journal types:`, typesResult.rows);
         
         // Try to find a bill or AP related journal type
         const apTypes = typesResult.rows.filter(t => 
@@ -69,11 +63,9 @@ async function createJournalEntryForBill(
         if (apTypes.length > 0) {
           // Use the first AP/Bill related journal type found
           journalType = apTypes[0].code;
-          console.log(`[Bill Journal] Selected journal type: ${journalType} (${apTypes[0].name})`);
         } else if (typesResult.rows.length > 0) {
           // Or just use the first available type
           journalType = typesResult.rows[0].code;
-          console.log(`[Bill Journal] Using first available journal type: ${journalType} (${typesResult.rows[0].name})`);
         }
       } else {
         console.log(`[Bill Journal] journal_types table doesn't exist, using default type: ${journalType}`);
@@ -95,7 +87,6 @@ async function createJournalEntryForBill(
         
         const lastNum = lastJournalResult.rows[0].last_num || 0;
         journalNumber = `J-${(lastNum + 1).toString().padStart(5, '0')}`;
-        console.log(`[Bill Journal] Generated journal number: ${journalNumber}`);
       }
     } catch (numErr) {
       console.error(`[Bill Journal] Error generating journal number:`, numErr);
@@ -166,12 +157,8 @@ async function createJournalEntryForBill(
         RETURNING id
       `;
       
-      console.log(`[Bill Journal] SQL: ${journalInsertQuery}`);
-      console.log(`[Bill Journal] Params: ${params.join(', ')}`);
-      
       const journalResult = await sql.query(journalInsertQuery, params);
       const journalId = journalResult.rows[0].id;
-      console.log(`[Bill Journal] Created journal header with ID: ${journalId}`);
       
       // Check journal_lines table columns
       const journalLinesColumnsCheck = await sql`
@@ -182,7 +169,6 @@ async function createJournalEntryForBill(
       `;
       
       const journalLinesColumns = journalLinesColumnsCheck.rows.map(r => r.column_name);
-      console.log(`[Bill Journal] Journal lines columns:`, journalLinesColumns);
       
       // Check if specific columns exist
       const hasLineNumber = journalLinesColumns.includes('line_number');
@@ -236,8 +222,6 @@ async function createJournalEntryForBill(
       
       // Insert all journal lines
       // Create dynamic SQL for the journal lines insertion
-      console.log(`[Bill Journal] Inserting AP line:`, apLine);
-      
       // First insert the AP line
       try {
         // Build column list and values list dynamically based on available fields
@@ -256,16 +240,13 @@ async function createJournalEntryForBill(
           VALUES (${apColumnsList.map((_, i) => `$${i + 1}`).join(', ')})
         `;
         
-        console.log(`[Bill Journal] AP line insert query:`, apInsertQuery);
         await sql.query(apInsertQuery, apValuesList);
-        console.log(`[Bill Journal] Successfully inserted AP line`);
       } catch (apLineError) {
         console.error(`[Bill Journal] Error inserting AP line:`, apLineError);
         throw apLineError;
       }
       
       // Then insert all expense lines
-      console.log(`[Bill Journal] Inserting ${expenseLines.length} expense lines`);
       for (const expenseLine of expenseLines) {
         try {
           // Build column list and values list dynamically based on available fields
@@ -311,8 +292,6 @@ async function createJournalEntryForBill(
         }
       }
       
-      console.log(`[Bill Journal] Successfully inserted all journal lines`);
-      
       // Link the journal to the bill if journal_id column exists in bills table
       try {
         const columnCheck = await sql`
@@ -326,7 +305,6 @@ async function createJournalEntryForBill(
           await sql`
             UPDATE bills SET journal_id = ${journalId} WHERE id = ${billId}
           `;
-          console.log(`[Bill Journal] Linked journal ${journalId} to bill ${billId} via journal_id column`);
         }
       } catch (linkErr) {
         console.error(`[Bill Journal] Error linking journal to bill:`, linkErr);
@@ -334,7 +312,6 @@ async function createJournalEntryForBill(
       }
       
       await sql.query('COMMIT');
-      console.log(`[Bill Journal] Successfully created journal entry ${journalId} for bill ${billId}`);
       return true;
     } catch (journalError) {
       await sql.query('ROLLBACK');
@@ -566,7 +543,6 @@ export async function POST(req: NextRequest) {
       
       // If the bill was created with Open status, create a journal entry
       if (newBill.status === 'Open') {
-        console.log(`[Bill Create] Creating journal entry for new bill ${newBill.id} with Open status`);
         try {
           // We need to get the vendor name to create a proper journal entry
           const vendorQuery = await sql`

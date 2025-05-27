@@ -4,7 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
  * Intent classification result
  */
 export interface IntentClassification {
-  intent: 'ap_bill' | 'ar_invoice' | 'gl_query' | 'reconciliation' | 'credit_card' | 'unknown';
+  intent: 'ap_bill' | 'ar_invoice' | 'gl_query' | 'reconciliation' | 'credit_card' | 'receipt' | 'unknown';
   confidence: number; // 0-1 scale
   details?: string;
 }
@@ -33,6 +33,7 @@ export async function classifyUserIntent(query: string): Promise<IntentClassific
       - gl_query: Queries about general ledger, chart of accounts, journal entries, or financial reporting
       - reconciliation: Queries about account reconciliation or bank reconciliation
       - credit_card: Queries about credit card statements, processing credit card transactions, or managing credit card accounts
+      - receipt: Queries about processing receipts, analyzing receipt images, extracting receipt data, or expense receipts
       - unknown: Queries that don't clearly fit the categories above
       
       Respond in JSON format with these fields:
@@ -103,6 +104,8 @@ export async function classifyUserIntent(query: string): Promise<IntentClassific
       return { intent: 'reconciliation', confidence: 0.7 };
     } else if (responseText.includes('credit_card')) {
       return { intent: 'credit_card', confidence: 0.7 };
+    } else if (responseText.includes('receipt')) {
+      return { intent: 'receipt', confidence: 0.7 };
     }
     
     return { intent: 'unknown', confidence: 0.5 };

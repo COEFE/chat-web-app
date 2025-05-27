@@ -4,7 +4,9 @@ export const authorizedDomains = [
   // Local development
   'localhost',
   
-  // Vercel deployments (add all your deployment URLs here)
+  // Vercel deployments for expense-ai project
+  'expense-ai.vercel.app',
+  'expense-ai-production.vercel.app',
   'chat-web-app-mu.vercel.app',
   'chat-web-k9jv559te-coefes-projects.vercel.app',
   
@@ -22,9 +24,8 @@ export function isAuthorizedDomain(hostname: string): boolean {
 // Get the appropriate auth domain to use
 // This should match a domain you've added in the Firebase console
 export function getAuthDomain(): string {
-  // Default Firebase auth domain from your project
-  // This should be the domain you've configured in Firebase Console
-  const defaultAuthDomain = 'web-chat-app-fa7f0.firebaseapp.com';
+  // Use production Firebase auth domain for expense-ai-production project
+  const defaultAuthDomain = 'expense-ai-production.firebaseapp.com';
   
   if (typeof window !== 'undefined') {
     // Log domain information for debugging

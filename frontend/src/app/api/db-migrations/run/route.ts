@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/authenticateRequest';
 import { sql } from '@vercel/postgres';
 import fs from 'fs';
 import path from 'path';
+import { NextRequest, NextResponse } from 'next/server';
 
 // POST /api/db-migrations/run - Run a database migration script
 export async function POST(req: NextRequest) {

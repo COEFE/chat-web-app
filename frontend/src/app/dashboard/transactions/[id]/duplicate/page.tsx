@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Save, ArrowLeft, Plus, Trash2, AlertCircle } from "lucide-react";
+import { Loader2, Save, ArrowLeft, Plus, Trash2, AlertCircle, Paperclip, Info } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import { format } from "date-fns";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface Account {
   id: number;
@@ -354,7 +355,7 @@ export default function DuplicateJournalPage() {
                 ) : (
                   <>
                     <Save className="h-4 w-4 mr-2" />
-                    Save
+                    Save & Open Journal
                   </>
                 )}
               </Button>
@@ -527,6 +528,17 @@ export default function DuplicateJournalPage() {
               </div>
             </div>
           </div>
+
+          {/* Attachments Information */}
+          <div className="mt-6">
+            <Alert>
+              <Paperclip className="h-4 w-4" />
+              <AlertDescription>
+                <strong>Attachments:</strong> You can add attachments (receipts, invoices, supporting documents) after saving this journal entry. 
+                The journal will open in view mode where you can upload and manage attachments.
+              </AlertDescription>
+            </Alert>
+          </div>
         </CardContent>
         <CardFooter className="flex justify-between border-t pt-6">
           <Button variant="secondary" onClick={goBack}>Cancel</Button>
@@ -539,7 +551,7 @@ export default function DuplicateJournalPage() {
             ) : (
               <>
                 <Save className="h-4 w-4 mr-2" />
-                Save as New Journal
+                Save & Open Journal
               </>
             )}
           </Button>

@@ -273,6 +273,44 @@ export class GLAgent implements Agent {
       
       console.log('[GLAgent] Required fields validation passed');
       
+      // Check if an account with the same name and type already exists
+      console.log('[GLAgent] Checking for existing accounts...');
+      const { sql } = await import('@vercel/postgres');
+      const existingAccountQuery = await sql`
+        SELECT id, code, name, account_type FROM accounts 
+        WHERE LOWER(name) = ${suggestedName.toLowerCase()} 
+        AND account_type = ${accountType}
+        AND user_id = ${message.userId || null}
+        LIMIT 1
+      `;
+
+      if (existingAccountQuery.rows.length > 0) {
+        const existingAccount = existingAccountQuery.rows[0];
+        console.log(`[GLAgent] Found existing account: ${existingAccount.name} (${existingAccount.code}) with ID ${existingAccount.id}`);
+        
+        // Prepare response payload with existing account information
+        const responsePayload = {
+          account: existingAccount,
+          accountId: existingAccount.id,
+          accountName: existingAccount.name,
+          accountCode: existingAccount.code,
+          accountType: existingAccount.account_type,
+          success: true
+        };
+        
+        // Respond with the existing account details
+        await respondToAgentMessage(
+          message.id,
+          MessageStatus.COMPLETED,
+          responsePayload,
+          `Found existing GL account: ${existingAccount.name} (${existingAccount.code})`
+        );
+        
+        return;
+      }
+
+      console.log('[GLAgent] No existing account found, creating new account...');
+      
       // Convert starting balance to number if provided
       const initialBalance = startingBalance ? parseFloat(startingBalance) : undefined;
       
@@ -763,19 +801,19 @@ Make sure the journal entry is valid - debits must equal credits. Every line mus
         console.log(`[GLAgent] AI detected specific journal ID in query: ${specificId}`);
         
         // Verify journal exists and is unposted
-        const journalCheck = await sql`
+        const { rows: journalRows } = await sql`
           SELECT id, is_posted FROM journals 
           WHERE id = ${specificId} AND is_deleted = false
         `;
         
-        if (journalCheck.rows.length === 0) {
+        if (journalRows.length === 0) {
           return {
             success: false,
             message: `I couldn't find journal entry with ID ${specificId}. It may not exist or has been deleted.`
           };
         }
         
-        if (journalCheck.rows[0].is_posted) {
+        if (journalRows[0].is_posted) {
           return {
             success: false,
             message: `Journal entry with ID ${specificId} is already posted.`

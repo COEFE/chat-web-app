@@ -8,10 +8,11 @@ CREATE TABLE IF NOT EXISTS journal_attachments (
     id SERIAL PRIMARY KEY,
     journal_id INTEGER NOT NULL,
     file_name VARCHAR(255) NOT NULL,
+    file_url TEXT NOT NULL,
+    file_path TEXT NOT NULL,
     file_type VARCHAR(100),
-    file_size_bytes BIGINT,
-    storage_path VARCHAR(1024) NOT NULL, -- e.g., S3 bucket/key or local path
-    uploaded_by VARCHAR(255), -- User ID or name
+    file_size INTEGER,
+    uploaded_by VARCHAR(100) NOT NULL,
     uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_journal_attachments_journal_id FOREIGN KEY (journal_id)
@@ -22,8 +23,11 @@ CREATE TABLE IF NOT EXISTS journal_attachments (
 CREATE INDEX IF NOT EXISTS idx_journal_attachments_journal_id ON journal_attachments(journal_id);
 CREATE INDEX IF NOT EXISTS idx_journal_attachments_file_name ON journal_attachments(file_name);
 
+-- Ensure legacy installations have file_path column (for compatibility)
+ALTER TABLE journal_attachments ADD COLUMN IF NOT EXISTS file_path TEXT;
+
 -- Comments for documentation
 COMMENT ON TABLE journal_attachments IS 'Stores metadata and storage paths for files attached to journal entries.';
-COMMENT ON COLUMN journal_attachments.storage_path IS 'The path or key where the file is stored (e.g., an S3 URL or a local file system path).';
+COMMENT ON COLUMN journal_attachments.file_path IS 'The path or key where the file is stored (e.g., Firebase Storage path).';
 
 COMMIT;

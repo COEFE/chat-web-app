@@ -29,6 +29,8 @@ export default function DatabaseAdminPage() {
     // For now, we'll hardcode the available migrations
     const migrations = [
       "accounting-schema-update.sql",
+      "005_create_journal_attachments_table.sql",
+      "006_create_bill_attachments_table.sql",
       "011_create_bank_statements_table.sql",
       "012_create_statement_trackers_table.sql",
       "013_add_is_bank_account_to_accounts.sql",
@@ -55,6 +57,8 @@ export default function DatabaseAdminPage() {
   const getMigrationDescription = (filename: string) => {
     const descriptions: Record<string, string> = {
       "accounting-schema-update.sql": "Applies the accounting schema updates including account types, check constraints, and indexes.",
+      "005_create_journal_attachments_table.sql": "Creates the journal_attachments table for storing attachments to journals.",
+      "006_create_bill_attachments_table.sql": "Creates the bill_attachments table for storing attachments to bills.",
       "011_create_bank_statements_table.sql": "Creates the bank_statements table for storing bank statement data. Required for the bank reconciliation feature.",
       "012_create_statement_trackers_table.sql": "Creates the statement_trackers table for tracking processed bank and credit card statements. Required for the AP Agent Memory System to recognize previously processed statements and avoid duplicate entries. Also adds user_id to accounts table if missing.",
       "013_add_is_bank_account_to_accounts.sql": "Adds is_bank_account column to the accounts table. Required for the AP Agent Memory System to properly identify bank accounts for statement processing.",
@@ -71,7 +75,8 @@ export default function DatabaseAdminPage() {
       "037_create_bill_refunds_table.sql": "Creates the bill_refunds table for tracking refunds against paid vendor bills. Required for the vendor bill refund feature.",
       "038_add_bill_refund_journal_type.sql": "Adds the 'BR' (Bill Refund) journal type to the journal_types table. Required for properly categorizing bill refund transactions.",
       "039_add_credit_card_journal_types.sql": "Adds the 'CCP' (Credit Card Purchase) and 'CCY' (Credit Card Payment) journal types to the journal_types table. Required for better categorization of credit card transactions.",
-      "040_add_credit_card_refund_journal_type.sql": "Adds the 'CCR' (Credit Card Refund) journal type to the journal_types table. Required for properly categorizing credit card refund transactions."
+      "040_add_credit_card_refund_journal_type.sql": "Adds the 'CCR' (Credit Card Refund) journal type to the journal_types table. Required for properly categorizing credit card refund transactions.",
+      "041_add_beginning_balance_journal_type.sql": "Adds the 'BB' (Beginning Balance) journal type to the journal_types table. Required for recording beginning balances."
     };
     return descriptions[filename] || "Run this migration to update your database schema.";
   };

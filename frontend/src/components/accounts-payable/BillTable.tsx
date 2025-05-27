@@ -171,8 +171,11 @@ export function BillTable({ bills, onEdit, onViewDetails }: BillTableProps) {
           ap_account_id: billData.ap_account_id
         },
         lines: billData.lines.map((line: any) => ({
-          ...line,
-          id: undefined // Remove any existing IDs
+          expense_account_id: line.expense_account_id,
+          description: line.description || '',
+          quantity: line.quantity || 1,
+          unit_price: line.unit_price || 0,
+          amount: (line.quantity || 1) * (line.unit_price || 0)
         }))
       };
       
@@ -187,7 +190,17 @@ export function BillTable({ bills, onEdit, onViewDetails }: BillTableProps) {
       });
       
       if (!createResponse.ok) {
-        throw new Error(`Error creating duplicate bill: ${createResponse.status}`);
+        let errorData;
+        const responseText = await createResponse.text();
+        
+        try {
+          errorData = JSON.parse(responseText);
+        } catch (e) {
+          errorData = { error: `Non-JSON response: ${responseText}` };
+        }
+        
+        console.error('Bill duplication error:', errorData);
+        throw new Error(`Error creating duplicate bill: ${createResponse.status} - ${errorData.error || 'Unknown error'}`);
       }
       
       const result = await createResponse.json();

@@ -170,6 +170,7 @@ export function JournalAttachments({
               className="hidden"
               onChange={handleFileUpload}
               disabled={isUploading}
+              accept="image/*,.heic,.heif,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
             />
             <label htmlFor="file-upload">
               <Button

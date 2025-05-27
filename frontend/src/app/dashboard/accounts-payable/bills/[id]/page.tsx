@@ -38,6 +38,7 @@ import { BillForm } from "@/components/accounts-payable/BillForm";
 import { BillPaymentForm } from "@/components/accounts-payable/BillPaymentForm";
 import CreateBillRefundButton from "@/components/bills/CreateBillRefundButton";
 import BillRefundsTable from "@/components/bills/BillRefundsTable";
+import BillAttachments from "@/components/bills/BillAttachments";
 
 interface BillLine {
   id: number;
@@ -563,6 +564,19 @@ export default function BillDetailsPage() {
                   </div>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Attachments Card */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Attachments</CardTitle>
+              <CardDescription>
+                Upload and manage files related to this bill
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <BillAttachments billId={bill.id} />
             </CardContent>
           </Card>
         </div>

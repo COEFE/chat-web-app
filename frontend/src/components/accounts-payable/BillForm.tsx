@@ -42,6 +42,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Loader2, Plus, Trash2, CalendarIcon, Calculator, UserPlus } from "lucide-react";
 import { getAuth } from "firebase/auth";
 import { VendorForm } from "@/components/accounts-payable/VendorForm";
+import { BillAttachments } from "@/components/bills/BillAttachments";
 
 // Define the validation schemas
 const billLineSchema = z.object({
@@ -997,6 +998,16 @@ export function BillForm({ bill, onClose, isCreditNote = false, title = "Add Bil
                   </div>
                 </div>
               </div>
+
+              {/* Attachments Section - only show for existing bills */}
+              {bill?.id && (
+                <div className="mt-6">
+                  <BillAttachments 
+                    billId={bill.id} 
+                    readOnly={bill.status === 'Posted'} 
+                  />
+                </div>
+              )}
 
               <DialogFooter>
                 <Button

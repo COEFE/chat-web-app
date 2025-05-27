@@ -222,6 +222,12 @@ export class AccountingOrchestrator {
         return this.agents['credit_card_agent'];
       }
       
+      // Check for receipt intent EARLY to prevent it from being misclassified as bill creation
+      if (classification.intent === 'receipt' && classification.confidence > 0.6) {
+        console.log('[Orchestrator] Receipt query detected, routing to receipt agent');
+        return this.agents['receipt_agent'];
+      }
+      
       // Check for bill payment patterns SECOND (after credit card check)
       // This prevents credit card refunds from being misclassified as bill payments
       if (await this.detectBillPaymentIntent(query)) {
@@ -266,11 +272,17 @@ export class AccountingOrchestrator {
         case 'credit_card':
           targetAgentId = 'credit_card_agent';
           break;
+        case 'receipt':
+          targetAgentId = 'receipt_agent';
+          break;
         default:
           // For unknown queries, as a fallback, we'll check if any agent claims it can handle the query
+          console.log(`[Orchestrator] Checking if any agent can handle the query: "${query}"`);
           for (const agentId in this.agents) {
             const agent = this.agents[agentId];
+            console.log(`[Orchestrator] Checking agent: ${agentId} (${agent.name})`);
             const canHandle = await agent.canHandle(query);
+            console.log(`[Orchestrator] Agent ${agentId} canHandle result: ${canHandle}`);
             
             if (canHandle) {
               console.log(`[Orchestrator] ${agentId} claims it can handle the query.`);

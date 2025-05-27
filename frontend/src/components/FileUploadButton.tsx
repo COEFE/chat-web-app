@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { PaperclipIcon, X } from 'lucide-react';
+import heic2any from 'heic2any';
 
 interface FileUploadButtonProps {
   onFileSelect: (fileData: {
@@ -17,6 +18,33 @@ interface FileUploadButtonProps {
   disabled?: boolean;
 }
 
+// Function to convert HEIC to JPEG using heic2any library
+const convertHeicToJpeg = async (file: File): Promise<File> => {
+  try {
+    // Convert HEIC to JPEG blob
+    const convertedBlob = await heic2any({
+      blob: file,
+      toType: 'image/jpeg',
+      quality: 0.9
+    });
+    
+    // Handle both single blob and array of blobs
+    const jpegBlob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+    
+    // Create a new File object with JPEG type
+    const convertedFile = new File(
+      [jpegBlob], 
+      file.name.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg'),
+      { type: 'image/jpeg' }
+    );
+    
+    return convertedFile;
+  } catch (error) {
+    console.error('HEIC conversion error:', error);
+    throw new Error('Failed to convert HEIC to JPEG');
+  }
+};
+
 export default function FileUploadButton({ 
   onFileSelect, 
   onClear, 
@@ -30,43 +58,66 @@ export default function FileUploadButton({
     const file = e.target.files?.[0];
     if (!file) return;
     
-    // Accepted MIME types that Claude supports
-    const acceptedTypes = [
-      'application/pdf',                    // PDF
-      'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', // Images
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // DOCX
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',      // XLSX
-      'text/plain', 'text/csv', 'application/rtf'                              // Text formats
-    ];
-    
-    if (!acceptedTypes.includes(file.type)) {
-      alert('Unsupported file type. Please upload PDF, Word, Excel, or common image formats.');
-      return;
-    }
-    
-    // Check file size (32MB limit for Claude)
-    const maxSizeInBytes = 32 * 1024 * 1024; // 32MB in bytes
-    if (file.size > maxSizeInBytes) {
-      alert(`File exceeds the 32MB size limit (${(file.size / (1024 * 1024)).toFixed(2)}MB)`);
-      return;
-    }
-    
     setIsUploading(true);
+    
     try {
+      let processedFile = file;
+      
+      // Check if it's a HEIC file and convert to JPEG
+      if (file.type === 'image/heic' || file.type === 'image/heif' || 
+          file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif')) {
+        try {
+          processedFile = await convertHeicToJpeg(file);
+          console.log('Converted HEIC to JPEG:', processedFile.name);
+        } catch (error) {
+          console.error('HEIC conversion failed:', error);
+          alert('Failed to convert HEIC image. Please try converting it to JPEG manually.');
+          setIsUploading(false);
+          return;
+        }
+      }
+      
+      // Accepted MIME types that Claude supports (including HEIC for processing)
+      const acceptedTypes = [
+        'application/pdf',                    // PDF
+        'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', // Images supported by Claude
+        'image/heic', 'image/heif',          // HEIC (will be converted to JPEG)
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // DOCX
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',      // XLSX
+        'text/plain', 'text/csv', 'application/rtf'                              // Text formats
+      ];
+      
+      // Check if original file type is supported (before any conversion)
+      if (!acceptedTypes.includes(file.type) && 
+          !file.name.toLowerCase().endsWith('.heic') && 
+          !file.name.toLowerCase().endsWith('.heif')) {
+        alert('Unsupported file type. Please upload PDF, Word, Excel, HEIC, or common image formats.');
+        setIsUploading(false);
+        return;
+      }
+      
+      // Check file size (32MB limit for Claude) - use processed file size
+      const maxSizeInBytes = 32 * 1024 * 1024; // 32MB in bytes
+      if (processedFile.size > maxSizeInBytes) {
+        alert(`File exceeds the 32MB size limit (${(processedFile.size / (1024 * 1024)).toFixed(2)}MB)`);
+        setIsUploading(false);
+        return;
+      }
+      
+      // Remove 'data:application/pdf;base64,' prefix
       const reader = new FileReader();
       reader.onload = (event) => {
         if (!event.target?.result) return;
         
-        // Remove 'data:application/pdf;base64,' prefix
         const base64String = event.target.result.toString().split(',')[1];
         onFileSelect({
-          name: file.name,
-          type: file.type,
+          name: processedFile.name,
+          type: processedFile.type,
           base64Data: base64String,
-          size: file.size
+          size: processedFile.size
         });
       };
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(processedFile);
     } catch (error) {
       console.error('Error reading file:', error);
       alert('An error occurred while uploading your file. Please try again.');
@@ -101,7 +152,7 @@ export default function FileUploadButton({
           <input
             type="file"
             ref={fileInputRef}
-            accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv,.rtf"
+            accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv,.rtf,.heic,.heif"
             onChange={handleFileChange}
             className="hidden"
             disabled={disabled || isUploading}

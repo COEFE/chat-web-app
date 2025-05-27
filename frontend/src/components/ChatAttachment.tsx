@@ -20,7 +20,7 @@ export default function ChatAttachment({
   
   // Get appropriate icon based on file type
   const getFileIcon = () => {
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(fileExtension)) {
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif'].includes(fileExtension)) {
       return <ImageIcon className="h-4 w-4 text-purple-500" />;
     } else if (['xlsx', 'xls', 'csv'].includes(fileExtension)) {
       return <FileSpreadsheet className="h-4 w-4 text-green-500" />;

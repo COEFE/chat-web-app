@@ -140,13 +140,22 @@ export function RunMigrationButton({
         return;
       }
       
-      const response = await fetch("/api/db-migrations/run", {
+      // Special handling for bill attachments migration
+      const apiEndpoint = migrationFile === "006_create_bill_attachments_table.sql" 
+        ? "/api/admin/migrate-bill-attachments"
+        : "/api/db-migrations/run";
+      
+      const requestBody = migrationFile === "006_create_bill_attachments_table.sql"
+        ? {} // No body needed for the bill attachments endpoint
+        : { migrationFile };
+      
+      const response = await fetch(apiEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({ migrationFile })
+        body: JSON.stringify(requestBody)
       });
       
       const data = await response.json();

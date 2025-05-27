@@ -50,45 +50,32 @@ let db: Firestore;
 let storage: FirebaseStorage;
 let functionsInstance: Functions;
 
-const initializeFirebase = async () => {
-  try {
-    if (!getApps().length) {
-      app = initializeApp(firebaseConfig);
-    } else {
-      app = getApp();
-    }
-
-    auth = getAuth(app);
-    db = getFirestore(app);
-    storage = getStorage(app);
-    functionsInstance = getFunctions(app);
-
-    // Check if we're in development mode to use emulators
-    if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS === 'true') {
-      console.log('Using Firebase emulators');
-      connectAuthEmulator(auth, 'http://localhost:9099');
-      connectFirestoreEmulator(db, 'localhost', 8080);
-      connectStorageEmulator(storage, 'localhost', 9199);
-      connectFunctionsEmulator(functionsInstance, 'localhost', 5001);
-    }
-
-    // Detect ad blockers and warn if needed
-    const hasAdBlocker = await detectAdBlocker();
-    if (hasAdBlocker) {
-      console.warn('Ad blocker detected. Some Firebase features may not work properly. ' +
-                 'Consider disabling your ad blocker or privacy extensions for this site.');
-    }
-
-    console.log('Firebase initialized successfully');
-  } catch (error) {
-    console.error('Error initializing Firebase:', error);
-  }
-};
-
-// Initialize Firebase immediately (skip during Jest tests)
-if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'test') {
-  initializeFirebase();
+// Initialize Firebase immediately (not async)
+if (!getApps().length) {
+  app = initializeApp(firebaseConfig);
+} else {
+  app = getApp();
 }
+
+auth = getAuth(app);
+db = getFirestore(app);
+storage = getStorage(app);
+functionsInstance = getFunctions(app);
+
+// Check if we're in development mode to use emulators
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS === 'true') {
+  console.log('Using Firebase emulators');
+  try {
+    connectAuthEmulator(auth, 'http://localhost:9099');
+    connectFirestoreEmulator(db, 'localhost', 8080);
+    connectStorageEmulator(storage, 'localhost', 9199);
+    connectFunctionsEmulator(functionsInstance, 'localhost', 5001);
+  } catch (error) {
+    console.warn('Emulator connection failed:', error);
+  }
+}
+
+console.log('Firebase initialized successfully');
 
 // ==============================================
 // NEW: Callable Cloud Function Wrappers
