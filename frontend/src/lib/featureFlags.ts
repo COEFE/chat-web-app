@@ -22,8 +22,10 @@ export const getFeatureFlags = (): FeatureFlags => {
   const environment = process.env.NODE_ENV;
   const productTier = process.env.NEXT_PUBLIC_PRODUCT_TIER || 'mvp';
   
-  // MVP configuration for consumer release
-  if (productTier === 'mvp') {
+  console.log('Feature Flags Debug:', { environment, productTier });
+  
+  // MVP configuration for consumer release (PRODUCTION DEFAULT)
+  if (productTier === 'mvp' || (environment === 'production' && productTier !== 'enterprise')) {
     return {
       // Enabled for MVP
       expenseTracking: true,
@@ -44,7 +46,7 @@ export const getFeatureFlags = (): FeatureFlags => {
     };
   }
   
-  // Full feature set for development/enterprise
+  // Full feature set for development or explicit enterprise tier
   if (environment === 'development' || productTier === 'enterprise') {
     return {
       expenseTracking: true,
@@ -61,7 +63,7 @@ export const getFeatureFlags = (): FeatureFlags => {
     };
   }
   
-  // Default to MVP
+  // Fallback to MVP (should never reach here with new logic)
   return {
     expenseTracking: true,
     receiptScanning: true,
