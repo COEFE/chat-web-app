@@ -22,16 +22,24 @@ export async function signInWithGoogleEnhanced(useRedirect = false) {
   provider.addScope('email');
   
   try {
-    // Log authentication attempt data
-    console.log('Starting Google Auth with:', {
-      currentDomain: window.location.hostname,
-      authDomain: auth.config.authDomain,
-      useRedirect: useRedirect
+    // Enhanced logging for debugging
+    const currentDomain = window.location.hostname;
+    const currentOrigin = window.location.origin;
+    const authDomain = auth.config.authDomain;
+    
+    console.log('🔍 DETAILED AUTH DEBUG:', {
+      currentDomain,
+      currentOrigin,
+      authDomain,
+      useRedirect,
+      fullURL: window.location.href,
+      protocol: window.location.protocol,
+      port: window.location.port
     });
     
-    // Use either popup or redirect based on parameter
     if (useRedirect) {
-      return await signInWithRedirect(auth, provider);
+      await signInWithRedirect(auth, provider);
+      return null; // Redirect doesn't return immediately
     } else {
       return await signInWithPopup(auth, provider);
     }

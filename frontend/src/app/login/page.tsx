@@ -50,7 +50,9 @@ export default function LoginPage() {
     } catch (error: any) {
       console.error('Error during sign-in:', error);
       
-      if (error?.code === 'auth/unauthorized-domain' || error?.code === 'auth/popup-closed-by-user') {
+      if (error?.code === 'auth/unauthorized-domain' || 
+          error?.code === 'auth/popup-closed-by-user' || 
+          error?.code === 'auth/popup-blocked') {
         console.log('Trying redirect method instead after popup failed...');
         try {
           // Fall back to redirect method
