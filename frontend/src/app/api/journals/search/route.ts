@@ -213,7 +213,7 @@ export async function GET(req: NextRequest) {
               'id', jl.id,
               'account_id', jl.account_id,
               'account_name', a.name,
-              'account_code', a.code,
+              'account_code', a.account_code,
               'description', jl.description,
               'debit', jl.debit,
               'credit', jl.credit

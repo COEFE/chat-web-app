@@ -1,5 +1,4 @@
-import { auth } from '@/lib/firebaseConfig';
-import { db } from '@/lib/firebaseConfig';
+import { db, auth } from '@/lib/firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
 
 /**

@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/authenticateRequest';
 import { sql } from '@vercel/postgres';
+import { NextRequest, NextResponse } from 'next/server';
 
 // GET /api/accounts – fetch chart of accounts
 export async function GET(req: NextRequest) {
@@ -11,16 +11,16 @@ export async function GET(req: NextRequest) {
     const { rows } = await sql`
       SELECT
         a.id,
-        a.code,
+        a.account_code as code,
         a.name,
         a.parent_id,
-        p.code AS parent_code,
+        p.account_code AS parent_code,
         a.notes,
         a.is_custom,
         a.account_type
       FROM accounts a
       LEFT JOIN accounts p ON p.id = a.parent_id
-      ORDER BY a.code
+      ORDER BY a.account_code
     `;
     return NextResponse.json({ accounts: rows });
   } catch (err: any) {

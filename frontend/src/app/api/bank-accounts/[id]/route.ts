@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
       SELECT 
         ba.*,
         a.name as gl_account_name,
-        a.code as gl_account_code,
+        a.account_code as gl_account_code,
         COALESCE(
           (SELECT SUM(
             CASE WHEN bt.transaction_type = 'credit' THEN bt.amount ELSE -bt.amount END

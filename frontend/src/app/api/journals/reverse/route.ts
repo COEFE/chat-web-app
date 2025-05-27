@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     
     // 2. Get original journal lines
     const { rows: lineRows } = await sql`
-      SELECT jl.*, a.code as account_code, a.name as account_name 
+      SELECT jl.*, a.account_code as account_code, a.name as account_name 
       FROM journal_lines jl
       JOIN accounts a ON jl.account_id = a.id
       WHERE jl.journal_id = ${journalId}

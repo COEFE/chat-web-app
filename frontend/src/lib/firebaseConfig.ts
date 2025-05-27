@@ -3,6 +3,10 @@ import { getAuth, Auth, connectAuthEmulator } from "firebase/auth";
 import { getFirestore, Firestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, Functions, connectFunctionsEmulator, httpsCallable } from "firebase/functions";
 import { getStorage, FirebaseStorage, connectStorageEmulator } from "firebase/storage";
+import { getMessaging, Messaging } from "firebase/messaging";
+import { getPerformance, Performance } from "firebase/performance";
+import { getRemoteConfig, RemoteConfig } from "firebase/remote-config";
+import { getAnalytics, Analytics } from "firebase/analytics";
 import { getAuthDomain } from "./authDomainConfig";
 
 // Function to detect ad blockers or privacy tools
@@ -49,6 +53,10 @@ let auth: Auth;
 let db: Firestore;
 let storage: FirebaseStorage;
 let functionsInstance: Functions;
+let messaging: Messaging | null = null;
+let performance: Performance | null = null;
+let remoteConfig: RemoteConfig | null = null;
+let analytics: Analytics | null = null;
 
 // Initialize Firebase immediately (not async)
 if (!getApps().length) {
@@ -61,6 +69,33 @@ auth = getAuth(app);
 db = getFirestore(app);
 storage = getStorage(app);
 functionsInstance = getFunctions(app);
+
+// Initialize optional services only on client side and with error handling
+if (typeof window !== 'undefined') {
+  try {
+    messaging = getMessaging(app);
+  } catch (error) {
+    console.warn('Firebase Messaging not supported:', error);
+  }
+  
+  try {
+    performance = getPerformance(app);
+  } catch (error) {
+    console.warn('Firebase Performance not supported:', error);
+  }
+  
+  try {
+    remoteConfig = getRemoteConfig(app);
+  } catch (error) {
+    console.warn('Firebase Remote Config not supported:', error);
+  }
+  
+  try {
+    analytics = getAnalytics(app);
+  } catch (error) {
+    console.warn('Firebase Analytics not supported:', error);
+  }
+}
 
 // Check if we're in development mode to use emulators
 if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS === 'true') {
@@ -132,4 +167,4 @@ export const moveDocumentAPI = async (payload: MoveDocumentPayload): Promise<Mov
   }
 };
 
-export { app, auth, db, storage, functionsInstance };
+export { app, auth, db, storage, functionsInstance, messaging, performance, remoteConfig, analytics };

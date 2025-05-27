@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
       SELECT 
         ba.*,
         a.name as gl_account_name,
-        a.code as gl_account_code
+        a.account_code as gl_account_code
       FROM 
         bank_accounts ba
         JOIN accounts a ON ba.gl_account_id = a.id

@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
         j.is_posted,
         jl.id as line_id,
         jl.account_id,
-        a.code as account_code,
+        a.account_code as account_code,
         a.name as account_name,
         jl.debit,
         jl.credit,

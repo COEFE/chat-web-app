@@ -3,6 +3,10 @@ import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getAuth } from 'firebase/auth';
 import { getFunctions } from 'firebase/functions';
+import { getAnalytics } from 'firebase/analytics';
+import { getPerformance } from 'firebase/performance';
+import { getRemoteConfig } from 'firebase/remote-config';
+import { getApp, getApps } from 'firebase/app';
 
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
@@ -24,5 +28,8 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const auth = getAuth(app);
 const functions = getFunctions(app);
+const analytics = getAnalytics(app);
+const performance = getPerformance(app);
+const remoteConfig = getRemoteConfig(app);
 
-export { app, db, storage, auth, functions };
+export { app, db, storage, auth, functions, analytics, performance, remoteConfig };

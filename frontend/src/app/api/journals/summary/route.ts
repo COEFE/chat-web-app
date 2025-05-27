@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
     const { rows: topAccounts } = await sql.query(`
       SELECT 
         jl.account_id,
-        a.code as account_code,
+        a.account_code as account_code,
         a.name as account_name,
         SUM(jl.debit + jl.credit) as total_amount
       FROM 
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
         j.is_deleted = FALSE
         ${dateFilter}
       GROUP BY
-        jl.account_id, a.code, a.name
+        jl.account_id, a.account_code, a.name
       ORDER BY
         total_amount DESC
       LIMIT 5

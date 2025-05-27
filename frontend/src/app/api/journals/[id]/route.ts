@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
       SELECT 
         jl.id,
         jl.account_id,
-        a.code AS account_code,
+        a.account_code AS account_code,
         a.name AS account_name,
         jl.debit,
         jl.credit,

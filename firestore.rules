@@ -31,6 +31,12 @@ service cloud.firestore {
           allow update, delete: if request.auth != null && request.auth.uid == userId;
         }
       }
+
+      // Match the 'folders' subcollection within a user's path
+      match /folders/{folderId} {
+        // Allow all operations if the user is authenticated and matches the userId
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
       
       // Allow access to all other subcollections under a user's document
       match /{allSubcollections=**} {
@@ -69,6 +75,22 @@ service cloud.firestore {
                            resource.data.createdBy == request.auth.uid);
       // Allow anyone to read a share if it's public (no password)
       allow read: if resource.data.password == null || resource.data.password == "";
+    }
+
+    // Rules for documents collection
+    match /documents/{documentId} {
+      // Allow read if the user is authenticated
+      allow read: if request.auth != null;
+      // Allow write if the user is authenticated
+      allow write: if request.auth != null;
+    }
+
+    // Rules for folders collection
+    match /folders/{folderId} {
+      // Allow read if the user is authenticated
+      allow read: if request.auth != null;
+      // Allow write if the user is authenticated
+      allow write: if request.auth != null;
     }
 
     // Default deny all other access

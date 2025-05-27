@@ -519,7 +519,7 @@ Please use this GL code information to help answer the user's question if releva
                   'id', jl.id,
                   'account_id', jl.account_id,
                   'account_name', a.name,
-                  'account_code', a.code,
+                  'account_code', a.account_code,
                   'description', jl.description,
                   'debit', jl.debit,
                   'credit', jl.credit,
