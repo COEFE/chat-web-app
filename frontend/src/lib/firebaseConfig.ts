@@ -4,7 +4,7 @@ import { getFirestore, Firestore, connectFirestoreEmulator } from "firebase/fire
 import { getFunctions, Functions, connectFunctionsEmulator, httpsCallable } from "firebase/functions";
 import { getStorage, FirebaseStorage, connectStorageEmulator } from "firebase/storage";
 import { getMessaging, Messaging } from "firebase/messaging";
-import { getPerformance, Performance } from "firebase/performance";
+import { getPerformance } from "firebase/performance";
 import { getRemoteConfig, RemoteConfig } from "firebase/remote-config";
 import { getAnalytics, Analytics } from "firebase/analytics";
 import { getAuthDomain } from "./authDomainConfig";
@@ -54,7 +54,7 @@ let db: Firestore;
 let storage: FirebaseStorage;
 let functionsInstance: Functions;
 let messaging: Messaging | null = null;
-let performance: Performance | null = null;
+let performance: any | null = null;
 let remoteConfig: RemoteConfig | null = null;
 let analytics: Analytics | null = null;
 

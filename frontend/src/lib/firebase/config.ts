@@ -1,4 +1,4 @@
-import { initializeApp, getApps } from 'firebase/app';
+import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getAuth } from 'firebase/auth';
@@ -6,7 +6,6 @@ import { getFunctions } from 'firebase/functions';
 import { getAnalytics } from 'firebase/analytics';
 import { getPerformance } from 'firebase/performance';
 import { getRemoteConfig } from 'firebase/remote-config';
-import { getApp, getApps } from 'firebase/app';
 
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
