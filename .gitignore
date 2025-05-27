@@ -58,3 +58,8 @@ emulators_data/
 # Firebase Crashlytics
 *crashlytics*.dSYM.zip
 .vercel
+
+# Sensitive configuration files
+production-firebase-config.md
+env-production-template.txt
+VERCEL-ENV-VARIABLES.md
