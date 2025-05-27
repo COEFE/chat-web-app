@@ -4,8 +4,14 @@ export const authorizedDomains = [
   // Local development
   'localhost',
   
-  // Vercel deployments for expense-ai project
+  // Vercel deployments for all projects under coefes-projects
+  'coefes-projects.vercel.app',
+  
+  // Specific project domains
   'expense-ai.vercel.app',
+  'chat-web-app.vercel.app',
+  
+  // Legacy Vercel deployments (keeping for backward compatibility)
   'expense-ai-production.vercel.app',
   'chat-web-app-mu.vercel.app',
   'chat-web-k9jv559te-coefes-projects.vercel.app',

@@ -63,3 +63,8 @@ emulators_data/
 production-firebase-config.md
 env-production-template.txt
 VERCEL-ENV-VARIABLES.md
+
+# Sensitive configuration files
+production-firebase-config.md
+env-production-template.txt
+VERCEL-ENV-VARIABLES.md
