@@ -99,7 +99,7 @@ export function RecurringJournalForm({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <span className="text-sm text-muted-foreground">Date:</span>
-                <p>{format(new Date(journal.date), "MMM d, yyyy")}</p>
+                <p>{journal.date ? format(new Date(journal.date), "MMM d, yyyy") : 'No date'}</p>
               </div>
               <div>
                 <span className="text-sm text-muted-foreground">Amount:</span>

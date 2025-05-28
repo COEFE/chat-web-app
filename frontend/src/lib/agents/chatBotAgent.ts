@@ -26,9 +26,13 @@ export class ChatBotAgent implements Agent {
     this.glAgent = new GLAgent();
   }
 
-  async canHandle(query: string, context: AgentContext): Promise<boolean> {
+  async canHandle(query: string): Promise<boolean> {
     // This agent can handle almost any query as it's the main user assistant
     return true;
+  }
+
+  async processRequest(context: AgentContext): Promise<AgentResponse> {
+    return await this.handle(context.query, context);
   }
 
   async handle(query: string, context: AgentContext): Promise<AgentResponse> {
@@ -100,7 +104,7 @@ Respond with just the category name.
   private async handleJournalReclassification(query: string, context: AgentContext): Promise<AgentResponse> {
     // Relay to GL Agent for journal entry operations
     try {
-      const glResponse = await this.glAgent.handle(query, context);
+      const glResponse = await this.glAgent.processRequest(context);
       
       if (glResponse.success) {
         return {

@@ -61,6 +61,7 @@ export interface BillPayment {
   payment_date: string;
   amount_paid: number;
   payment_account_id: number;
+  payment_account_name?: string; // Added from JOIN with accounts table
   payment_method?: string;
   reference_number?: string;
   journal_id?: number;
