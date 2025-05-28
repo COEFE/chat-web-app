@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Disable font optimization to avoid lightningcss issues
+  optimizeFonts: false,
   // Disable ESLint during production builds
   eslint: {
     ignoreDuringBuilds: true,

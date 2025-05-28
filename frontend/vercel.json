@@ -3,7 +3,7 @@
   "framework": "nextjs",
   "buildCommand": "NODE_OPTIONS='--max_old_space_size=4096' next build",
   "devCommand": "next dev",
-  "installCommand": "npm ci --force",
+  "installCommand": "npm install",
   "outputDirectory": ".next",
   "regions": ["iad1"],
   "functions": {
