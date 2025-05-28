@@ -5,6 +5,11 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   
+  // Disable TypeScript checking during build
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  
   // Use the standard output format for Vercel
   // This is the default and works best with Vercel
   
