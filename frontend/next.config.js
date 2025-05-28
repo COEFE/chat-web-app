@@ -10,6 +10,9 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   
+  // Disable font optimization to fix lightningcss build issues
+  optimizeFonts: false,
+  
   // Use the standard output format for Vercel
   // This is the default and works best with Vercel
   
@@ -29,6 +32,11 @@ const nextConfig = {
   // It will be picked up by Vercel during deployment
   env: {
     VERCEL_FUNCTIONS_TIMEOUT: '60',
+  },
+
+  // Experimental settings to fix lightningcss issues
+  experimental: {
+    optimizePackageImports: ['lucide-react'],
   },
 }
 

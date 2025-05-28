@@ -6,7 +6,10 @@
     "node": "18.x"
   },
   "resolutions": {
-    "lightningcss": "3.5.0"
+    "lightningcss": "3.5.0",
+    "lightningcss-linux-x64-gnu": "3.5.0",
+    "lightningcss-darwin-x64": "3.5.0",
+    "lightningcss-darwin-arm64": "3.5.0"
   },
   "scripts": {
     "dev": "next dev",
