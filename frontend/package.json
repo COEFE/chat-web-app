@@ -5,6 +5,13 @@
   "engines": {
     "node": "18.x"
   },
+  "optionalDependencies": {
+    "@next/swc-darwin-arm64": "15.2.4",
+    "@next/swc-darwin-x64": "15.2.4",
+    "@next/swc-linux-arm64-gnu": "15.2.4",
+    "@next/swc-linux-x64-gnu": "15.2.4",
+    "lightningcss-linux-x64-gnu": "latest"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",

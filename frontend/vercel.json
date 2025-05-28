@@ -1,9 +1,9 @@
 {
   "version": 2,
   "framework": "nextjs",
-  "buildCommand": "npm run build",
-  "devCommand": "npm run dev",
-  "installCommand": "npm ci",
+  "buildCommand": "NODE_OPTIONS='--max_old_space_size=4096' next build",
+  "devCommand": "next dev",
+  "installCommand": "npm ci --force",
   "outputDirectory": ".next",
   "regions": ["iad1"],
   "functions": {
