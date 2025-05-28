@@ -21,9 +21,26 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
+export interface JournalLine {
+  id: number;
+  line_number?: number;
+  journal_id?: number;
+  account_id: number;
+  account_code?: string;
+  account_name?: string;
+  debit: number;
+  credit: number;
+  description?: string;
+  category?: string;
+  location?: string;
+  vendor?: string;
+  funder?: string;
+}
+
 export interface JournalEntry {
   id: number;
-  date: string | Date;
+  date?: string | Date;
+  journal_date?: string | Date; // Added to support both field names
   memo: string;
   source?: string;
   created_by: string;
@@ -31,18 +48,9 @@ export interface JournalEntry {
   is_posted: boolean;
   is_deleted: boolean;
   total_amount?: number;
+  total_debit?: number;
+  total_credit?: number;
   lines?: JournalLine[];
-}
-
-export interface JournalLine {
-  id: number;
-  journal_id: number;
-  account_id: number;
-  account_code?: string;
-  account_name?: string;
-  debit: number;
-  credit: number;
-  description?: string;
 }
 
 interface JournalTableProps {
@@ -73,7 +81,7 @@ export function JournalTable({
   };
 
   // Format date for display
-  const formatDate = (date: string | Date) => {
+  const formatDate = (date: string | Date | undefined) => {
     if (!date) return "N/A";
     try {
       return format(new Date(date), "MMM d, yyyy");
@@ -140,7 +148,9 @@ export function JournalTable({
                       </Button>
                     )}
                   </TableCell>
-                  <TableCell>{formatDate(journal.date)}</TableCell>
+                  <TableCell className="text-center">
+                    {formatDate(journal.journal_date)}
+                  </TableCell>
                   <TableCell>{journal.id}</TableCell>
                   <TableCell>{journal.memo}</TableCell>
                   <TableCell>{journal.source || "—"}</TableCell>

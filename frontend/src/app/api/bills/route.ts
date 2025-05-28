@@ -180,8 +180,8 @@ async function createJournalEntryForBill(
       const apLine = {
         account_id: bill.ap_account_id,
         description: `Bill #${bill.bill_number || billId} - ${bill.vendor_name || 'Vendor'}`,
-        debit: 0,
-        credit: totalAmount
+        debit_amount: 0,
+        credit_amount: totalAmount
       };
       if (hasLineNumber) {
         (apLine as any).line_number = 1;
@@ -192,12 +192,12 @@ async function createJournalEntryForBill(
       let lineNumber = 2;
       
       for (const line of lines) {
-        const lineAmount = parseFloat(line.amount);
+        const lineAmount = parseFloat(line.line_total);
         const expenseLine = {
-          account_id: parseInt(line.expense_account_id as string),
+          account_id: parseInt(line.account_id as string),
           description: line.description || `Bill #${bill.bill_number || billId} expense`,
-          debit: lineAmount,
-          credit: 0
+          debit_amount: lineAmount,
+          credit_amount: 0
         };
         
         // Only add optional fields if they exist in the schema
@@ -225,8 +225,8 @@ async function createJournalEntryForBill(
       // First insert the AP line
       try {
         // Build column list and values list dynamically based on available fields
-        const apColumnsList = ['journal_id', 'account_id', 'description', 'debit', 'credit'];
-        const apValuesList = [journalId, apLine.account_id, apLine.description, apLine.debit, apLine.credit];
+        const apColumnsList = ['journal_id', 'account_id', 'description', 'debit_amount', 'credit_amount'];
+        const apValuesList = [journalId, apLine.account_id, apLine.description, apLine.debit_amount, apLine.credit_amount];
         
         // Add optional fields if they exist
         if (hasLineNumber) {
@@ -250,8 +250,8 @@ async function createJournalEntryForBill(
       for (const expenseLine of expenseLines) {
         try {
           // Build column list and values list dynamically based on available fields
-          const expColumnsList = ['journal_id', 'account_id', 'description', 'debit', 'credit'];
-          const expValuesList = [journalId, expenseLine.account_id, expenseLine.description, expenseLine.debit, expenseLine.credit];
+          const expColumnsList = ['journal_id', 'account_id', 'description', 'debit_amount', 'credit_amount'];
+          const expValuesList = [journalId, expenseLine.account_id, expenseLine.description, expenseLine.debit_amount, expenseLine.credit_amount];
           
           // Add optional fields if they exist
           if (hasLineNumber) {
@@ -442,14 +442,14 @@ export async function POST(req: NextRequest) {
     
     // Calculate total amount if not provided
     if (!bill.total_amount) {
-      bill.total_amount = lines.reduce((total, line) => total + (line.amount || 0), 0);
+      bill.total_amount = lines.reduce((total, line) => total + (line.line_total || 0), 0);
     }
     
     // Validate line items
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       
-      if (!line.expense_account_id) {
+      if (!line.account_id) {
         return NextResponse.json({ 
           error: `Line ${i + 1}: Expense account ID is required` 
         }, { status: 400 });
@@ -467,7 +467,7 @@ export async function POST(req: NextRequest) {
         }, { status: 400 });
       }
       
-      if (!line.amount || line.amount < 0) {
+      if (!line.line_total || line.line_total < 0) {
         return NextResponse.json({ 
           error: `Line ${i + 1}: Amount must be non-negative` 
         }, { status: 400 });
@@ -475,9 +475,9 @@ export async function POST(req: NextRequest) {
       
       // Validate that amount = quantity * unit_price (with small rounding tolerance)
       const calculatedAmount = line.quantity * line.unit_price;
-      if (Math.abs(calculatedAmount - line.amount) > 0.01) {
+      if (Math.abs(calculatedAmount - line.line_total) > 0.01) {
         return NextResponse.json({ 
-          error: `Line ${i + 1}: Amount (${line.amount}) does not match quantity (${line.quantity}) * unit_price (${line.unit_price}) = ${calculatedAmount}` 
+          error: `Line ${i + 1}: Amount (${line.line_total}) does not match quantity (${line.quantity}) * unit_price (${line.unit_price}) = ${calculatedAmount}` 
         }, { status: 400 });
       }
     }
@@ -493,19 +493,19 @@ export async function POST(req: NextRequest) {
       bill_date: bill.bill_date,
       due_date: bill.due_date,
       total_amount: bill.total_amount,
-      amount_paid: bill.amount_paid || 0,
+      paid_amount: bill.paid_amount || 0,
       status: bill.status,
-      terms: bill.terms,
-      memo: bill.memo,
+      payment_terms: bill.payment_terms,
+      description: bill.description,
       ap_account_id: bill.ap_account_id
     };
     
     const lineItems: BillLine[] = lines.map(line => ({
-      expense_account_id: line.expense_account_id,
+      account_id: line.account_id,
       description: line.description,
       quantity: line.quantity,
       unit_price: line.unit_price,
-      amount: line.amount
+      line_total: line.line_total
     }));
     
     const newBill = await createBill(billData, lineItems, userId); // Pass userId for proper data isolation
@@ -531,7 +531,7 @@ export async function POST(req: NextRequest) {
         status: 'SUCCESS',
         // context: { // Optional: for additional details if required
         //   lineItemsCount: lineItems.length,
-        //   memo: newBill.memo
+        //   description: newBill.description
         // }
       };
       try {

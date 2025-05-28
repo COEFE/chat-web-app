@@ -39,64 +39,12 @@ import { BillPaymentForm } from "@/components/accounts-payable/BillPaymentForm";
 import CreateBillRefundButton from "@/components/bills/CreateBillRefundButton";
 import BillRefundsTable from "@/components/bills/BillRefundsTable";
 import BillAttachments from "@/components/bills/BillAttachments";
-
-interface BillLine {
-  id: number;
-  expense_account_id: number;
-  expense_account_name: string;
-  description?: string;
-  quantity: number;
-  unit_price: number;
-  amount: number;
-}
-
-interface BillPayment {
-  id: number;
-  bill_id: number;
-  payment_date: string;
-  amount_paid: number;
-  payment_account_id: number;
-  payment_account_name: string;
-  payment_method?: string;
-  reference_number?: string;
-  journal_id?: number;
-  created_at: string;
-}
-
-interface BillRefund {
-  id: number;
-  bill_id: number;
-  refund_date: string;
-  amount: number;
-  refund_account_id: number;
-  refund_account_name?: string;
-  refund_method?: string;
-  reference_number?: string;
-  journal_id?: number;
-  reason?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-interface Bill {
-  id: number;
-  vendor_id: number;
-  vendor_name: string;
-  bill_number?: string;
-  bill_date: string;
-  due_date: string;
-  total_amount: number;
-  amount_paid: number;
-  status: string;
-  terms?: string;
-  memo?: string;
-  ap_account_id: number;
-  ap_account_name: string;
-  created_at: string;
-  updated_at: string;
-  lines: BillLine[];
-  payments: BillPayment[];
-}
+import { 
+  Bill, 
+  BillLine, 
+  BillPayment, 
+  BillRefund 
+} from "@/lib/accounting/billQueries";
 
 export default function BillDetailsPage() {
   const { user } = useAuth();
@@ -338,15 +286,24 @@ export default function BillDetailsPage() {
     }
   };
 
-  const formatCurrency = (amount: number) => {
+  const getNumericValue = (value: number | string): number => {
+    const numericValue = typeof value === 'string' ? parseFloat(value) : value;
+    return isNaN(numericValue) ? 0 : numericValue;
+  };
+
+  const formatCurrency = (amount: number | string) => {
+    const numericAmount = getNumericValue(amount);
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
-    }).format(amount);
+    }).format(numericAmount);
   };
 
   const calculateRemainingAmount = (bill: Bill) => {
-    return bill.total_amount - bill.amount_paid;
+    const totalAmount = getNumericValue(bill.total_amount);
+    const amountPaid = getNumericValue(bill.paid_amount || 0);
+
+    return totalAmount - amountPaid;
   };
 
   if (!user) {
@@ -403,7 +360,7 @@ export default function BillDetailsPage() {
             <>
               <Button 
                 onClick={handleEditClick}
-                disabled={bill.amount_paid > 0}
+                disabled={getNumericValue(bill.paid_amount || 0) > 0}
                 variant="outline"
               >
                 <Edit className="mr-2 h-4 w-4" />
@@ -423,15 +380,15 @@ export default function BillDetailsPage() {
           
           {bill.status === 'Paid' && (
             <CreateBillRefundButton
-              billId={bill.id}
+              billId={bill.id || 0}
               billNumber={bill.bill_number}
-              amountPaid={bill.amount_paid}
+              amountPaid={getNumericValue(bill.paid_amount || 0)}
               onRefundCreated={fetchRefunds}
               accounts={accounts}
             />
           )}
           
-          {bill.amount_paid === 0 && (
+          {getNumericValue(bill.paid_amount || 0) === 0 && (
             <Button 
               onClick={handleDeleteClick}
               variant="outline"
@@ -457,11 +414,11 @@ export default function BillDetailsPage() {
                       : `Bill ID: ${bill.id}`}
                   </CardTitle>
                   <CardDescription>
-                    Vendor: {bill.vendor_name}
+                    Vendor: {bill.vendor_name || 'Unknown Vendor'}
                   </CardDescription>
                 </div>
-                <Badge variant={getStatusBadgeVariant(bill.status) as any} className="text-sm">
-                  {bill.status}
+                <Badge variant={getStatusBadgeVariant(bill.status || 'Unknown') as any} className="text-sm">
+                  {bill.status || 'Unknown'}
                 </Badge>
               </div>
             </CardHeader>
@@ -479,7 +436,7 @@ export default function BillDetailsPage() {
                   <div className="text-sm text-muted-foreground">Due Date</div>
                   <div className="flex items-center">
                     <Calendar className="h-4 w-4 mr-2 text-muted-foreground" />
-                    {format(new Date(bill.due_date), 'MMMM d, yyyy')}
+                    {bill.due_date ? format(new Date(bill.due_date), 'MMMM d, yyyy') : 'Not specified'}
                   </div>
                 </div>
                 
@@ -497,7 +454,7 @@ export default function BillDetailsPage() {
                   <div className="text-sm text-muted-foreground">AP Account</div>
                   <div className="flex items-center">
                     <Building className="h-4 w-4 mr-2 text-muted-foreground" />
-                    {bill.ap_account_name}
+                    {bill.ap_account_name || 'Not specified'}
                   </div>
                 </div>
               </div>
@@ -529,15 +486,21 @@ export default function BillDetailsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {bill.lines.map((line) => (
-                      <tr key={line.id} className="border-t">
-                        <td className="p-2 pl-3">{line.expense_account_name}</td>
-                        <td className="p-2">{line.description || "-"}</td>
-                        <td className="p-2 text-right">{line.quantity}</td>
-                        <td className="p-2 text-right">{formatCurrency(line.unit_price)}</td>
-                        <td className="p-2 pr-3 text-right">{formatCurrency(line.amount)}</td>
+                    {bill.lines && bill.lines.length > 0 ? (
+                      bill.lines.map((line: BillLine) => (
+                        <tr key={line.id} className="border-t">
+                          <td className="p-2 pl-3">{line.expense_account_name || 'N/A'}</td>
+                          <td className="p-2">{line.description || "-"}</td>
+                          <td className="p-2 text-right">{line.quantity}</td>
+                          <td className="p-2 text-right">{formatCurrency(getNumericValue(line.unit_price))}</td>
+                          <td className="p-2 pr-3 text-right">{formatCurrency(line.amount || getNumericValue(line.line_total))}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={5} className="p-2 text-center">No line items found.</td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -555,7 +518,7 @@ export default function BillDetailsPage() {
                   </div>
                   <div className="flex justify-between py-2">
                     <span>Amount Paid:</span>
-                    <span>{formatCurrency(bill.amount_paid)}</span>
+                    <span>{formatCurrency(bill.paid_amount || 0)}</span>
                   </div>
                   <Separator />
                   <div className="flex justify-between py-2 font-bold">
@@ -576,7 +539,7 @@ export default function BillDetailsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <BillAttachments billId={bill.id} />
+              <BillAttachments billId={bill.id || 0} />
             </CardContent>
           </Card>
         </div>
@@ -587,31 +550,15 @@ export default function BillDetailsPage() {
             <CardHeader>
               <CardTitle>Payment History</CardTitle>
               <CardDescription>
-                {bill.payments.length === 0 
-                  ? "No payments recorded yet" 
-                  : `${bill.payments.length} payment(s) recorded`}
+                {bill.payments && bill.payments.length > 0 
+                  ? `${bill.payments.length} payment(s) recorded` 
+                  : "No payments recorded yet"}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {bill.payments.length === 0 ? (
-                <div className="text-center py-6 text-muted-foreground">
-                  <CreditCard className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                  <p>No payments have been recorded for this bill.</p>
-                  
-                  {bill.status !== 'Paid' && bill.status !== 'Void' && (
-                    <Button 
-                      onClick={handleAddPaymentClick}
-                      variant="outline"
-                      className="mt-4"
-                    >
-                      <DollarSign className="mr-2 h-4 w-4" />
-                      Record a Payment
-                    </Button>
-                  )}
-                </div>
-              ) : (
+              {bill.payments && bill.payments.length > 0 ? (
                 <div className="space-y-4">
-                  {bill.payments.map((payment) => (
+                  {bill.payments.map((payment: BillPayment) => (
                     <div key={payment.id} className="border rounded-md p-3">
                       <div className="flex justify-between items-start mb-2">
                         <div className="font-medium">
@@ -621,7 +568,7 @@ export default function BillDetailsPage() {
                           variant="ghost"
                           size="sm"
                           className="h-6 px-2 text-red-500 hover:text-red-700"
-                          onClick={() => handleDeletePayment(payment.id)}
+                          onClick={() => handleDeletePayment(payment.id || 0)}
                         >
                           <Trash2 className="h-3 w-3" />
                         </Button>
@@ -678,6 +625,22 @@ export default function BillDetailsPage() {
                     </Button>
                   )}
                 </div>
+              ) : (
+                <div className="text-center py-6 text-muted-foreground">
+                  <CreditCard className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                  <p>No payments have been recorded for this bill.</p>
+                  
+                  {bill.status !== 'Paid' && bill.status !== 'Void' && (
+                    <Button 
+                      onClick={handleAddPaymentClick}
+                      variant="outline"
+                      className="mt-4"
+                    >
+                      <DollarSign className="mr-2 h-4 w-4" />
+                      Record a Payment
+                    </Button>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>
@@ -688,9 +651,9 @@ export default function BillDetailsPage() {
               <CardHeader>
                 <CardTitle>Refund History</CardTitle>
                 <CardDescription>
-                  {refunds.length === 0 
-                    ? "No refunds recorded yet" 
-                    : `${refunds.length} refund(s) recorded`}
+                  {refunds.length > 0 
+                    ? `${refunds.length} refund(s) recorded` 
+                    : "No refunds recorded yet"}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -700,7 +663,7 @@ export default function BillDetailsPage() {
                   </div>
                 ) : (
                   <BillRefundsTable
-                    billId={bill.id}
+                    billId={bill.id || 0}
                     billNumber={bill.bill_number}
                     refunds={refunds}
                     onRefundDeleted={fetchRefunds}
@@ -719,12 +682,12 @@ export default function BillDetailsPage() {
               <div className="space-y-3">
                 <div>
                   <div className="text-sm text-muted-foreground">Created</div>
-                  <div>{format(new Date(bill.created_at), 'MMM d, yyyy h:mm a')}</div>
+                  <div>{bill.created_at ? format(new Date(bill.created_at), 'MMM d, yyyy h:mm a') : 'Not specified'}</div>
                 </div>
                 
                 <div>
                   <div className="text-sm text-muted-foreground">Last Updated</div>
-                  <div>{format(new Date(bill.updated_at), 'MMM d, yyyy h:mm a')}</div>
+                  <div>{bill.updated_at ? format(new Date(bill.updated_at), 'MMM d, yyyy h:mm a') : 'Not specified'}</div>
                 </div>
                 
                 <div>

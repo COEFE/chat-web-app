@@ -62,8 +62,8 @@ export async function GET(req: NextRequest) {
         jl.account_id,
         a.account_code AS account_code,
         a.name AS account_name,
-        jl.debit,
-        jl.credit,
+        jl.debit_amount AS debit,
+        jl.credit_amount AS credit,
         jl.description,
         jl.category,
         jl.location,
@@ -185,19 +185,19 @@ export async function PATCH(req: NextRequest) {
       if (body.lines && Array.isArray(body.lines)) {
         // Validate lines
         for (const line of (body.lines as any[])) {
-          if (!line.account_id || (line.debit === undefined && line.credit === undefined)) {
+          if (!line.account_id || (line.debit_amount === undefined && line.credit_amount === undefined)) {
             await sql.query('ROLLBACK');
             return NextResponse.json({ 
-              error: 'Each line must have an account_id and either a debit or credit amount.' 
+              error: 'Each line must have an account_id and either a debit_amount or credit_amount.' 
             }, { status: 400 });
           }
         }
         
         // Check if debits = credits
         const totalDebits = (body.lines as any[]).reduce((sum: number, line: any) => 
-          sum + (parseFloat(line.debit) || 0), 0);
+          sum + (parseFloat(line.debit_amount) || 0), 0);
         const totalCredits = (body.lines as any[]).reduce((sum: number, line: any) => 
-          sum + (parseFloat(line.credit) || 0), 0);
+          sum + (parseFloat(line.credit_amount) || 0), 0);
         
         if (Math.abs(totalDebits - totalCredits) > 0.01) {
           await sql.query('ROLLBACK');
@@ -215,26 +215,28 @@ export async function PATCH(req: NextRequest) {
             INSERT INTO journal_lines (
               journal_id, 
               account_id, 
-              debit, 
-              credit, 
+              debit_amount, 
+              credit_amount, 
               description, 
               category, 
               location, 
               vendor, 
-              funder
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              funder,
+              user_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
           `;
           
           const lineParams = [
             id,
             line.account_id,
-            line.debit || 0,
-            line.credit || 0,
-            line.description || null,
-            line.category || null,
-            line.location || null,
-            line.vendor || null,
-            line.funder || null
+            line.debit_amount || 0,
+            line.credit_amount || 0,
+            line.description || '',
+            line.category || '',
+            line.location || '',
+            line.vendor || '',
+            line.funder || '',
+            userId
           ];
           
           await sql.query(insertLineQuery, lineParams);

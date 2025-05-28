@@ -29,6 +29,16 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { JournalEntry } from "./JournalTable";
 
+interface JournalLine {
+  id: number;
+  account_id: number;
+  account_code?: string;
+  account_name?: string;
+  debit: number | string;
+  credit: number | string;
+  description?: string;
+}
+
 interface JournalViewProps {
   journal: JournalEntry;
   onClose: () => void;
@@ -85,7 +95,7 @@ export function JournalView({ journal, onClose, onEdit, onPost }: JournalViewPro
     }
   };
   // Format date for display
-  const formatDate = (date: string | Date) => {
+  const formatDate = (date: string | Date | undefined) => {
     if (!date) return "N/A";
     try {
       return format(new Date(date), "MMM d, yyyy");
@@ -104,7 +114,7 @@ export function JournalView({ journal, onClose, onEdit, onPost }: JournalViewPro
 
   // Calculate totals with proper number parsing to prevent NaN
   const totalDebit = journal.lines?.reduce((sum, line) => {
-    // Ensure we have a valid number by parsing and defaulting to 0 if NaN
+    // Use the debit field from API response
     const debitValue = typeof line.debit === 'string' 
       ? parseFloat(line.debit) || 0 
       : Number(line.debit || 0);
@@ -112,7 +122,7 @@ export function JournalView({ journal, onClose, onEdit, onPost }: JournalViewPro
   }, 0) || 0;
   
   const totalCredit = journal.lines?.reduce((sum, line) => {
-    // Ensure we have a valid number by parsing and defaulting to 0 if NaN
+    // Use the credit field from API response
     const creditValue = typeof line.credit === 'string' 
       ? parseFloat(line.credit) || 0 
       : Number(line.credit || 0);
@@ -153,7 +163,9 @@ export function JournalView({ journal, onClose, onEdit, onPost }: JournalViewPro
             <h4 className="text-sm font-medium text-muted-foreground mb-1">
               Date
             </h4>
-            <p>{formatDate(journal.date)}</p>
+            <div className="text-sm text-muted-foreground">
+              {formatDate(journal.journal_date)}
+            </div>
           </div>
           <div>
             <h4 className="text-sm font-medium text-muted-foreground mb-1">
@@ -182,7 +194,7 @@ export function JournalView({ journal, onClose, onEdit, onPost }: JournalViewPro
               </TableRow>
             </TableHeader>
             <TableBody>
-              {journal.lines?.map((line) => (
+              {journal.lines?.map(line => (
                 <TableRow key={line.id}>
                   <TableCell>
                     {line.account_code && line.account_name
@@ -190,10 +202,10 @@ export function JournalView({ journal, onClose, onEdit, onPost }: JournalViewPro
                       : `Account #${line.account_id}`}
                   </TableCell>
                   <TableCell className="text-right">
-                    {line.debit > 0 ? formatAmount(line.debit) : ""}
+                    {line.debit && Number(line.debit) > 0 ? formatAmount(Number(line.debit)) : ""}
                   </TableCell>
                   <TableCell className="text-right">
-                    {line.credit > 0 ? formatAmount(line.credit) : ""}
+                    {line.credit && Number(line.credit) > 0 ? formatAmount(Number(line.credit)) : ""}
                   </TableCell>
                   <TableCell>{line.description || "—"}</TableCell>
                 </TableRow>

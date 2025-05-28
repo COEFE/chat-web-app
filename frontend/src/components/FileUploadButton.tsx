@@ -1,7 +1,6 @@
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { PaperclipIcon, X } from 'lucide-react';
-import heic2any from 'heic2any';
 
 interface FileUploadButtonProps {
   onFileSelect: (fileData: {
@@ -18,31 +17,90 @@ interface FileUploadButtonProps {
   disabled?: boolean;
 }
 
-// Function to convert HEIC to JPEG using heic2any library
+// Function to convert HEIC to JPEG
 const convertHeicToJpeg = async (file: File): Promise<File> => {
+  console.log('Starting HEIC conversion for file:', file.name);
+  
+  // Check if file is actually HEIC/HEIF
+  const isHeic = /\.(heic|heif)$/i.test(file.name) || file.type === 'image/heic' || file.type === 'image/heif';
+  if (!isHeic) {
+    console.log('File is not HEIC/HEIF, returning original file');
+    return file;
+  }
+  
+  // Try heic-to first (newer, more reliable library)
   try {
-    // Convert HEIC to JPEG blob
-    const convertedBlob = await heic2any({
+    const heicTo = await import('heic-to');
+    console.log('Attempting conversion with heic-to library...');
+    
+    const convertedBlob = await heicTo.heicTo({
       blob: file,
-      toType: 'image/jpeg',
-      quality: 0.9
+      type: 'image/jpeg',
+      quality: 0.8
     });
     
-    // Handle both single blob and array of blobs
-    const jpegBlob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
-    
-    // Create a new File object with JPEG type
     const convertedFile = new File(
-      [jpegBlob], 
-      file.name.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg'),
+      [convertedBlob],
+      file.name.replace(/\.(heic|heif)$/i, '.jpg'),
       { type: 'image/jpeg' }
     );
     
+    console.log('Successfully converted HEIC to JPEG using heic-to');
     return convertedFile;
   } catch (error) {
-    console.error('HEIC conversion error:', error);
-    throw new Error('Failed to convert HEIC to JPEG');
+    console.warn('heic-to conversion failed:', error);
   }
+
+  // Fallback to heic2any
+  try {
+    const heic2any = await import('heic2any');
+    console.log('Attempting conversion with heic2any library...');
+    
+    const convertedBlob = await heic2any.default({
+      blob: file,
+      toType: 'image/jpeg',
+      quality: 0.8
+    });
+    
+    const blob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+    const convertedFile = new File(
+      [blob],
+      file.name.replace(/\.(heic|heif)$/i, '.jpg'),
+      { type: 'image/jpeg' }
+    );
+    
+    console.log('Successfully converted HEIC to JPEG using heic2any');
+    return convertedFile;
+  } catch (error) {
+    console.warn('heic2any conversion failed:', error);
+  }
+
+  // Fallback to heic-convert (if available in browser)
+  try {
+    const heicConvert = await import('heic-convert');
+    console.log('Attempting conversion with heic-convert library...');
+    
+    const buffer = await file.arrayBuffer();
+    const convertedBuffer = await heicConvert.default({
+      buffer: buffer,
+      format: 'JPEG',
+      quality: 0.8
+    });
+    
+    const convertedBlob = new Blob([convertedBuffer], { type: 'image/jpeg' });
+    const convertedFile = new File(
+      [convertedBlob],
+      file.name.replace(/\.(heic|heif)$/i, '.jpg'),
+      { type: 'image/jpeg' }
+    );
+    
+    console.log('Successfully converted HEIC to JPEG using heic-convert');
+    return convertedFile;
+  } catch (error) {
+    console.warn('heic-convert conversion failed:', error);
+  }
+
+  throw new Error('All HEIC conversion attempts failed. Please try a different image format or contact support.');
 };
 
 export default function FileUploadButton({ 

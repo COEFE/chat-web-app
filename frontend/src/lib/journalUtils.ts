@@ -7,7 +7,7 @@ import Anthropic from "@anthropic-ai/sdk";
  */
 export interface AIJournalEntry {
   memo: string;
-  transaction_date: string;
+  journal_date: string;
   journal_type?: string;
   reference_number?: string;
   lines: {
@@ -127,7 +127,7 @@ export async function findAccountWithAI(
           content: `
             Transaction: "${accountSearch}"
             Transaction context: "${transactionContext}"
-            Is debit: ${isDebit ? "Yes" : "No"}
+            Is debit_amount: ${isDebit ? "Yes" : "No"}
             
             Available accounts:
             ${accountsForContext.map(a => `Code: ${a.code}, Name: ${a.name}, Type: ${a.account_type}`).join('\n')}
@@ -289,8 +289,8 @@ export async function convertAIJournalToSystem(aiJournal: AIJournalEntry, userId
       account_name: account.name,
       account_code: account.code,
       description: line.description,
-      debit: line.debit || 0,
-      credit: line.credit || 0,
+      debit_amount: line.debit || 0,
+      credit_amount: line.credit || 0,
       category: line.category,
       location: line.location,
       vendor: line.vendor,
@@ -312,8 +312,8 @@ export async function convertAIJournalToSystem(aiJournal: AIJournalEntry, userId
         account_name: suspenseAccount.name,
         account_code: suspenseAccount.code,
         description: 'Auto-balancing entry',
-        debit: diff < 0 ? Math.abs(diff) : 0,
-        credit: diff > 0 ? diff : 0,
+        debit_amount: diff < 0 ? Math.abs(diff) : 0,
+        credit_amount: diff > 0 ? diff : 0,
       });
 
       // Recalculate totals
@@ -332,7 +332,7 @@ export async function convertAIJournalToSystem(aiJournal: AIJournalEntry, userId
   
   // Create the journal object
   const journal: Journal = {
-    transaction_date: aiJournal.transaction_date,
+    journal_date: aiJournal.journal_date,
     journal_type: aiJournal.journal_type || 'GJ',
     memo: aiJournal.memo,
     reference_number: aiJournal.reference_number,
@@ -358,7 +358,7 @@ export async function createJournalFromAI(aiJournal: AIJournalEntry, userId: str
   console.log(`[journalUtils] Creating journal from AI with userId: ${userId}`);
   console.log(`[journalUtils] Journal data:`, {
     memo: aiJournal.memo,
-    transaction_date: aiJournal.transaction_date,
+    journal_date: aiJournal.journal_date,
     journal_type: aiJournal.journal_type,
     reference_number: aiJournal.reference_number,
     lineCount: aiJournal.lines?.length
@@ -414,7 +414,7 @@ export function extractJournalEntryFromText(text: string): AIJournalEntry | null
       try {
         // Try parsing JSON directly
         const journalData = JSON.parse(journalMatch[1]);
-        if (journalData.memo && journalData.transaction_date && Array.isArray(journalData.lines)) {
+        if (journalData.memo && journalData.journal_date && Array.isArray(journalData.lines)) {
           return journalData as AIJournalEntry;
         }
       } catch (e) {
@@ -497,13 +497,13 @@ export function isJournalSummaryQuery(message: string): boolean {
  * Get recent unposted journal entries
  * @param limit - Maximum number of journals to return (default: 20)
  */
-export async function getUnpostedJournals(limit: number = 20): Promise<{ id: number, transaction_date: string, memo: string, total_debits: number }[]> {
+export async function getUnpostedJournals(limit: number = 20): Promise<{ id: number, journal_date: string, memo: string, total_debits: number }[]> {
   try {
     const query = `
-      SELECT id, transaction_date, memo, total_debits
+      SELECT id, journal_date, memo, total_debits
       FROM journals
       WHERE is_posted = false AND is_deleted = false
-      ORDER BY transaction_date DESC, id DESC
+      ORDER BY journal_date DESC, id DESC
       LIMIT $1
     `;
     
@@ -632,7 +632,7 @@ export async function findJournalsToPostWithAI(query: string): Promise<number[]>
             
             Available unposted journals:
             ${unpostedJournals.map(j => 
-              `ID: ${j.id}, Date: ${j.transaction_date}, Memo: ${j.memo}, Amount: $${j.total_debits}`
+              `ID: ${j.id}, Date: ${j.journal_date}, Memo: ${j.memo}, Amount: $${j.total_debits}`
             ).join('\n')}
             
             Which journal IDs should be posted based on the query?
@@ -860,7 +860,7 @@ export function extractJournalIdFromEditQuery(message: string): number | null {
   // Various regex patterns to match journal IDs in different contexts
   const patterns = [
     // Change the value of journal entry 72 to $2000
-    /(change|update|modify|adjust|set)\s+(the\s+)?(value|amount|total|debit|credit)\s+of\s+(journal|entry|transaction)\s*(entry\s+)?(id|#)?\s*(\d+)(\s+to\s+[\$]?\d+)?/i,
+    /(change|update|set|modify)\s+(the\s+)?(value|amount|total|debit|credit)\s+of\s+(journal|entry)\s*(entry\s+)?(id|#)?\s*(\d+)\s+to\s+\$?(\d+(?:\.\d+)?)/i,
     
     // Entry 72 to $2000
     /(journal|entry|transaction)\s*(entry\s+)?(id|#|number)?\s*(\d+)\s+to\s+[\$]?(\d+)/i,
@@ -1174,7 +1174,7 @@ export async function updateJournalEntry(journalId: number, updates: {
       
       if (updates.date !== undefined) {
         const paramIndex = queryParams.length + 1;
-        setValues.push(`transaction_date = $${paramIndex}`);
+        setValues.push(`journal_date = $${paramIndex}`);
         queryParams.push(updates.date);
       }
       

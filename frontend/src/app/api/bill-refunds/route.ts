@@ -26,7 +26,7 @@ interface Bill {
   bill_date: string;
   due_date: string;
   total_amount: number;
-  amount_paid: number;
+  paid_amount: number;
   status: string;
   terms?: string;
   memo?: string;
@@ -89,8 +89,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Only paid bills can be refunded' }, { status: 400 });
     }
     
-    // Check if bill has an amount_paid value
-    const billAmountPaid = bill.amount_paid || 0;
+    // Check if bill has an paid_amount value
+    const billAmountPaid = bill.paid_amount || 0;
     
     // Check if refund amount exceeds paid amount
     if (refund.amount > billAmountPaid) {
@@ -305,7 +305,7 @@ export async function POST(req: NextRequest) {
         
         const newRefund = refundResult.rows[0];
         
-        // No longer update the bill's amount_paid or status
+        // No longer update the bill's paid_amount or status
         // Refunds are tracked separately and don't modify the original bill
         
         // Commit the transaction

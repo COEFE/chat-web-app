@@ -220,7 +220,7 @@ export async function calculateDueDateFromTerms(invoiceDate: Date, terms: string
 /**
  * Identify expense account with AI
  */
-export async function identifyExpenseAccountWithAI(params: { vendorId: number; memo: string; amount: number }): Promise<number | null> {
+export async function identifyExpenseAccountWithAI(params: { vendorId: number; description: string; amount: number }): Promise<number | null> {
   console.log('[ExcelDataProcessor] Starting expense account identification with AI');
   
   try {
@@ -267,10 +267,10 @@ export async function identifyExpenseAccountWithAI(params: { vendorId: number; m
     
     // Implement intelligent pre-filtering to find the most relevant accounts
     // This helps Claude by providing a more targeted set of options
-    const getRelevantAccounts = (accounts: any[], vendorName: string, memo: string): AccountWithScore[] => {
+    const getRelevantAccounts = (accounts: any[], vendorName: string, description: string): AccountWithScore[] => {
       // Convert inputs to lowercase for case-insensitive matching
       const vendorLower = vendorName.toLowerCase();
-      const memoLower = memo ? memo.toLowerCase() : '';
+      const descriptionLower = description ? description.toLowerCase() : '';
       
       // Score each account based on relevance to the transaction
       const scoredAccounts = accounts.map((acc: any) => {
@@ -280,12 +280,12 @@ export async function identifyExpenseAccountWithAI(params: { vendorId: number; m
         
         // Check for exact or partial matches in account name
         if (nameLower.includes(vendorLower) || vendorLower.includes(nameLower)) score += 5;
-        if (memoLower && nameLower.includes(memoLower)) score += 3;
+        if (descriptionLower && nameLower.includes(descriptionLower)) score += 3;
         
         // Check for keywords in the memo that might match account purpose
         const keywords = ['marketing', 'advertising', 'rent', 'salary', 'travel', 'office', 'supplies', 'utilities'];
         keywords.forEach(keyword => {
-          if (nameLower.includes(keyword) && memoLower.includes(keyword)) score += 4;
+          if (nameLower.includes(keyword) && descriptionLower.includes(keyword)) score += 4;
         });
         
         return { ...acc, score };
@@ -296,7 +296,7 @@ export async function identifyExpenseAccountWithAI(params: { vendorId: number; m
     };
     
     // Get the most relevant accounts for this transaction
-    const relevantAccounts = getRelevantAccounts(accounts, vendorName, params.memo);
+    const relevantAccounts = getRelevantAccounts(accounts, vendorName, params.description);
     const accountOptions = relevantAccounts.map((acc: AccountWithScore) => {
       return `ID: ${acc.id}, Name: ${acc.name || 'N/A'}, Code: ${acc.code || 'N/A'}, Type: ${acc.account_type || 'N/A'}`;
     }).join('\n');
@@ -305,7 +305,7 @@ export async function identifyExpenseAccountWithAI(params: { vendorId: number; m
     const prompt = `Select the best expense account for this transaction:
 
 Vendor: ${vendorName}
-Description: ${params.memo}
+Description: ${params.description}
 Amount: ${params.amount || 'Unknown'}
 
 Accounts:
@@ -809,7 +809,7 @@ async function identifyColumnMappings(headers: string[], sampleRow: Record<strin
         bill_date: ['bill_date', 'invoice_date', 'date', 'Invoice Date', 'Bill Date', 'BILL_DATE'],
         due_date: ['due_date', 'payment_due', 'Due Date', 'Payment Due', 'DUE_DATE'],
         total_amount: ['total_amount', 'amount', 'total', 'invoice_amount', 'bill_amount', 'Total Amount', 'Amount', 'TOTAL', 'Invoice Total', 'Total'],
-        memo: ['memo', 'notes', 'description', 'comments', 'Memo', 'Notes', 'Description', 'MEMO'],
+        description: ['memo', 'notes', 'description', 'comments', 'Memo', 'Notes', 'Description', 'MEMO'],
         line_description: ['item_description', 'line_description', 'description', 'item', 'Description', 'Item', 'LINE_DESC'],
         line_amount: ['item_amount', 'line_amount', 'amount', 'line_total', 'Amount', 'Line Amount', 'LINE_AMOUNT'],
         line_account: ['account_id', 'gl_account', 'account', 'Account', 'GL Account', 'ACCOUNT_ID']
@@ -898,7 +898,7 @@ Example response format:
         bill_date: ['bill_date', 'invoice_date', 'date', 'Invoice Date', 'Bill Date', 'BILL_DATE'],
         due_date: ['due_date', 'payment_due', 'Due Date', 'Payment Due', 'DUE_DATE'],
         total_amount: ['total_amount', 'amount', 'total', 'invoice_amount', 'bill_amount', 'Total Amount', 'Amount', 'TOTAL', 'Invoice Total', 'Total'],
-        memo: ['memo', 'notes', 'description', 'comments', 'Memo', 'Notes', 'Description', 'MEMO'],
+        description: ['memo', 'notes', 'description', 'comments', 'Memo', 'Notes', 'Description', 'MEMO'],
         line_description: ['item_description', 'line_description', 'description', 'item', 'Description', 'Item', 'LINE_DESC'],
         line_amount: ['item_amount', 'line_amount', 'amount', 'line_total', 'Amount', 'Line Amount', 'LINE_AMOUNT'],
         line_account: ['account_id', 'gl_account', 'account', 'Account', 'GL Account', 'ACCOUNT_ID']
@@ -1197,7 +1197,7 @@ export async function processVendorBillsFromExcel(
               
               // Use AI to select the appropriate expense account based on vendor, description, and amount
               const expenseAccountId = await identifyExpenseAccountWithAI({
-                memo: billData.memo || billData.lines[0]?.description || '',
+                description: billData.memo || billData.lines[0]?.description || '',
                 amount: billData.total_amount,
                 vendorId: vendorId
                 // userId parameter removed as it's not used in the function
@@ -1208,10 +1208,12 @@ export async function processVendorBillsFromExcel(
               // Convert our line items to match the BillLine interface
               const formattedLines = billData.lines.map(line => ({
                 description: line.description || '',
-                expense_account_id: String(line.expense_account_id || expenseAccountId), // Use the discovered expense account ID
+                account_id: String(line.expense_account_id || expenseAccountId), // Required by BillLine interface
+                expense_account_id: Number(line.expense_account_id || expenseAccountId), // Use the discovered expense account ID
                 quantity: '1', // Default quantity
                 unit_price: String(line.amount || 0), // Use the amount as unit price
-                amount: String(line.amount || 0), // Amount as string
+                line_total: String(line.amount || 0), // Required by BillLine interface
+                amount: Number(line.amount || 0), // Amount as number
                 category: '',
                 location: '',
                 funder: ''
@@ -1239,7 +1241,7 @@ export async function processVendorBillsFromExcel(
                 bill_date: billData.bill_date.toISOString().split('T')[0], // Convert Date to YYYY-MM-DD
                 due_date: billData.due_date.toISOString().split('T')[0], // Convert Date to YYYY-MM-DD
                 total_amount: billData.total_amount,
-                memo: billData.memo || '',
+                description: billData.memo || '',
                 status: 'Open', // Set to Open to ensure journal entries are created
                 ap_account_id: apAccountId
               }, formattedLines, userId); // Pass userId for proper data isolation

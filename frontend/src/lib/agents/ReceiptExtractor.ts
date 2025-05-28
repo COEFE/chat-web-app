@@ -170,6 +170,100 @@ export class ReceiptExtractor {
     }
   }
 
+  private async convertHeicToJpeg(base64Data: string, mediaType: string): Promise<{ data: string; mediaType: string }> {
+    // If not HEIC, return as-is
+    if (mediaType !== 'image/heic' && mediaType !== 'image/heif') {
+      return { data: base64Data, mediaType };
+    }
+
+    try {
+      console.log('[ReceiptExtractor] Converting HEIC to JPEG on server...');
+      
+      // Convert base64 to buffer
+      const buffer = Buffer.from(base64Data, 'base64');
+      
+      // Method 1: Try libheif-js (Node.js HEIF/HEIC decoder)
+      try {
+        console.log('[ReceiptExtractor] Trying libheif-js conversion...');
+        const libheif = require('libheif-js');
+        
+        // Decode HEIC
+        const decoder = new libheif.HeifDecoder();
+        const data = decoder.decode(buffer);
+        
+        if (data && data.length > 0) {
+          const image = data[0];
+          const width = image.get_width();
+          const height = image.get_height();
+          
+          // Get image data as RGBA
+          const imageData = image.display(new libheif.HeifImage(), {
+            colorSpace: libheif.ColorSpace.RGB,
+            chroma: libheif.Chroma.RGB_888
+          });
+          
+          // Convert to JPEG using Sharp
+          const sharp = require('sharp');
+          const jpegBuffer = await sharp(imageData, {
+            raw: {
+              width: width,
+              height: height,
+              channels: 3
+            }
+          })
+          .jpeg({ quality: 90 })
+          .toBuffer();
+          
+          const jpegBase64 = jpegBuffer.toString('base64');
+          console.log('[ReceiptExtractor] HEIC converted to JPEG using libheif-js + Sharp');
+          return { data: jpegBase64, mediaType: 'image/jpeg' };
+        }
+      } catch (libheifError) {
+        console.warn('[ReceiptExtractor] libheif-js conversion failed:', libheifError);
+      }
+      
+      // Method 2: Try Sharp directly (might work with some HEIC files)
+      try {
+        console.log('[ReceiptExtractor] Trying Sharp direct conversion...');
+        const sharp = require('sharp');
+        const jpegBuffer = await sharp(buffer)
+          .jpeg({ quality: 90 })
+          .toBuffer();
+        
+        const jpegBase64 = jpegBuffer.toString('base64');
+        console.log('[ReceiptExtractor] HEIC converted to JPEG using Sharp directly');
+        return { data: jpegBase64, mediaType: 'image/jpeg' };
+      } catch (sharpError) {
+        console.warn('[ReceiptExtractor] Sharp direct conversion failed:', sharpError);
+      }
+      
+      // Method 3: Try heic-convert (npm package)
+      try {
+        console.log('[ReceiptExtractor] Trying heic-convert...');
+        const heicConvert = require('heic-convert');
+        
+        const outputBuffer = await heicConvert({
+          buffer: buffer,
+          format: 'JPEG',
+          quality: 0.9
+        });
+        
+        const jpegBase64 = Buffer.from(outputBuffer).toString('base64');
+        console.log('[ReceiptExtractor] HEIC converted to JPEG using heic-convert');
+        return { data: jpegBase64, mediaType: 'image/jpeg' };
+      } catch (heicConvertError) {
+        console.warn('[ReceiptExtractor] heic-convert failed:', heicConvertError);
+      }
+      
+    } catch (error) {
+      console.error('[ReceiptExtractor] HEIC conversion failed:', error);
+    }
+    
+    // If all conversion attempts fail, reject the request instead of sending invalid data
+    console.error('[ReceiptExtractor] All HEIC conversion methods failed');
+    throw new Error('HEIC image conversion failed. Please convert the image to JPEG/PNG format and try again.');
+  }
+
   public async extractReceiptInfo(
     userQuery: string,
     imageUrlOrBase64: string,
@@ -210,6 +304,11 @@ export class ReceiptExtractor {
           imageMediaType = prefixMatch.mediaType;
           imageData = prefixMatch.data;
         }
+        
+        // Convert HEIC to JPEG if necessary
+        const convertedData = await this.convertHeicToJpeg(imageData, imageMediaType);
+        imageData = convertedData.data;
+        imageMediaType = convertedData.mediaType;
       } else {
         return {
           success: false,

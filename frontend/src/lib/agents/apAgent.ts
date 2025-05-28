@@ -1587,14 +1587,9 @@ Use the following information to help answer the user's query about accounts pay
           // Make a simple cross-process API call that will detect the status change
           // and create the journal entry
           // Get base URL for the API call
-          const host =
-            process.env.NEXT_PUBLIC_APP_URL ||
-            process.env.VERCEL_URL ||
-            "localhost:3000";
+          const host = process.env.VERCEL_URL || "localhost:3000";
           const protocol = host.includes("localhost") ? "http" : "https";
-          const baseUrl = host.startsWith("http")
-            ? host
-            : `${protocol}://${host}`;
+          const baseUrl = `${protocol}://${host}`;
 
           console.log(`[APAgent] Using base URL for API call: ${baseUrl}`);
 
@@ -1605,11 +1600,7 @@ Use the following information to help answer the user's query about accounts pay
               Authorization: "Bearer internal-api-call",
             },
             body: JSON.stringify({
-              bill: {
-                // Set status to Open again, which will trigger journal entry creation
-                // via the API's existing logic
-                status: "Open",
-              },
+              bill: { status: "Open" },
             }),
           });
 
@@ -1620,7 +1611,7 @@ Use the following information to help answer the user's query about accounts pay
             // Note: We don't return an error here since the bill status was already updated
           } else {
             console.log(
-              `[APAgent] Journal entry created successfully for bill ${bill.id}`
+              `[APAgent] Successfully created journal entry for bill ${bill.id}`
             );
           }
         } catch (apiError) {
@@ -3446,11 +3437,11 @@ Use the following information to help answer the user's query about accounts pay
       // Create default bill line
       const lines = [
         {
-          expense_account_id: expenseAccountId.toString(), // Convert to string to match BillLine type
+          account_id: expenseAccountId.toString(), // Convert to string to match BillLine type
           description: billInfo.description || "General expense",
           quantity: "1",
           unit_price: (billInfo.amount || 0).toString(),
-          amount: (billInfo.amount || 0).toString(),
+          line_total: (billInfo.amount || 0).toString(),
           category: "",
           location: "",
           funder: "",

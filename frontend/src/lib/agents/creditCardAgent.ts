@@ -3019,7 +3019,7 @@ export class CreditCardAgent implements Agent {
               throw new Error(`Invalid account IDs: debitAccountId=${debitAccountId}, creditAccountId=${creditAccountId}`);
             }
             if (!amount || amount <= 0) {
-              throw new Error(`Invalid amount: ${amount}`);
+              throw new Error(`Invalid line_total: ${amount}`);
             }
             
             // Verify accounts exist in database
@@ -3119,7 +3119,7 @@ export class CreditCardAgent implements Agent {
             creditCardAccountId: accountId,
             creditCardAccountName: accountName,
             bankAccountId: creditAccountId,
-            amount: amount,
+            line_total: amount,
             date: transaction.date,
             description: transaction.description,
             isPayment: transaction.isPayment || true,
@@ -3210,7 +3210,7 @@ export class CreditCardAgent implements Agent {
           JSON.stringify({
             transactionId: transaction.transactionId || transaction.id || '',
             description: transaction.description,
-            amount: transaction.amount,
+            line_total: transaction.amount,
             date: transaction.date
           }, null, 2)
         );
@@ -4456,11 +4456,11 @@ Do not include any other text outside of the JSON object.`;
 
       // Format the bill line according to the BillLine interface
       const billLine = {
-        expense_account_id: expenseAccountId.toString(),
+        account_id: expenseAccountId.toString(),
         description: transaction.description,
         quantity: "1",
         unit_price: Math.abs(transaction.amount).toString(),
-        amount: Math.abs(transaction.amount).toString(),
+        line_total: Math.abs(transaction.amount).toString(),
         category: expenseCategory,
       };
 
@@ -4559,7 +4559,7 @@ Do not include any other text outside of the JSON object.`;
           // Make sure we have a valid transaction amount
           const transactionAmount = Math.abs(transaction.amount);
           console.log(
-            `[CreditCardAgent] Creating journal entry with transaction amount: ${transactionAmount}`
+            `[CreditCardAgent] Creating journal entry with transaction line_total: ${transactionAmount}`
           );
 
           const journalResult = await sql.query(journalInsertQuery, [

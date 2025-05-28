@@ -1,68 +1,132 @@
 import { useFeatureFlags } from '@/lib/featureFlags';
 import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import ReceiptUploadButton from '@/components/receipts/ReceiptUploadButton';
 
 export default function MVPNavigation() {
   const features = useFeatureFlags();
   
   return (
-    <nav className="bg-white shadow-sm border-b">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16">
-          <div className="flex">
-            <div className="flex-shrink-0 flex items-center">
-              <h1 className="text-xl font-bold text-blue-600">
-                {process.env.NEXT_PUBLIC_PRODUCT_TIER === 'mvp' ? 'ExpenseAI' : 'AccountingAI Pro'}
-              </h1>
-            </div>
-            
-            <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-              {/* Core MVP Features */}
-              {features.expenseTracking && (
-                <Link href="/expenses" className="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
-                  Expenses
-                </Link>
-              )}
-              
-              {features.receiptScanning && (
-                <Link href="/dashboard/accounting-assistant" className="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
-                  Scan Receipt
-                </Link>
-              )}
-              
-              {features.basicReporting && (
-                <Link href="/reports" className="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
-                  Reports
-                </Link>
-              )}
-              
-              {/* Advanced Features (Only for Enterprise) */}
-              {features.invoicing && (
-                <Link href="/invoicing" className="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
-                  Invoicing
-                </Link>
-              )}
-              
-              {features.accounting && (
-                <Link href="/accounting" className="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
-                  Accounting
-                </Link>
-              )}
-              
-              {features.fullAccounting && (
-                <Link href="/dashboard" className="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
-                  Dashboard
-                </Link>
-              )}
-            </div>
-          </div>
+    <>
+      {/* Home link - always visible */}
+      <Button asChild variant="ghost">
+        <Link href="/">Home</Link>
+      </Button>
+      
+      {/* MVP Mode: Only show Accounting Assistant */}
+      {process.env.NEXT_PUBLIC_PRODUCT_TIER === 'mvp' && (
+        <>
+          <Button asChild variant="ghost">
+            <Link href="/dashboard/accounting-assistant">Accounting Assistant</Link>
+          </Button>
+          {features.aiAssistant && (
+            <Button asChild variant="ghost">
+              <Link href="/assistant">AI Assistant</Link>
+            </Button>
+          )}
+        </>
+      )}
+      
+      {/* Enterprise/Development Mode: Show all features */}
+      {process.env.NEXT_PUBLIC_PRODUCT_TIER !== 'mvp' && (
+        <>
+          {features.dashboard && (
+            <Button asChild variant="ghost">
+              <Link href="/dashboard">Dashboard</Link>
+            </Button>
+          )}
           
-          <div className="flex items-center">
-            <Link href="/profile" className="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium">
-              Profile
-            </Link>
-          </div>
-        </div>
-      </div>
-    </nav>
+          {/* Receipt Upload Button - next to dashboard */}
+          {features.expenseTracking && <ReceiptUploadButton />}
+          
+          {/* Receipts link - for tracking uploaded receipts */}
+          {features.expenseTracking && (
+            <Button asChild variant="ghost">
+              <Link href="/dashboard/receipts">Receipts</Link>
+            </Button>
+          )}
+          
+          {features.expenseTracking && (
+            <Button asChild variant="ghost">
+              <Link href="/dashboard/transactions">Transactions</Link>
+            </Button>
+          )}
+          
+          {features.basicReporting && (
+            <Button asChild variant="ghost">
+              <Link href="/dashboard/reports">Financial Reports</Link>
+            </Button>
+          )}
+          
+          <Button asChild variant="ghost">
+            <Link href="/dashboard/accounting-assistant">Accounting Assistant</Link>
+          </Button>
+          
+          {features.aiAssistant && (
+            <Button asChild variant="ghost">
+              <Link href="/assistant">AI Assistant</Link>
+            </Button>
+          )}
+          
+          {features.fullAccounting && (
+            <>
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/gl-codes">GL Codes</Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/gl-transactions">GL Transactions</Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/accounts">Accounts</Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/financial-dashboard">Financial Dashboard</Link>
+              </Button>
+            </>
+          )}
+          
+          {features.invoicing && (
+            <>
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/accounts-payable/vendors">Accounts Payable</Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/accounts-receivable/invoices">Invoices</Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/accounts-receivable/customers">Customers</Link>
+              </Button>
+            </>
+          )}
+          
+          {features.fullAccounting && (
+            <Button asChild variant="ghost">
+              <Link href="/dashboard/banking">Banking</Link>
+            </Button>
+          )}
+          
+          {features.multiEntity && (
+            <Button asChild variant="ghost">
+              <Link href="/dashboard/crm">CRM</Link>
+            </Button>
+          )}
+          
+          {/* Admin features for development */}
+          {process.env.NODE_ENV === 'development' && (
+            <>
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/admin/database">Admin DB</Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/admin/agent-tests">Agent Tests</Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/admin/audit-logs">Audit Logs</Link>
+              </Button>
+            </>
+          )}
+        </>
+      )}
+    </>
   );
 }

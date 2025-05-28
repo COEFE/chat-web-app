@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     });
     console.log('[GL Agent Journal API] Journal entry data:', {
       memo: body.journalEntry?.memo,
-      transaction_date: body.journalEntry?.transaction_date,
+      journal_date: body.journalEntry?.journal_date,
       journal_type: body.journalEntry?.journal_type,
       reference_number: body.journalEntry?.reference_number,
       lineCount: body.journalEntry?.lines?.length,
@@ -75,37 +75,21 @@ export async function POST(request: Request) {
     
     const journalEntry = body.journalEntry as AIJournalEntry;
     
-    // Validate journal entry format has required fields
-    if (!journalEntry.memo || !journalEntry.transaction_date || !journalEntry.lines || journalEntry.lines.length === 0) {
-      console.error('[GL Agent Journal API] Missing required fields in journal entry:', { 
-        hasMemo: !!journalEntry.memo, 
-        hasDate: !!journalEntry.transaction_date, 
-        hasLines: !!journalEntry.lines, 
-        lineCount: journalEntry.lines?.length 
-      });
-      return NextResponse.json(
-        { 
-          success: false, 
-          message: 'Invalid journal entry format. Required fields: memo, transaction_date, and at least one line.' 
-        },
-        { status: 400 }
-      );
+    // Validate required fields
+    if (!journalEntry.memo || !journalEntry.journal_date || !journalEntry.lines || journalEntry.lines.length === 0) {
+      return NextResponse.json({ 
+        error: 'Missing required fields: memo, journal_date, and lines are required' 
+      }, { status: 400 });
     }
-    
-    // Log the full journal entry for debugging
-    console.log('[GL Agent Journal API] Processing journal entry:', {
-      memo: journalEntry.memo,
-      date: journalEntry.transaction_date,
-      type: journalEntry.journal_type,
-      reference: journalEntry.reference_number,
-      lineCount: journalEntry.lines.length,
-      lines: journalEntry.lines.map(l => ({
-        account: l.account_code_or_name,
-        debit: l.debit,
-        credit: l.credit
-      }))
-    });
-    
+
+    // Validate date format
+    const journalDate = new Date(journalEntry.journal_date);
+    if (isNaN(journalDate.getTime())) {
+      return NextResponse.json({ 
+        error: 'Invalid journal_date format' 
+      }, { status: 400 });
+    }
+
     // Validate lines have required fields
     for (const line of journalEntry.lines) {
       if (!line.account_code_or_name || (line.debit === undefined && line.credit === undefined)) {

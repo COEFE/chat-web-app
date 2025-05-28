@@ -48,7 +48,7 @@ interface JournalLineResult {
 
 interface JournalResult {
   id: number;
-  transaction_date: string;
+  journal_date: string;
   memo: string;
   journal_type: string;
   source: string;
@@ -313,7 +313,7 @@ export function SemanticJournalSearch() {
                       </Badge>
                     </div>
                     <div className="flex justify-between text-sm text-muted-foreground">
-                      <span>{journal.transaction_date}</span>
+                      <span>{journal.journal_date}</span>
                       <span className="uppercase text-xs">{journal.journal_type}</span>
                     </div>
                   </CardHeader>

@@ -35,13 +35,13 @@ export async function GET(req: NextRequest) {
     const { rows } = await sql<AccountRow>`
       SELECT 
         id, 
-        code, 
+        account_code as code, 
         name, 
         parent_id, 
         notes,
         is_custom
       FROM accounts 
-      ORDER BY code ASC;
+      ORDER BY account_code ASC;
     `;
 
     const accounts = rows as AccountRow[];

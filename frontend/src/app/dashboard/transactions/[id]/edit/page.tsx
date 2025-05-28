@@ -266,8 +266,8 @@ export default function EditJournalPage() {
       const formattedLines = lines.map(line => ({
         id: line.id,
         account_id: line.account_id,
-        debit: line.debit || '0',
-        credit: line.credit || '0',
+        debit_amount: parseFloat(line.debit) || 0,
+        credit_amount: parseFloat(line.credit) || 0,
         description: line.description || '',
         category: line.category || '',
         location: line.location || '',

@@ -21,8 +21,8 @@ export async function beforePost(
   error?: string;
 }> {
   // Check for required fields
-  if (!journal.transaction_date) {
-    return { valid: false, error: 'Transaction date is required' };
+  if (!journal.journal_date) {
+    return { valid: false, error: 'Journal date is required' };
   }
   
   if (!journal.memo || journal.memo.trim().length === 0) {
@@ -34,8 +34,8 @@ export async function beforePost(
   }
   
   // Check for balanced debits/credits (client-side validation)
-  const totalDebits = journal.lines.reduce((sum: number, line: JournalLine) => sum + (Number(line.debit) || 0), 0);
-  const totalCredits = journal.lines.reduce((sum: number, line: JournalLine) => sum + (Number(line.credit) || 0), 0);
+  const totalDebits = journal.lines.reduce((sum: number, line: JournalLine) => sum + (Number(line.debit_amount) || 0), 0);
+  const totalCredits = journal.lines.reduce((sum: number, line: JournalLine) => sum + (Number(line.credit_amount) || 0), 0);
   
   if (Math.abs(totalDebits - totalCredits) > 0.01) {
     return { 
@@ -46,10 +46,10 @@ export async function beforePost(
   
   // Check for period locks - don't allow posting to closed accounting periods
   try {
-    // Convert transaction_date to string if it's a Date object
-    const dateStr = typeof journal.transaction_date === 'string' 
-      ? journal.transaction_date 
-      : journal.transaction_date.toISOString().split('T')[0];
+    // Convert journal_date to string if it's a Date object
+    const dateStr = typeof journal.journal_date === 'string' 
+      ? journal.journal_date 
+      : journal.journal_date.toISOString().split('T')[0];
       
     const { rows } = await sql.query(`
       SELECT EXISTS (
@@ -255,7 +255,7 @@ async function generateJournalEmbeddings(journalId: number): Promise<void> {
       memo,
       source,
       journal_type,
-      transaction_date
+      journal_date
     FROM 
       journals
     WHERE 
@@ -276,10 +276,10 @@ async function generateJournalEmbeddings(journalId: number): Promise<void> {
       const textToEmbed = `
         Journal: ${journal.memo}
         Type: ${journal.journal_type || 'General'}
-        Date: ${journal.transaction_date}
+        Date: ${journal.journal_date}
         Line Description: ${line.description || ''}
-        Amount: ${line.debit > 0 ? line.debit : line.credit}
-        ${line.debit > 0 ? 'Debit' : 'Credit'}: Account ${line.account_id}
+        Amount: ${line.debit_amount > 0 ? line.debit_amount : line.credit_amount}
+        ${line.debit_amount > 0 ? 'Debit' : 'Credit'}: Account ${line.account_id}
       `;
       
       // Generate embedding
@@ -422,8 +422,8 @@ function amountsChanged(before: any, after: any): boolean {
   
   // Check if any amounts changed
   for (let i = 0; i < before.lines.length; i++) {
-    if (Number(before.lines[i].debit) !== Number(after.lines[i].debit)) return true;
-    if (Number(before.lines[i].credit) !== Number(after.lines[i].credit)) return true;
+    if (Number(before.lines[i].debit_amount) !== Number(after.lines[i].debit_amount)) return true;
+    if (Number(before.lines[i].credit_amount) !== Number(after.lines[i].credit_amount)) return true;
   }
   
   return false;

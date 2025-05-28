@@ -19,13 +19,13 @@ export async function PATCH(req: NextRequest) {
     const { rows } = await sql`
       UPDATE accounts
       SET
-        code       = COALESCE(${code}, code),
+        account_code = COALESCE(${code}, account_code),
         name       = COALESCE(${name}, name),
         parent_id  = COALESCE(${parent_id}, parent_id),
         notes      = COALESCE(${notes}, notes),
         is_custom  = COALESCE(${is_custom}, is_custom)
       WHERE id = ${id}
-      RETURNING id, code, name, parent_id, notes, is_custom;
+      RETURNING id, account_code as code, name, parent_id, notes, is_custom;
     `;
 
     if (rows.length === 0) {

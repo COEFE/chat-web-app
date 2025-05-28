@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
       'bank_transactions',
       'bill_lines',
       'bill_payments',
+      'bill_refunds',
       'bills',
       'budgets',
       'customers',

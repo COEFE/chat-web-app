@@ -35,8 +35,6 @@ export async function GET(req: NextRequest) {
     // Special parameter for getting a specific journal
     const journalId = url.searchParams.get('id');
     if (journalId) {
-      console.log(`[journals/GET] Fetching specific journal ${journalId} for user: ${userId}`);
-      // Pass userId to ensure data privacy
       const journal = await getJournal(parseInt(journalId, 10), userId);
       if (!journal) {
         return NextResponse.json({ error: 'Journal not found' }, { status: 404 });
@@ -54,7 +52,6 @@ export async function GET(req: NextRequest) {
     
     // Get journals with pagination and filters
     // Always pass userId for data privacy/isolation
-    console.log(`[journals/GET] Fetching journals for user: ${userId}`);
     const { journals, total } = await getJournals(
       page,
       limit,
@@ -87,12 +84,70 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { userId, error } = await authenticateRequest(req);
   if (error) return error;
+  
+  console.log('[API] Authenticated userId:', userId);
 
   try {
     const body = await req.json();
     
-    // Detect what format we're dealing with (legacy or new)
-    if (body.date && body.lines && Array.isArray(body.lines)) {
+    console.log('[API] Received request body:', JSON.stringify(body, null, 2));
+    console.log('[API] Number of lines received:', body.journal?.lines ? body.journal.lines.length : 'No lines property');
+    
+    // Handle the new format with nested journal object
+    if (body.journal && body.journal.lines && Array.isArray(body.journal.lines)) {
+      const { journal } = body;
+      const { journal_date, memo, source, reference_number, lines } = journal;
+      
+      // Validate required fields
+      if (!journal_date) {
+        return NextResponse.json({ error: 'Date is required' }, { status: 400 });
+      }
+      
+      if (!lines || !Array.isArray(lines) || lines.length === 0) {
+        return NextResponse.json({ error: 'At least one journal line is required' }, { status: 400 });
+      }
+      
+      // Check for balanced debits and credits using the correct field names
+      const totalDebits = lines.reduce((sum, line) => sum + (parseFloat(line.debit) || 0), 0);
+      const totalCredits = lines.reduce((sum, line) => sum + (parseFloat(line.credit) || 0), 0);
+      
+      // Ensure we don't have lines with both debit and credit values
+      for (const line of lines) {
+        if ((parseFloat(line.debit) || 0) > 0 && (parseFloat(line.credit) || 0) > 0) {
+          return NextResponse.json({
+            error: 'Each journal line must have either a debit OR credit amount, not both',
+            problemLine: line
+          }, { status: 400 });
+        }
+      }
+      
+      if (Math.abs(totalDebits - totalCredits) > 0.01) {
+        return NextResponse.json({
+          error: `Journal entry must balance. Total debits: $${totalDebits.toFixed(2)}, Total credits: $${totalCredits.toFixed(2)}`,
+          totalDebits,
+          totalCredits
+        }, { status: 400 });
+      }
+      
+      // Create the journal entry
+      const journalEntry = await createJournal({
+        journal_type: journal.journal_type || 'GJ',
+        journal_date: journal_date, // Keep as string since interface expects string
+        memo: memo || '',
+        source: source || '',
+        reference_number: reference_number || '',
+        is_posted: false,
+        created_by: userId,
+        lines: lines
+      }, userId);
+      
+      return NextResponse.json({ 
+        message: 'Journal entry created successfully', 
+        journal: journalEntry 
+      });
+    }
+    // Legacy format handling (keep existing logic)
+    else if (body.date && body.lines && Array.isArray(body.lines)) {
       // Legacy format
       const { date, memo, source, lines } = body;
       
@@ -106,30 +161,12 @@ export async function POST(req: NextRequest) {
       }
       
       // Check for balanced debits and credits
-      const totalDebits = lines.reduce((sum, line) => sum + (parseFloat(line.debit) || 0), 0);
-      const totalCredits = lines.reduce((sum, line) => sum + (parseFloat(line.credit) || 0), 0);
-      
-      // Detailed line checking for debugging
-      const lineDetails = lines.map((line, i) => ({
-        index: i,
-        accountId: line.accountId || line.account_id,
-        debit: parseFloat(line.debit) || 0,
-        credit: parseFloat(line.credit) || 0,
-        type: typeof line.debit,
-        rawDebit: line.debit,
-        rawCredit: line.credit
-      }));
-      
-      console.log('Journal balance check:', { 
-        totalDebits: totalDebits.toFixed(2), 
-        totalCredits: totalCredits.toFixed(2),
-        difference: (totalDebits - totalCredits).toFixed(2),
-        lineCount: lines.length
-      });
+      const totalDebits = lines.reduce((sum, line) => sum + (parseFloat(line.debit_amount) || 0), 0);
+      const totalCredits = lines.reduce((sum, line) => sum + (parseFloat(line.credit_amount) || 0), 0);
       
       // Ensure we don't have lines with both debit and credit values
       for (const line of lines) {
-        if ((parseFloat(line.debit) || 0) > 0 && (parseFloat(line.credit) || 0) > 0) {
+        if ((parseFloat(line.debit_amount) || 0) > 0 && (parseFloat(line.credit_amount) || 0) > 0) {
           return NextResponse.json({
             error: 'Each journal line must have either a debit OR credit amount, not both',
             problemLine: line
@@ -158,16 +195,15 @@ export async function POST(req: NextRequest) {
             lines.push({
               accountId: suspenseAccount.id,
               description: 'Auto-balancing entry',
-              debit: diff < 0 ? Math.abs(diff) : 0,
-              credit: diff > 0 ? diff : 0
+              debit_amount: diff < 0 ? Math.abs(diff) : 0,
+              credit_amount: diff > 0 ? diff : 0
             });
             
             // Recalculate totals after adding balancing line
-            const newTotalDebits = lines.reduce((sum, line) => sum + (parseFloat(line.debit) || 0), 0);
-            const newTotalCredits = lines.reduce((sum, line) => sum + (parseFloat(line.credit) || 0), 0);
+            const newTotalDebits = lines.reduce((sum, line) => sum + (parseFloat(line.debit_amount) || 0), 0);
+            const newTotalCredits = lines.reduce((sum, line) => sum + (parseFloat(line.credit_amount) || 0), 0);
             
             if (Math.abs(newTotalDebits - newTotalCredits) <= 0.01) {
-              console.log('Journal auto-balanced using suspense account 9999');
             } else {
               return NextResponse.json({
                 error: `Failed to auto-balance journal. Remaining difference: ${(newTotalDebits - newTotalCredits).toFixed(2)}`,
@@ -179,8 +215,7 @@ export async function POST(req: NextRequest) {
               error: `Journal entry is not balanced. Difference: ${(totalDebits - totalCredits).toFixed(2)}. Create account 9999 for auto-balancing.`,
               totalDebits,
               totalCredits,
-              difference: totalDebits - totalCredits,
-              lineDetails: lineDetails
+              difference: totalDebits - totalCredits
             }, { status: 400 });
           }
         } catch (error) {
@@ -189,15 +224,14 @@ export async function POST(req: NextRequest) {
             error: `Journal entry is not balanced. Difference: ${(totalDebits - totalCredits).toFixed(2)}`,
             totalDebits,
             totalCredits,
-            difference: totalDebits - totalCredits,
-            lineDetails: lineDetails
+            difference: totalDebits - totalCredits
           }, { status: 400 });
         }
       }
       
       // Convert to new journal format
       const journal: Journal = {
-        transaction_date: date,
+        journal_date: date,
         memo: memo || '',
         source: source,
         journal_type: 'GJ', // Default to General Journal for legacy entries
@@ -206,8 +240,8 @@ export async function POST(req: NextRequest) {
           line_number: index + 1,
           account_id: line.accountId || line.account_id,
           description: line.description || '',
-          debit: (parseFloat(line.debit) || 0) > 0 ? parseFloat(line.debit) : 0,
-          credit: (parseFloat(line.credit) || 0) > 0 ? parseFloat(line.credit) : 0
+          debit_amount: (parseFloat(line.debit_amount) || 0) > 0 ? parseFloat(line.debit_amount) : 0,
+          credit_amount: (parseFloat(line.credit_amount) || 0) > 0 ? parseFloat(line.credit_amount) : 0
         }))
       };
       
@@ -237,7 +271,7 @@ export async function POST(req: NextRequest) {
       const journal: Journal = body.journal;
       
       // Validate required fields
-      if (!journal.transaction_date) {
+      if (!journal.journal_date) {
         return NextResponse.json({ error: 'Transaction date is required' }, { status: 400 });
       }
       
@@ -250,8 +284,8 @@ export async function POST(req: NextRequest) {
       }
       
       // Check for balanced debits and credits
-      const totalDebits = journal.lines.reduce((sum, line) => sum + (parseFloat(String(line.debit)) || 0), 0);
-      const totalCredits = journal.lines.reduce((sum, line) => sum + (parseFloat(String(line.credit)) || 0), 0);
+      const totalDebits = journal.lines.reduce((sum, line) => sum + (parseFloat(String(line.debit_amount)) || 0), 0);
+      const totalCredits = journal.lines.reduce((sum, line) => sum + (parseFloat(String(line.credit_amount)) || 0), 0);
       
       if (Math.abs(totalDebits - totalCredits) > 0.01) { // Allow for small rounding differences
         return NextResponse.json({

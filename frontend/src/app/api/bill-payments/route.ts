@@ -63,12 +63,12 @@ export async function POST(req: NextRequest) {
     }
     
     // Check if bill is already fully paid
-    if ((bill.amount_paid || 0) >= (bill.total_amount || 0)) {
+    if ((bill.paid_amount || 0) >= (bill.total_amount || 0)) {
       return NextResponse.json({ error: 'Bill is already fully paid' }, { status: 400 });
     }
     
     // Check if payment amount exceeds remaining amount
-    const remainingAmount = (bill.total_amount || 0) - (bill.amount_paid || 0);
+    const remainingAmount = (bill.total_amount || 0) - (bill.paid_amount || 0);
     if (payment.amount_paid > remainingAmount) {
       return NextResponse.json({ 
         error: `Payment amount ${payment.amount_paid} exceeds remaining bill amount ${remainingAmount}` 

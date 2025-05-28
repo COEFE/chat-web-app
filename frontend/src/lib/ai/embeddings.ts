@@ -151,8 +151,9 @@ export async function findSimilarJournals(
     SELECT 
       jl.id AS line_id,
       j.id AS journal_id,
+      j.journal_number,
+      j.journal_date,
       j.memo,
-      j.transaction_date,
       jl.description,
       jl.debit,
       jl.credit,

@@ -8,24 +8,73 @@ export async function POST(req: NextRequest) {
   if (error) return error;
 
   try {
-    // Create accounts table
-    await sql`
-      CREATE TABLE IF NOT EXISTS accounts (
-        id SERIAL PRIMARY KEY,
-        account_code VARCHAR(50) NOT NULL UNIQUE,
-        name TEXT NOT NULL,
-        parent_id INTEGER REFERENCES accounts(id),
-        notes TEXT,
-        is_custom BOOLEAN NOT NULL DEFAULT FALSE,
-        account_type VARCHAR(50) NOT NULL,
-        is_active BOOLEAN DEFAULT TRUE,
-        is_deleted BOOLEAN DEFAULT FALSE,
-        deleted_at TIMESTAMP WITH TIME ZONE,
-        user_id VARCHAR(255) NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
+    // First check if accounts table exists
+    const { rows: existingTables } = await sql`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'accounts'
+      ) as exists;
     `;
+    
+    // Table already exists, just verify the schema
+    if (existingTables[0]?.exists) {
+      // Check if all required columns exist and add them if needed
+      await sql`
+        ALTER TABLE accounts ADD COLUMN IF NOT EXISTS notes TEXT;
+      `;
+      await sql`
+        ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_custom BOOLEAN NOT NULL DEFAULT FALSE;
+      `;
+      
+      // Count accounts to see if we need to add default accounts
+      const { rows: accountCount } = await sql`SELECT COUNT(*) as count FROM accounts WHERE user_id = ${userId};`;
+      
+      // If we already have accounts for this user, we don't need to do anything else
+      if (parseInt(accountCount[0]?.count) > 0) {
+        return NextResponse.json({ 
+          success: true, 
+          message: `Accounts table already exists and has ${accountCount[0]?.count} accounts for this user`,
+          accountCount: accountCount[0]?.count
+        });
+      }
+      
+      // Check if account_code has unique constraint, if not add it
+      const { rows: constraints } = await sql`
+        SELECT constraint_name 
+        FROM information_schema.table_constraints 
+        WHERE table_name = 'accounts' 
+        AND constraint_type = 'UNIQUE'
+        AND constraint_name LIKE '%account_code%';
+      `;
+      
+      if (constraints.length === 0) {
+        // Add unique constraint to account_code
+        await sql`
+          ALTER TABLE accounts ADD CONSTRAINT accounts_account_code_unique UNIQUE (account_code);
+        `;
+      }
+    } else {
+      // Create accounts table if it doesn't exist
+      await sql`
+        CREATE TABLE IF NOT EXISTS accounts (
+          id SERIAL PRIMARY KEY,
+          account_code VARCHAR(50) NOT NULL UNIQUE,
+          name TEXT NOT NULL,
+          parent_id INTEGER REFERENCES accounts(id),
+          notes TEXT,
+          is_custom BOOLEAN NOT NULL DEFAULT FALSE,
+          account_type VARCHAR(50) NOT NULL,
+          is_active BOOLEAN DEFAULT TRUE,
+          is_deleted BOOLEAN DEFAULT FALSE,
+          deleted_at TIMESTAMP WITH TIME ZONE,
+          user_id VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `;
+    }
+
 
     // Default Chart of Accounts
     const defaults: { account_code: string; name: string; account_type: string; parent?: string }[] = [
@@ -79,7 +128,7 @@ export async function POST(req: NextRequest) {
           VALUES (
             ${acct.account_code},
             ${acct.name},
-            (SELECT id FROM accounts WHERE account_code = ${acct.parent}),
+            (SELECT id FROM accounts WHERE account_code = ${acct.parent} AND user_id = ${userId}),
             NULL,
             FALSE,
             ${acct.account_type},
@@ -117,6 +166,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, message: 'Accounts setup and seeded' });
   } catch (err: any) {
     console.error('[accounts/db-setup] Error:', err);
-    return NextResponse.json({ error: err.message || 'Unknown error' }, { status: 500 });
+    return NextResponse.json({ 
+      error: err.message || 'Unknown error',
+      stack: err.stack 
+    }, { status: 500 });
   }
 }

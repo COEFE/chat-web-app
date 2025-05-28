@@ -118,6 +118,15 @@ export class ReceiptAgent implements Agent {
         };
       }
 
+      // Extract user context from query if provided
+      // Query format: "Process this receipt for: [user context]" or just "process receipt"
+      let userReceiptContext = '';
+      const contextMatch = query.match(/Process this receipt for:\s*(.+)/i);
+      if (contextMatch && contextMatch[1]) {
+        userReceiptContext = contextMatch[1].trim();
+        console.log(`[ReceiptAgent] User provided context: "${userReceiptContext}"`);
+      }
+
       let receiptInfo: any = { success: false };
 
       // Check if we already have extracted data in additionalContext.documentContext
@@ -327,8 +336,9 @@ export class ReceiptAgent implements Agent {
 
           billLineItems.push({
             description: item.description,
-            amount: parseFloat(item.amount.toString()),
             quantity: item.quantity || 1,
+            unit_price: item.amount.toString(),
+            line_total: item.amount.toString(),
             glAccountId: glAccountId,
             category: item.categoryGuess,
           });
@@ -371,11 +381,11 @@ export class ReceiptAgent implements Agent {
           }
 
           billLines.push({
-            expense_account_id: expenseAccountId.toString(),
+            account_id: expenseAccountId.toString(),
             description: item.description,
             quantity: item.quantity.toString(),
-            unit_price: item.amount.toString(),
-            amount: item.amount.toString(),
+            unit_price: item.unit_price,
+            line_total: item.line_total,
             category: item.category,
           });
         }
@@ -414,11 +424,11 @@ export class ReceiptAgent implements Agent {
           }
 
           billLines.push({
-            expense_account_id: taxAccountId.toString(),
+            account_id: taxAccountId.toString(),
             description: "Sales Tax",
             quantity: "1",
             unit_price: receiptInfo.taxAmount.toString(),
-            amount: receiptInfo.taxAmount.toString(),
+            line_total: receiptInfo.taxAmount.toString(),
             category: "Tax Expense",
           });
         }
@@ -457,11 +467,11 @@ export class ReceiptAgent implements Agent {
           }
 
           billLines.push({
-            expense_account_id: tipAccountId.toString(),
+            account_id: tipAccountId.toString(),
             description: "Tip/Gratuity",
             quantity: "1",
             unit_price: receiptInfo.tipAmount.toString(),
-            amount: receiptInfo.tipAmount.toString(),
+            line_total: receiptInfo.tipAmount.toString(),
             category: "Meals & Entertainment",
           });
         }
@@ -491,14 +501,17 @@ export class ReceiptAgent implements Agent {
           bill_date: receiptInfo.receiptDate,
           due_date: receiptInfo.receiptDate, // Same day for receipts
           total_amount: parseFloat(receiptInfo.totalAmount.toString()),
-          amount_paid: 0, // Start with 0, payment will update this
+          paid_amount: 0, // Start with 0, payment will update this
           status: "Open", // Start as Open, payment will update to Paid
-          memo: `Receipt from ${receiptInfo.vendorName} - ${receiptInfo.receiptDate}`,
+          description: userReceiptContext 
+            ? userReceiptContext 
+            : `Receipt from ${receiptInfo.vendorName} - ${receiptInfo.receiptDate}`,
           ap_account_id: await this.findOrCreatePayableAccount(
             context,
             receiptInfo
           ),
           journal_type: journalType,
+          user_receipt_context: userReceiptContext, // Pass user context for journal description
         };
 
         const newBill = await billQueries.createBill(
@@ -892,7 +905,7 @@ For accountName:
       );
 
       const insertResult = await sql`
-        INSERT INTO accounts (name, code, account_type, notes, user_id, is_active) 
+        INSERT INTO accounts (name, account_code, account_type, notes, user_id, is_active) 
         VALUES (
           ${accountName}, 
           ${accountCode}, 
@@ -930,7 +943,7 @@ For accountName:
       // Create a default accounts payable account if none exists
       console.log(`[ReceiptAgent] Creating default accounts payable account`);
       const defaultAPInsert = await sql`
-        INSERT INTO accounts (name, code, account_type, notes, user_id, is_active) 
+        INSERT INTO accounts (name, account_code, account_type, notes, user_id, is_active) 
         VALUES (
           'Accounts Payable', 
           '20001', 
@@ -1068,7 +1081,7 @@ For accountName:
       );
 
       const insertResult = await sql`
-        INSERT INTO accounts (name, code, account_type, notes, user_id, is_active) 
+        INSERT INTO accounts (name, account_code, account_type, notes, user_id, is_active) 
         VALUES (
           ${finalAccountName}, 
           ${accountCode}, 
@@ -1506,6 +1519,9 @@ RESPONSE: Return ONLY the bill number (e.g., "RECEIPT-20230804-PION58")`;
     existingAccounts: Array<{ id: number; name: string; notes?: string }>
   ): Promise<string> {
     try {
+      // First, check if we have existing accounts to avoid duplicates
+      const existingCodes = existingAccounts.map(acc => acc.id.toString());
+      
       const prompt = `Generate a 5-digit GL account code for "${accountName}" (type: ${accountType})
 
 STANDARD RANGES:
@@ -1532,18 +1548,15 @@ RESPONSE: Return ONLY the 5-digit code (e.g., "52100")`;
       
       // Simple validation and fallback
       if (result && /^\d{5}$/.test(result)) {
-        return result;
-      } else {
-        // Fallback based on account type
-        switch (accountType) {
-          case "expense":
-            return (50000 + Math.floor(Math.random() * 9999)).toString();
-          case "liability":
-            return (20000 + Math.floor(Math.random() * 9999)).toString();
-          case "asset":
-            return (10000 + Math.floor(Math.random() * 9999)).toString();
-          default:
-            return (50000 + Math.floor(Math.random() * 9999)).toString();
+        // Check if this code already exists in the database
+        const { rows: existingCodeCheck } = await sql`
+          SELECT id FROM accounts WHERE account_code = ${result} LIMIT 1
+        `;
+        
+        if (existingCodeCheck.length === 0) {
+          return result;
+        } else {
+          console.log(`[ReceiptAgent] AI generated code ${result} already exists, using fallback`);
         }
       }
     } catch (error) {
@@ -1551,18 +1564,40 @@ RESPONSE: Return ONLY the 5-digit code (e.g., "52100")`;
         `[ReceiptAgent] Error generating intelligent account code:`,
         error
       );
-      // Fallback based on account type
-      switch (accountType) {
-        case "expense":
-          return (50000 + Math.floor(Math.random() * 9999)).toString();
-        case "liability":
-          return (20000 + Math.floor(Math.random() * 9999)).toString();
-        case "asset":
-          return (10000 + Math.floor(Math.random() * 9999)).toString();
-        default:
-          return (50000 + Math.floor(Math.random() * 9999)).toString();
+    }
+    
+    // Robust fallback: generate a unique code based on account type
+    return await this.generateFallbackAccountCode(accountType);
+  }
+
+  /**
+   * Generate a fallback account code that's guaranteed to be unique
+   */
+  private async generateFallbackAccountCode(accountType: string): Promise<string> {
+    const ranges = {
+      expense: { start: 50000, end: 59999 },
+      liability: { start: 20000, end: 29999 },
+      asset: { start: 10000, end: 19999 },
+      equity: { start: 30000, end: 39999 },
+      revenue: { start: 40000, end: 49999 }
+    };
+
+    const range = ranges[accountType as keyof typeof ranges] || ranges.expense;
+    
+    // Try to find the next available sequential code
+    for (let code = range.start; code <= range.end; code++) {
+      const { rows: existingCodeCheck } = await sql`
+        SELECT id FROM accounts WHERE account_code = ${code.toString()} LIMIT 1
+      `;
+      
+      if (existingCodeCheck.length === 0) {
+        return code.toString();
       }
     }
+    
+    // If all sequential codes are taken, use random with timestamp
+    const timestamp = Date.now().toString().slice(-3);
+    return `${range.start + parseInt(timestamp)}`;
   }
 
   /**
@@ -1631,7 +1666,7 @@ RESPONSE: Return ONLY the 5-digit code (e.g., "52100")`;
       );
 
       const insertResult = await sql`
-        INSERT INTO accounts (name, code, account_type, notes, user_id, is_active) 
+        INSERT INTO accounts (name, account_code, account_type, notes, user_id, is_active) 
         VALUES (
           ${accountName}, 
           ${accountCode}, 

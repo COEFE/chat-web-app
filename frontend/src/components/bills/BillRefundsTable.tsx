@@ -25,21 +25,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Trash2 } from 'lucide-react';
-
-interface BillRefund {
-  id: number;
-  bill_id: number;
-  refund_date: string;
-  amount: number;
-  refund_account_id: number;
-  refund_method?: string;
-  reference_number?: string;
-  journal_id?: number;
-  reason?: string;
-  created_at: string;
-  updated_at: string;
-  account_name?: string; // From join with accounts table
-}
+import { BillRefund } from '@/lib/accounting/billQueries';
 
 interface BillRefundsTableProps {
   billId: number;
@@ -185,7 +171,7 @@ export default function BillRefundsTable({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => handleDeleteClick(refund.id)}
+                  onClick={() => handleDeleteClick(refund.id || 0)}
                   title="Delete Refund"
                 >
                   <Trash2 className="h-4 w-4" />

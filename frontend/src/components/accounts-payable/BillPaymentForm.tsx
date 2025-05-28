@@ -41,6 +41,7 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import { Loader2, CalendarIcon } from "lucide-react";
 import { getAuth } from "firebase/auth";
+import { Bill } from "@/lib/accounting/billQueries";
 
 // Define the validation schema
 const paymentFormSchema = z.object({
@@ -67,20 +68,6 @@ interface Account {
   type?: string; // Keeping for backward compatibility
 }
 
-interface Bill {
-  id: number;
-  vendor_id: number;
-  vendor_name: string;
-  bill_number?: string;
-  bill_date: string;
-  due_date: string;
-  total_amount: number;
-  amount_paid: number;
-  status: string;
-  ap_account_id: number;
-  ap_account_name: string;
-}
-
 interface BillPaymentFormProps {
   bill: Bill;
   onClose: (refreshData?: boolean) => void;
@@ -96,7 +83,7 @@ export function BillPaymentForm({ bill, onClose }: BillPaymentFormProps) {
   // Calculate remaining amount to be paid
   useEffect(() => {
     if (bill) {
-      setRemainingAmount(bill.total_amount - bill.amount_paid);
+      setRemainingAmount(bill.total_amount - (bill.amount_paid || bill.paid_amount || 0));
     }
   }, [bill]);
 
@@ -312,7 +299,7 @@ export function BillPaymentForm({ bill, onClose }: BillPaymentFormProps) {
                     {new Intl.NumberFormat('en-US', {
                       style: 'currency',
                       currency: 'USD',
-                    }).format(bill.amount_paid)}
+                    }).format(bill.amount_paid || bill.paid_amount || 0)}
                   </span>
                 </div>
                 <div className="flex justify-between border-t pt-2">

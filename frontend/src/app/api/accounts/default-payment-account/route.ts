@@ -83,7 +83,7 @@ export async function GET(request: Request) {
         // Create a parent asset account
         const createAssetQuery = `
           INSERT INTO accounts (
-            code, name, account_type, is_custom, user_id
+            account_code, name, account_type, is_custom, user_id
           ) VALUES (
             '1000', 'Assets', 'asset', true, $1
           ) RETURNING id
@@ -99,10 +99,10 @@ export async function GET(request: Request) {
       // Create the bank account
       const createBankQuery = `
         INSERT INTO accounts (
-          code, name, account_type, is_custom, user_id, parent_id
+          account_code, name, account_type, is_custom, user_id, parent_id
         ) VALUES (
           '1100', 'Bank Account', 'bank', true, $1, $2
-        ) RETURNING id, name, account_type, code
+        ) RETURNING id, name, account_type, account_code as code
       `;
       
       const bankCreateResult = await sql.query(createBankQuery, [userId, assetAccountId]);

@@ -7,6 +7,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { EmailTemplateProvider } from "@/components/providers/EmailTemplateProvider";
+import MVPNavigation from "@/components/Navigation/MVPNavigation";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -44,60 +45,7 @@ export default function RootLayout({
             <EmailTemplateProvider />
             <header className="border-b bg-background">
               <div className="container mx-auto flex items-center space-x-4 py-4 overflow-x-auto">
-                <Button asChild variant="ghost">
-                  <Link href="/">Home</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/budget">Budget</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard">Dashboard</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/gl-codes">GL Codes</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/gl-transactions">GL Transactions</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/transactions">Transactions</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/accounts">Accounts</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/reports">Financial Reports</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/accounting-assistant">Accounting Assistant</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/financial-dashboard">Financial Dashboard</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/accounts-payable/vendors">Accounts Payable</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/accounts-receivable/invoices">Invoices</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/accounts-receivable/customers">Customers</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/banking">Banking</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/crm">CRM</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/admin/database">Admin DB</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/admin/agent-tests">Agent Tests</Link>
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link href="/dashboard/admin/audit-logs">Audit Logs</Link>
-                </Button>
+                <MVPNavigation />
               </div>
             </header>
             {children}

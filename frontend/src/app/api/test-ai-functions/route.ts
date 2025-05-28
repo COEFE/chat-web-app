@@ -5,7 +5,7 @@ export async function GET() {
   try {
     // Test the AI-powered expense account identification function
     const result = await identifyExpenseAccountWithAI({
-      memo: "Office supplies - paper, pens, and printer ink",
+      description: "Office supplies - paper, pens, and printer ink",
       vendorId: 1,
       amount: 120.50  // Convert string to number
     });

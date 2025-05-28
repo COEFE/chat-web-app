@@ -9,8 +9,8 @@ export interface JournalLine {
   account_name?: string; // For UI display purposes
   account_code?: string; // For UI display purposes
   description: string;
-  debit: number;
-  credit: number;
+  debit_amount: number;
+  credit_amount: number;
   category?: string;
   location?: string;
   vendor?: string;
@@ -21,7 +21,7 @@ export interface Journal {
   id?: number;
   journal_number?: string;
   journal_type: string;
-  transaction_date: string; // ISO date string
+  journal_date: string; // ISO date string
   memo: string;
   source?: string;
   reference_number?: string;
@@ -102,7 +102,7 @@ export async function getJournal(journalId: number, userId?: string): Promise<Jo
   // Check schema first for backwards compatibility
   const schemaCheck = await sql`
     SELECT 
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transaction_date') as has_transaction_date,
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journal_date') as has_journal_date,
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journal_number') as has_journal_number,
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journal_type') as has_journal_type,
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'reference_number') as has_reference_number,
@@ -117,13 +117,14 @@ export async function getJournal(journalId: number, userId?: string): Promise<Jo
     j.id, 
     ${schema.has_journal_number ? 'j.journal_number,' : 'NULL as journal_number,'}
     ${schema.has_journal_type ? 'j.journal_type,' : '\'GJ\' as journal_type,'}
-    ${schema.has_transaction_date ? 'j.transaction_date,' : schema.has_date ? 'j.date as transaction_date,' : 'CURRENT_DATE as transaction_date,'}
+    ${schema.has_journal_date ? 'j.journal_date,' : schema.has_date ? 'j.date as journal_date,' : 'CURRENT_DATE as journal_date,'}
     j.memo, j.source, 
     ${schema.has_reference_number ? 'j.reference_number,' : 'NULL as reference_number,'}
     j.is_posted, j.created_by, j.created_at,
     ${schema.has_journal_types_table ? 'jt.name as journal_type_name,' : '\'General Journal\' as journal_type_name,'}
-    (SELECT SUM(debit) FROM journal_lines WHERE journal_id = j.id) as total_debits,
-    (SELECT SUM(credit) FROM journal_lines WHERE journal_id = j.id) as total_credits,
+    (SELECT SUM(debit_amount) FROM journal_lines WHERE journal_id = j.id) as total_debits,
+    (SELECT SUM(credit_amount) FROM journal_lines WHERE journal_id = j.id) as total_credits,
+    (SELECT COUNT(*) FROM journal_lines WHERE journal_id = j.id) as line_count,
     (SELECT COUNT(*) FROM journal_attachments WHERE journal_id = j.id) as attachment_count
   `;
 
@@ -171,11 +172,30 @@ export async function getJournal(journalId: number, userId?: string): Promise<Jo
 
   const orderByField = hasLineNumber ? 'jl.line_number' : 'jl.id';
 
+  // Check if accounts table has code and name columns
+  const accountColumnsCheck = await sql`
+    SELECT 
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'accounts' AND column_name = 'code') as has_code_column,
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'accounts' AND column_name = 'name') as has_name_column
+  `;
+
+  const hasCodeColumn: boolean = accountColumnsCheck.rows[0]?.has_code_column;
+  const hasNameColumn: boolean = accountColumnsCheck.rows[0]?.has_name_column;
+
+  // Build dynamic select for account code and name
+  const accountCodeField = hasCodeColumn
+    ? 'a.code as account_code'
+    : 'NULL as account_code';
+    
+  const accountNameField = hasNameColumn
+    ? 'a.name as account_name'
+    : 'NULL as account_name';
+
   // Get journal lines
   const linesQuery = `SELECT 
       jl.id, ${lineNumberField}, jl.account_id, jl.description,
-      jl.debit, jl.credit, jl.category, jl.location, jl.vendor, jl.funder,
-      a.code as account_code, a.name as account_name
+      jl.debit_amount, jl.credit_amount, jl.category, jl.location, jl.vendor, jl.funder,
+      ${accountCodeField}, ${accountNameField}
     FROM journal_lines jl
     LEFT JOIN accounts a ON jl.account_id = a.id
     WHERE jl.journal_id = $1
@@ -197,8 +217,8 @@ export async function getJournal(journalId: number, userId?: string): Promise<Jo
     lines: linesResult.rows as unknown as JournalLine[],
     attachments: attachmentsResult.rows as unknown as JournalAttachment[],
     // Calculate totals
-    total_debits: linesResult.rows.reduce((sum, line) => sum + parseFloat(line.debit || 0), 0),
-    total_credits: linesResult.rows.reduce((sum, line) => sum + parseFloat(line.credit || 0), 0),
+    total_debits: linesResult.rows.reduce((sum, line) => sum + parseFloat(line.debit_amount || 0), 0),
+    total_credits: linesResult.rows.reduce((sum, line) => sum + parseFloat(line.credit_amount || 0), 0),
   } as Journal;
   
   return journal;
@@ -235,12 +255,12 @@ export async function getJournals(
   }
   
   if (startDate) {
-    conditions.push('j.transaction_date >= $' + (params.length + 1));
+    conditions.push('j.journal_date >= $' + (params.length + 1));
     params.push(startDate);
   }
   
   if (endDate) {
-    conditions.push('j.transaction_date <= $' + (params.length + 1));
+    conditions.push('j.journal_date <= $' + (params.length + 1));
     params.push(endDate);
   }
   
@@ -265,7 +285,7 @@ export async function getJournals(
   // First, check if the journals table has been migrated to the new schema
   const schemaCheck = await sql`
     SELECT 
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transaction_date') as has_transaction_date,
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journal_date') as has_journal_date,
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journal_number') as has_journal_number,
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journal_type') as has_journal_type,
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'date') as has_date,
@@ -280,17 +300,17 @@ export async function getJournals(
     j.id, 
     ${schema.has_journal_number ? 'j.journal_number,' : 'NULL as journal_number,'}
     ${schema.has_journal_type ? 'j.journal_type,' : '\'GJ\' as journal_type,'}
-    ${schema.has_transaction_date ? 'j.transaction_date,' : schema.has_date ? 'j.date as transaction_date,' : 'CURRENT_DATE as transaction_date,'}
+    ${schema.has_journal_date ? 'j.journal_date,' : schema.has_date ? 'j.date as journal_date,' : 'CURRENT_DATE as journal_date,'}
     j.memo, j.is_posted, j.created_by,
     ${schema.has_journal_types_table ? 'jt.name as journal_type_name,' : '\'General Journal\' as journal_type_name,'}
-    (SELECT SUM(debit) FROM journal_lines WHERE journal_id = j.id) as total_debits,
-    (SELECT SUM(credit) FROM journal_lines WHERE journal_id = j.id) as total_credits,
+    (SELECT SUM(debit_amount) FROM journal_lines WHERE journal_id = j.id) as total_debits,
+    (SELECT SUM(credit_amount) FROM journal_lines WHERE journal_id = j.id) as total_credits,
     (SELECT COUNT(*) FROM journal_lines WHERE journal_id = j.id) as line_count,
     (SELECT COUNT(*) FROM journal_attachments WHERE journal_id = j.id) as attachment_count
   `;
   
   // Build the ordering by available date column
-  let orderBy = schema.has_transaction_date ? 'j.transaction_date' : schema.has_date ? 'j.date' : 'j.id';
+  let orderBy = schema.has_journal_date ? 'j.journal_date' : schema.has_date ? 'j.date' : 'j.id';
   
   // Update join based on schema
   const joinClause = schema.has_journal_types_table && schema.has_journal_type ? 
@@ -311,6 +331,12 @@ export async function getJournals(
   `;
   
   const journalsResult = await sql.query(query, params);
+  
+  if (journalsResult.rows.length > 0) {
+    console.log('[getJournals] Sample journal fields:', Object.keys(journalsResult.rows[0]));
+    console.log('[getJournals] Sample journal date:', journalsResult.rows[0].date);
+    console.log('[getJournals] Sample journal_date:', journalsResult.rows[0].journal_date);
+  }
   
   return {
     journals: journalsResult.rows as Journal[],
@@ -347,8 +373,8 @@ async function getNextJournalNumber(client: any): Promise<string> {
  */
 export async function createJournal(journal: Journal, userId: string): Promise<number> {
   // Validate journal is balanced
-  const totalDebits = journal.lines.reduce((sum, line) => sum + (line.debit || 0), 0);
-  const totalCredits = journal.lines.reduce((sum, line) => sum + (line.credit || 0), 0);
+  const totalDebits = journal.lines.reduce((sum, line) => sum + (line.debit_amount || 0), 0);
+  const totalCredits = journal.lines.reduce((sum, line) => sum + (line.credit_amount || 0), 0);
   
   // Check if debits equal credits (allow for small rounding differences)
   if (Math.abs(totalDebits - totalCredits) > 0.01) {
@@ -357,12 +383,15 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
   
   // Ensure each line has either debit OR credit, not both
   for (const line of journal.lines) {
-    if (line.debit > 0 && line.credit > 0) {
+    const debitAmount = (line as any).debit_amount ?? (line as any).debit ?? 0;
+    const creditAmount = (line as any).credit_amount ?? (line as any).credit ?? 0;
+    
+    if (debitAmount > 0 && creditAmount > 0) {
       throw new Error('Each journal line must have either a debit OR credit amount, not both');
     }
     
     // Ensure we don't have any zero-value lines
-    if ((line.debit || 0) === 0 && (line.credit || 0) === 0) {
+    if (debitAmount === 0 && creditAmount === 0) {
       throw new Error('Each journal line must have a non-zero debit or credit amount');
     }
   }
@@ -370,7 +399,7 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
   // Check schema first for backwards compatibility
   const schemaCheck = await sql`
     SELECT 
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transaction_date') as has_transaction_date,
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journal_date') as has_journal_date,
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journal_number') as has_journal_number,
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journal_type') as has_journal_type,
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'reference_number') as has_reference_number,
@@ -394,14 +423,14 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
       let index = 1;
       
       // Add appropriate date column based on schema
-      if (schema.has_transaction_date) {
-        insertColumns.push('transaction_date');
+      if (schema.has_journal_date) {
+        insertColumns.push('journal_date');
         placeholders.push(`$${index++}`);
-        values.push(journal.transaction_date);
+        values.push(journal.journal_date);
       } else if (schema.has_date) {
         insertColumns.push('date');
         placeholders.push(`$${index++}`);
-        values.push(journal.transaction_date);
+        values.push(journal.journal_date);
       }
       
       // Add optional columns if they exist in schema
@@ -442,7 +471,7 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
       const journalResult = await client.query(insertQuery, values);
       journalId = journalResult.rows[0].id;
       
-      // Check if journal_lines table has line_number column
+      // Check if journal_lines has a line_number column
       const lineNumberCheck = await client.query(`
         SELECT EXISTS (
           SELECT 1 FROM information_schema.columns 
@@ -453,52 +482,93 @@ export async function createJournal(journal: Journal, userId: string): Promise<n
       const hasLineNumber = lineNumberCheck.rows[0].exists;
       
       // Insert journal lines based on schema
-      for (const line of journal.lines) {
-        if (hasLineNumber) {
-          // If line_number column exists, use it
-          await client.query(`
-            INSERT INTO journal_lines (
-              journal_id, line_number, account_id, description, debit, credit,
-              category, location, vendor, funder, user_id
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-            )
-          `, [
-            journalId,
-            line.line_number,
-            line.account_id,
-            line.description,
-            line.debit || 0,
-            line.credit || 0,
-            line.category || null,
-            line.location || null,
-            line.vendor || null,
-            line.funder || null,
-            userId // Add the user_id to ensure it's not null
-          ]);
-        } else {
-          // If line_number column doesn't exist, omit it
-          await client.query(`
-            INSERT INTO journal_lines (
-              journal_id, account_id, description, debit, credit,
-              category, location, vendor, funder, user_id
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-            )
-          `, [
-            journalId,
-            line.account_id,
-            line.description,
-            line.debit || 0,
-            line.credit || 0,
-            line.category || null,
-            line.location || null,
-            line.vendor || null,
-            line.funder || null,
-            userId // Add the user_id to ensure it's not null
-          ]);
+      for (let i = 0; i < journal.lines.length; i++) {
+        const line = journal.lines[i];
+        const debitAmount = (line as any).debit_amount ?? (line as any).debit ?? 0;
+        const creditAmount = (line as any).credit_amount ?? (line as any).credit ?? 0;
+        
+        console.log(`[createJournal] Processing line ${i + 1}/${journal.lines.length}:`, {
+          account_id: line.account_id,
+          description: line.description,
+          debitAmount,
+          creditAmount,
+          originalLine: line
+        });
+        
+        try {
+          if (hasLineNumber) {
+            // If line_number column exists, use it
+            await client.query(`
+              INSERT INTO journal_lines (
+                journal_id, line_number, account_id, description, debit_amount, credit_amount,
+                category, location, vendor, funder, user_id
+              ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+              )
+            `, [
+              journalId,
+              line.line_number,
+              line.account_id,
+              line.description,
+              debitAmount,
+              creditAmount,
+              line.category || null,
+              line.location || null,
+              line.vendor || null,
+              line.funder || null,
+              userId // Add the user_id to ensure it's not null
+            ]);
+          } else {
+            // If line_number column doesn't exist, omit it
+            await client.query(`
+              INSERT INTO journal_lines (
+                journal_id, account_id, description, debit_amount, credit_amount,
+                category, location, vendor, funder, user_id
+              ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+              )
+            `, [
+              journalId,
+              line.account_id,
+              line.description,
+              debitAmount,
+              creditAmount,
+              line.category || null,
+              line.location || null,
+              line.vendor || null,
+              line.funder || null,
+              userId // Add the user_id to ensure it's not null
+            ]);
+          }
+        } catch (error) {
+          console.error(`Error inserting line ${i + 1}:`, error);
+          throw error;
         }
       }
+      
+      // Manually check the balance after all lines are inserted
+      const balanceCheck = await client.query(`
+        SELECT 
+          COALESCE(SUM(debit_amount), 0) as total_debits,
+          COALESCE(SUM(credit_amount), 0) as total_credits
+        FROM journal_lines 
+        WHERE journal_id = $1
+      `, [journalId]);
+      
+      const { total_debits, total_credits } = balanceCheck.rows[0];
+      
+      if (Math.abs(parseFloat(total_debits) - parseFloat(total_credits)) > 0.01) {
+        throw new Error(`Journal entry must balance: debits (${total_debits}) must equal credits (${total_credits})`);
+      }
+      
+      console.log(`[createJournal] Balance check passed: debits=${total_debits}, credits=${total_credits}`);
+      
+      // Update journal header totals
+      await client.query(`
+        UPDATE journals 
+        SET total_debit = $1, total_credit = $2 
+        WHERE id = $3
+      `, [total_debits, total_credits, journalId]);
       
       // Insert attachments if any
       if (journal.attachments && journal.attachments.length > 0) {
@@ -568,7 +638,7 @@ export async function updateJournal(journal: Journal, userId: string): Promise<v
     // Check schema first for backwards compatibility
     const schemaCheck = await client.query(`
       SELECT 
-        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'transaction_date') as has_transaction_date,
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journal_date') as has_journal_date,
         EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'journal_type') as has_journal_type,
         EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'reference_number') as has_reference_number,
         EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'journals' AND column_name = 'date') as has_date
@@ -582,12 +652,12 @@ export async function updateJournal(journal: Journal, userId: string): Promise<v
     let index = 1;
     
     // Handle date field based on schema
-    if (schema.has_transaction_date) {
-      updateSets.push(`transaction_date = $${index++}`);
-      values.push(journal.transaction_date);
+    if (schema.has_journal_date) {
+      updateSets.push(`journal_date = $${index++}`);
+      values.push(journal.journal_date);
     } else if (schema.has_date) {
       updateSets.push(`date = $${index++}`);
-      values.push(journal.transaction_date);
+      values.push(journal.journal_date);
     }
     
     // Handle optional columns if they exist
@@ -626,7 +696,7 @@ export async function updateJournal(journal: Journal, userId: string): Promise<v
     for (const line of journal.lines) {
       await client.query(`
         INSERT INTO journal_lines (
-          journal_id, line_number, account_id, description, debit, credit
+          journal_id, line_number, account_id, description, debit_amount, credit_amount
         ) VALUES (
           $1, $2, $3, $4, $5, $6
         )
@@ -635,10 +705,34 @@ export async function updateJournal(journal: Journal, userId: string): Promise<v
         line.line_number,
         line.account_id,
         line.description,
-        line.debit || 0,
-        line.credit || 0
+        line.debit_amount || 0,
+        line.credit_amount || 0
       ]);
     }
+    
+    // Manually check the balance after all lines are inserted
+    const balanceCheck = await client.query(`
+      SELECT 
+        COALESCE(SUM(debit_amount), 0) as total_debits,
+        COALESCE(SUM(credit_amount), 0) as total_credits
+      FROM journal_lines 
+      WHERE journal_id = $1
+    `, [journal.id]);
+    
+    const { total_debits, total_credits } = balanceCheck.rows[0];
+    
+    if (Math.abs(parseFloat(total_debits) - parseFloat(total_credits)) > 0.01) {
+      throw new Error(`Journal entry must balance: debits (${total_debits}) must equal credits (${total_credits})`);
+    }
+    
+    console.log(`[updateJournal] Balance check passed: debits=${total_debits}, credits=${total_credits}`);
+    
+    // Update journal header totals
+    await client.query(`
+      UPDATE journals 
+      SET total_debit = $1, total_credit = $2 
+      WHERE id = $3
+    `, [total_debits, total_credits, journal.id]);
     
     // Commit the transaction before calling afterUpdate hook
     await client.query('COMMIT');
@@ -663,7 +757,7 @@ export async function updateJournal(journal: Journal, userId: string): Promise<v
 export async function postJournal(journalId: number, userId: string): Promise<void> {
   // Check if journal exists and is not already posted
   const journalResult = await sql`
-    SELECT is_posted, journal_type, transaction_date, memo, source, reference_number, created_by, created_at
+    SELECT is_posted, journal_type, journal_date, memo, source, reference_number, created_by, created_at
     FROM journals 
     WHERE id = ${journalId} AND is_deleted = FALSE
   `;

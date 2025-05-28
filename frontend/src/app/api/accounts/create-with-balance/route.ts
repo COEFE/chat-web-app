@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     // Check if the account code already exists
     try {
       const { rows: existingAccounts } = await sql`
-        SELECT code, name FROM accounts WHERE code = ${formattedCode}
+        SELECT account_code as code, name FROM accounts WHERE account_code = ${formattedCode}
       `;
       
       // If the account exists, modify the code to make it unique
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
         while (!isUnique && suffix < 100) {
           uniqueCode = `${formattedCode}-${suffix}`;
           const { rows: checkAccounts } = await sql`
-            SELECT code FROM accounts WHERE code = ${uniqueCode}
+            SELECT account_code as code FROM accounts WHERE account_code = ${uniqueCode}
           `;
           
           if (checkAccounts.length === 0) {

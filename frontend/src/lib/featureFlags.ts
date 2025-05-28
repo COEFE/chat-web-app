@@ -4,6 +4,7 @@ export interface FeatureFlags {
   expenseTracking: boolean;
   receiptScanning: boolean;
   basicReporting: boolean;
+  aiAssistant: boolean;
   
   // Advanced Features (Future Phases)
   invoicing: boolean;
@@ -31,6 +32,7 @@ export const getFeatureFlags = (): FeatureFlags => {
       expenseTracking: true,
       receiptScanning: true,
       basicReporting: true,
+      aiAssistant: true,
       
       // Disabled for MVP
       invoicing: false,
@@ -52,6 +54,7 @@ export const getFeatureFlags = (): FeatureFlags => {
       expenseTracking: true,
       receiptScanning: true,
       basicReporting: true,
+      aiAssistant: true,
       invoicing: true,
       payroll: true,
       fullAccounting: true,
@@ -68,6 +71,7 @@ export const getFeatureFlags = (): FeatureFlags => {
     expenseTracking: true,
     receiptScanning: true,
     basicReporting: true,
+    aiAssistant: true,
     invoicing: false,
     payroll: false,
     fullAccounting: false,

@@ -192,8 +192,8 @@ export default function NewTransactionPage() {
       // Format lines for API submission
       const formattedLines = lines.map(line => ({
         account_id: line.account_id,
-        debit: line.debit ? parseFloat(line.debit) : 0,
-        credit: line.credit ? parseFloat(line.credit) : 0,
+        debit_amount: line.debit ? parseFloat(line.debit) : 0,
+        credit_amount: line.credit ? parseFloat(line.credit) : 0,
         description: line.description,
         category: line.category,
         location: line.location,
@@ -201,18 +201,23 @@ export default function NewTransactionPage() {
         funder: line.funder
       }));
       
+      const requestBody = {
+        date,
+        memo,
+        source,
+        lines: formattedLines
+      };
+      
+      console.log('[Frontend] Submitting journal with data:', requestBody);
+      console.log('[Frontend] Number of lines:', formattedLines.length);
+      
       const res = await fetch('/api/journals', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json', 
           Authorization: `Bearer ${token}` 
         },
-        body: JSON.stringify({
-          date,
-          memo,
-          source,
-          lines: formattedLines
-        })
+        body: JSON.stringify(requestBody)
       });
       
       const data = await res.json();

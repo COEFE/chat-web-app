@@ -95,6 +95,7 @@ export async function saveReceiptAsBillAttachment({
           file_path,
           file_type,
           file_size,
+          user_id,
           uploaded_by,
           uploaded_at
         ) VALUES (
@@ -104,6 +105,7 @@ export async function saveReceiptAsBillAttachment({
           ${storagePath},
           ${fileType},
           ${fileBuffer.length},
+          ${userId},
           ${userId},
           CURRENT_TIMESTAMP
         )

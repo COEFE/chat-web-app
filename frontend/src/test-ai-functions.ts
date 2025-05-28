@@ -8,7 +8,7 @@ async function testAIFunctions() {
     // Test the AI-powered expense account identification
     const accountId = await identifyExpenseAccountWithAI({
       vendorId: 1, // Use a valid vendor ID from your database
-      memo: 'Monthly office supplies purchase - paper, pens, and printer ink',
+      description: 'Monthly office supplies purchase - paper, pens, and printer ink',
       amount: 245.67
     });
     

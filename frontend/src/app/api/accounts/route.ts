@@ -53,14 +53,14 @@ export async function POST(req: NextRequest) {
         }
         try {
           await sql`
-            INSERT INTO accounts (code, name, parent_id, notes, is_custom)
+            INSERT INTO accounts (account_code, name, parent_id, notes, is_custom)
             VALUES (
               ${acctCode},
               ${description},
               NULL,
               ${notes ?? null},
               TRUE
-            ) ON CONFLICT (code) DO UPDATE
+            ) ON CONFLICT (account_code) DO UPDATE
             SET name = EXCLUDED.name, notes = EXCLUDED.notes
           `;
           results.push({ code: acctCode, status: 'success' });
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
     try {
       const { rows } = await sql`
         INSERT INTO accounts (
-          code, 
+          account_code, 
           name, 
           parent_id, 
           notes, 
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
           ${is_bank_account ?? false},
           ${userId}
         )
-        RETURNING id, code, name, parent_id, notes, is_custom, account_type, is_bank_account
+        RETURNING id, account_code as code, name, parent_id, notes, is_custom, account_type, is_bank_account
       `;
       return NextResponse.json({ account: rows[0] });
     } catch (err: any) {
@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
         console.log('[accounts] is_bank_account column not found, inserting without it');
         const { rows } = await sql`
           INSERT INTO accounts (
-            code, 
+            account_code, 
             name, 
             parent_id, 
             notes, 
@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
             ${account_type ?? 'ASSET'},
             ${userId}
           )
-          RETURNING id, code, name, parent_id, notes, is_custom, account_type
+          RETURNING id, account_code as code, name, parent_id, notes, is_custom, account_type
         `;
         return NextResponse.json({ account: rows[0] });
       } else {

@@ -4,7 +4,7 @@
 
 export interface Journal {
   id?: number;
-  transaction_date: string | Date;
+  journal_date: string | Date; // Changed from transaction_date to journal_date to match database schema
   journal_number?: string;
   journal_type: string;
   reference_number?: string;
@@ -23,8 +23,8 @@ export interface JournalLine {
   line_number?: number;
   account_id: number;
   description?: string;
-  debit: number;
-  credit: number;
+  debit_amount: number;
+  credit_amount: number;
   category?: string;
   location?: string;
   vendor?: string;

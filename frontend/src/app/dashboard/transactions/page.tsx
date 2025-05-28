@@ -242,6 +242,9 @@ export default function TransactionsPage() {
         params.append('endDate', format(endDate, 'yyyy-MM-dd'));
       }
       
+      // Add cache-busting parameter
+      params.append('_t', Date.now().toString());
+      
       const response = await fetch(`/api/journals?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` }
       });

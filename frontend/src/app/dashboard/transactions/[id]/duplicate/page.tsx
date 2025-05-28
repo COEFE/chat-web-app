@@ -125,8 +125,8 @@ export default function DuplicateJournalPage() {
           const newLines = data.lines.map((line: any) => ({
             id: crypto.randomUUID(),
             account_id: line.account_id,
-            debit: line.debit || "",
-            credit: line.credit || "",
+            debit: line.debit_amount ? String(line.debit_amount) : "",
+            credit: line.credit_amount ? String(line.credit_amount) : "",
             description: line.description || "",
             category: line.category || "",
             location: line.location || "",
@@ -207,6 +207,16 @@ export default function DuplicateJournalPage() {
       return;
     }
 
+    // Check if original journal data is loaded
+    if (!originalJournal) {
+      toast({
+        title: "Error",
+        description: "Original journal data is still loading. Please wait.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Validation
     if (!date || !memo) {
       toast({
@@ -254,8 +264,8 @@ export default function DuplicateJournalPage() {
       // Format journal lines exactly as expected by the API
       const formattedLines = lines.map(line => ({
         accountId: line.account_id, // API expects accountId, not account_id
-        debit: parseFloat(line.debit) || 0,
-        credit: parseFloat(line.credit) || 0,
+        debit_amount: parseFloat(line.debit) || 0,
+        credit_amount: parseFloat(line.credit) || 0,
         description: line.description || '',
         // Only include these fields if they are supported by the API
         category: line.category || "",
@@ -264,6 +274,20 @@ export default function DuplicateJournalPage() {
         funder: line.funder || ""
       }));
 
+      // Filter out lines with zero amounts
+      const validLines = formattedLines.filter(line => 
+        (line.debit_amount > 0 || line.credit_amount > 0)
+      );
+      
+      if (validLines.length === 0) {
+        toast({
+          title: "Error",
+          description: "Please enter at least one debit or credit amount",
+          variant: "destructive",
+        });
+        return;
+      }
+      
       // Save to API with exactly the fields expected in the legacy format
       const token = await user.getIdToken();
       const res = await fetch('/api/journals', {
@@ -276,7 +300,7 @@ export default function DuplicateJournalPage() {
           date, // Use date, not transaction_date
           memo: memo || '',
           source: source || '',
-          lines: formattedLines
+          lines: validLines
         })
       });
 
@@ -346,7 +370,7 @@ export default function DuplicateJournalPage() {
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back
               </Button>
-              <Button onClick={saveJournal} disabled={isSaving}>
+              <Button onClick={saveJournal} disabled={isSaving || isLoading || !originalJournal}>
                 {isSaving ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -542,7 +566,7 @@ export default function DuplicateJournalPage() {
         </CardContent>
         <CardFooter className="flex justify-between border-t pt-6">
           <Button variant="secondary" onClick={goBack}>Cancel</Button>
-          <Button onClick={saveJournal} disabled={isSaving}>
+          <Button onClick={saveJournal} disabled={isSaving || isLoading || !originalJournal}>
             {isSaving ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />

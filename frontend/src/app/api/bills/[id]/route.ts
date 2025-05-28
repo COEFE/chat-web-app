@@ -104,10 +104,10 @@ interface BillWithDetails {
   bill_date: string;
   due_date: string;
   total_amount: string | number;
-  amount_paid?: string | number;
+  paid_amount?: string | number;
   status: string;
-  terms?: string;
-  memo?: string;
+  payment_terms?: string;
+  description?: string;
   ap_account_id: number;
   ap_account_name?: string;
   created_at?: string;
@@ -120,11 +120,11 @@ interface BillWithDetails {
 
 // Simplified JournalLine interface for our specific needs
 interface JournalEntry {
-  line_number: number;
+  line_number?: number;
   account_id: number;
   description: string;
-  debit: number;
-  credit: number;
+  debit_amount: number;
+  credit_amount: number;
   category?: string | null;
   location?: string | null;
   vendor?: string | null;
@@ -307,27 +307,27 @@ async function createJournalEntryForBill(billId: number, bill: BillWithDetails, 
       const totalAmount = parseFloat(typeof bill.total_amount === 'string' ? bill.total_amount : bill.total_amount.toString());
       
       // First add the A/P account credit line
-      const apLine = {
+      const apLine: JournalEntry = {
         account_id: bill.ap_account_id,
         description: `Bill #${bill.bill_number || billId} - ${bill.vendor_name || 'Vendor'}`,
-        debit: 0,
-        credit: totalAmount
+        debit_amount: 0,
+        credit_amount: totalAmount
       };
       if (hasLineNumber) {
         (apLine as any).line_number = 1;
       }
       
       // Add expense account debit lines
-      const expenseLines = [];
+      const expenseLines: JournalEntry[] = [];
       let lineNumber = 2;
       
       for (const line of billLines) {
-        const lineAmount = parseFloat(line.amount);
-        const expenseLine = {
-          account_id: parseInt(line.expense_account_id as string),
+        const lineAmount = parseFloat(line.line_total);
+        const expenseLine: JournalEntry = {
+          account_id: parseInt(line.account_id as string),
           description: line.description || `Bill #${bill.bill_number || billId} expense`,
-          debit: lineAmount,
-          credit: 0
+          debit_amount: lineAmount,
+          credit_amount: 0
         };
         
         // Only add optional fields if they exist in the schema
@@ -357,8 +357,8 @@ async function createJournalEntryForBill(billId: number, bill: BillWithDetails, 
       // First insert the AP line
       try {
         // Build column list and values list dynamically based on available fields
-        const apColumnsList = ['journal_id', 'account_id', 'description', 'debit', 'credit', 'user_id'];
-        const apValuesList = [journalId, apLine.account_id, apLine.description, apLine.debit, apLine.credit, userId];
+        const apColumnsList = ['journal_id', 'account_id', 'description', 'debit_amount', 'credit_amount', 'user_id'];
+        const apValuesList = [journalId, apLine.account_id, apLine.description, apLine.debit_amount, apLine.credit_amount, userId];
         
         // Add optional fields if they exist
         if (hasLineNumber) {
@@ -385,8 +385,8 @@ async function createJournalEntryForBill(billId: number, bill: BillWithDetails, 
       for (const expenseLine of expenseLines) {
         try {
           // Build column list and values list dynamically based on available fields
-          const expColumnsList = ['journal_id', 'account_id', 'description', 'debit', 'credit', 'user_id'];
-          const expValuesList = [journalId, expenseLine.account_id, expenseLine.description, expenseLine.debit, expenseLine.credit, userId];
+          const expColumnsList = ['journal_id', 'account_id', 'description', 'debit_amount', 'credit_amount', 'user_id'];
+          const expValuesList = [journalId, expenseLine.account_id, expenseLine.description, expenseLine.debit_amount, expenseLine.credit_amount, userId];
           
           // Add optional fields if they exist
           if (hasLineNumber) {
@@ -516,7 +516,7 @@ export async function PUT(req: NextRequest) {
     }
 
     // Don't allow updates if bill has payments and we're trying to change certain fields
-    if ((existingBill.amount_paid || 0) > 0) {
+    if ((existingBill.paid_amount || 0) > 0) {
       const { bill } = body;
       if (
         (bill.vendor_id && bill.vendor_id !== existingBill.vendor_id) ||
@@ -540,9 +540,9 @@ export async function PUT(req: NextRequest) {
     console.log(`[Bill Update] Status change detection: existingStatus=${existingBill.status}, newStatus=${bill.status}, changingFromDraftToOpen=${changingFromDraftToOpen}`);
 
     // If updating total_amount, make sure it's not less than amount already paid
-    if (bill.total_amount && (existingBill.amount_paid || 0) > bill.total_amount) {
+    if (bill.total_amount && (existingBill.paid_amount || 0) > bill.total_amount) {
       return NextResponse.json(
-        { error: `Cannot set total amount less than amount already paid (${existingBill.amount_paid})` },
+        { error: `Cannot set total amount less than amount already paid (${existingBill.paid_amount})` },
         { status: 400 }
       );
     }
@@ -551,18 +551,18 @@ export async function PUT(req: NextRequest) {
     // If so, calculate the due date based on the new payment terms
     let billToUpdate = { ...bill };
     
-    if (bill.terms && (!bill.due_date || bill.due_date === existingBill.due_date)) {
+    if (bill.payment_terms && (!bill.due_date || bill.due_date === existingBill.due_date)) {
       // Terms changed but due date not explicitly updated
-      if (bill.terms !== existingBill.terms) {
-        console.log(`[Bills API] Payment terms changed from ${existingBill.terms} to ${bill.terms}, recalculating due date`);
+      if (bill.payment_terms !== existingBill.payment_terms) {
+        console.log(`[Bills API] Payment terms changed from ${existingBill.payment_terms} to ${bill.payment_terms}, recalculating due date`);
         
         // Use the bill date from the update if provided, otherwise use existing bill date
         const billDate = bill.bill_date || existingBill.bill_date;
         
         // Calculate new due date based on the updated terms
         try {
-          const calculatedDueDate = await calculateDueDateFromTerms(billDate, bill.terms);
-          console.log(`[Bills API] Auto-calculated due date: ${calculatedDueDate} based on terms: ${bill.terms}`);
+          const calculatedDueDate = await calculateDueDateFromTerms(billDate, bill.payment_terms);
+          console.log(`[Bills API] Auto-calculated due date: ${calculatedDueDate} based on terms: ${bill.payment_terms}`);
           
           // Update the due date in the bill object
           billToUpdate.due_date = calculatedDueDate;
@@ -579,7 +579,7 @@ export async function PUT(req: NextRequest) {
       {
         ...billToUpdate,
         // Fields that should never be updated via API
-        amount_paid: undefined, // Never update amount_paid directly, only via payments
+        paid_amount: undefined, // Never update paid_amount directly, only via payments
         is_deleted: undefined, // Never update is_deleted directly, use DELETE endpoint
         deleted_at: undefined, // Never update deleted_at directly, use DELETE endpoint
       },
@@ -612,7 +612,7 @@ export async function PUT(req: NextRequest) {
       const changes: { field: string; old_value: any; new_value: any }[] = [];
       const fieldsToCompare: (keyof typeof existingBill)[] = [
         'vendor_id', 'bill_number', 'bill_date', 'due_date', 
-        'total_amount', 'status', 'terms', 'memo', 'ap_account_id'
+        'total_amount', 'status', 'payment_terms', 'description', 'ap_account_id'
       ];
 
       for (const field of fieldsToCompare) {
@@ -676,7 +676,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     // Don't allow deletion if bill has payments
-    if ((bill.amount_paid || 0) > 0) {
+    if ((bill.paid_amount || 0) > 0) {
       return NextResponse.json({ error: 'Cannot delete a bill that has payments' }, { status: 400 });
     }
 

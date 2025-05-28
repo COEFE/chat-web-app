@@ -7,17 +7,21 @@ import { Vendor } from './vendorQueries';
  * This is specifically designed for the AP Agent to provide more complete information
  */
 export interface BillLineDetail {
-  id: number;
-  bill_id: number;
-  expense_account_id: number;
-  description: string;
+  id?: number;
+  bill_id?: string;
+  account_id: string;
+  expense_account_id?: number;
+  description?: string;
   quantity: string;
   unit_price: string;
-  amount: string;
+  line_total: string;
+  amount?: number;
   category?: string;
   location?: string;
   funder?: string;
   expense_account_name?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface BillWithDetails extends BillWithVendor {

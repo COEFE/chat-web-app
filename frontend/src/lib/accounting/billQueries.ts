@@ -6,21 +6,29 @@ import { sql } from "@vercel/postgres";
 export interface Bill {
   id?: number;
   vendor_id: number;
+  vendor_name?: string;
   bill_number?: string;
   bill_date: string;
   due_date: string;
   total_amount: number;
-  amount_paid?: number;
+  paid_amount?: number;
+  amount_paid?: number; // Alias for paid_amount for compatibility
   status?: string;
-  terms?: string;
-  memo?: string;
+  payment_terms?: string;
+  terms?: string; // Alias for payment_terms for compatibility
+  description?: string;
+  memo?: string; // Alias for description for compatibility
   ap_account_id: number;
+  ap_account_name?: string;
   created_at?: string;
   updated_at?: string;
   is_deleted?: boolean;
   deleted_at?: string;
   journal_type?: string; // Add journal_type to the Bill interface
   journal_id?: number; // Add journal_id to track associated journal entry
+  user_receipt_context?: string; // User-provided context for receipt processing
+  lines?: BillLine[];
+  payments?: BillPayment[];
 }
 
 /**
@@ -29,11 +37,14 @@ export interface Bill {
 export interface BillLine {
   id?: number;
   bill_id?: string;
-  expense_account_id: string;
+  account_id: string;
+  expense_account_id?: number;
+  expense_account_name?: string;
   description?: string;
   quantity: string;
   unit_price: string;
-  amount: string;
+  line_total: string;
+  amount?: number; // Alias for line_total as number
   category?: string;
   location?: string;
   funder?: string;
@@ -72,6 +83,7 @@ export interface BillRefund {
   reason?: string;
   created_at?: string;
   updated_at?: string;
+  account_name?: string; // From join with accounts table
 }
 
 /**
@@ -154,6 +166,7 @@ export async function getBills(
     const billsQuery = `
       SELECT 
         b.*,
+        b.paid_amount as amount_paid,
         v.name as vendor_name,
         a.name as ap_account_name
       FROM bills b
@@ -210,6 +223,7 @@ export async function getBill(
     let billQuery = `
       SELECT 
         b.*,
+        b.paid_amount as amount_paid,
         v.name as vendor_name,
         a.name as ap_account_name
       FROM bills b
@@ -244,7 +258,7 @@ export async function getBill(
           bl.*,
           a.name as expense_account_name
         FROM bill_lines bl
-        LEFT JOIN accounts a ON bl.expense_account_id = a.id
+        LEFT JOIN accounts a ON bl.account_id = a.id
         WHERE bl.bill_id = $1
         ORDER BY bl.id
       `;
@@ -312,10 +326,10 @@ export async function createBill(
         bill_date,
         due_date,
         total_amount,
-        amount_paid,
+        paid_amount,
         status,
-        terms,
-        memo,
+        payment_terms,
+        description,
         ap_account_id,
         user_id
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -324,7 +338,7 @@ export async function createBill(
 
     // Calculate total from line items
     const totalAmount = lines.reduce(
-      (sum, line) => sum + parseFloat(line.amount),
+      (sum, line) => sum + parseFloat(line.line_total),
       0
     );
 
@@ -341,7 +355,7 @@ export async function createBill(
     // If the bill status is 'Paid', set amount_paid to the total amount
     // Otherwise, use the provided amount_paid or default to 0
     const amountPaid =
-      billStatus === "Paid" ? totalAmount : bill.amount_paid || 0;
+      billStatus === "Paid" ? totalAmount : bill.paid_amount || 0;
     console.log(
       `[Bill Create] Setting amount_paid to ${amountPaid} for bill with status: ${billStatus}`
     );
@@ -354,8 +368,8 @@ export async function createBill(
       totalAmount,
       amountPaid, // Use the calculated amount_paid value
       billStatus, // Use the determined status
-      bill.terms || null,
-      bill.memo || null,
+      bill.payment_terms || null,
+      bill.description || null,
       bill.ap_account_id,
       userId || null, // Include user_id for proper data isolation
     ]);
@@ -367,11 +381,11 @@ export async function createBill(
       const lineQuery = `
         INSERT INTO bill_lines (
           bill_id,
-          expense_account_id,
+          account_id,
           description,
           quantity,
           unit_price,
-          amount,
+          line_total,
           category,
           location,
           funder,
@@ -381,11 +395,11 @@ export async function createBill(
 
       await sql.query(lineQuery, [
         newBill.id,
-        line.expense_account_id,
+        line.account_id,
         line.description || null,
         line.quantity,
         line.unit_price,
-        line.amount,
+        line.line_total,
         line.category || null,
         line.location || null,
         line.funder || null,
@@ -410,20 +424,22 @@ export async function createBill(
         const schema = schemaCheck.rows[0];
         const dateColumnName = schema.has_transaction_date
           ? "transaction_date"
-          : "date";
+          : "journal_date"; // Use journal_date as fallback instead of "date"
         const hasLineNumber = schema.has_line_number;
 
         // Create journal entry header
         const journalInsertQuery = `
           INSERT INTO journals (
-            ${dateColumnName}, memo, journal_type, is_posted, created_by, source, user_id
+            ${dateColumnName}, description, journal_type, is_posted, created_by, source, user_id
           )
           VALUES ($1, $2, $3, $4, $5, $6, $7)
           RETURNING id
         `;
 
         const billNumber = newBill.bill_number || `Bill #${newBill.id}`;
-        const memo = `${billNumber} - ${newBill.vendor_id}`;
+        const memo = bill.user_receipt_context 
+          ? bill.user_receipt_context 
+          : `${billNumber} - ${newBill.vendor_id}`;
 
         const journalResult = await sql.query(journalInsertQuery, [
           bill.bill_date,
@@ -455,32 +471,32 @@ export async function createBill(
         if (hasLineNumber) {
           await sql.query(
             `
-            INSERT INTO journal_lines (journal_id, line_number, account_id, description, debit, credit, user_id)
+            INSERT INTO journal_lines (journal_id, line_number, account_id, description, debit_amount, credit_amount, user_id)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
           `,
             [
               journalId,
-              1, // line number
+              1,
               bill.ap_account_id,
               `AP - ${apAccountName}`,
-              0, // debit
-              totalAmount, // credit AP account
-              userId, // user_id for proper data isolation
+              0,
+              totalAmount,
+              userId,
             ]
           );
         } else {
           await sql.query(
             `
-            INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, user_id)
+            INSERT INTO journal_lines (journal_id, account_id, description, debit_amount, credit_amount, user_id)
             VALUES ($1, $2, $3, $4, $5, $6)
           `,
             [
               journalId,
               bill.ap_account_id,
               `AP - ${apAccountName}`,
-              0, // debit
-              totalAmount, // credit AP account
-              userId, // user_id for proper data isolation
+              0,
+              totalAmount,
+              userId,
             ]
           );
         }
@@ -491,8 +507,8 @@ export async function createBill(
         let lineNumber = 2;
 
         for (const line of lines) {
-          const accountId = line.expense_account_id;
-          const amount = parseFloat(line.amount);
+          const accountId = line.account_id;
+          const amount = parseFloat(line.line_total);
 
           // Get expense account name
           const expenseAccountResult = await sql.query(
@@ -506,7 +522,7 @@ export async function createBill(
           if (hasLineNumber) {
             await sql.query(
               `
-              INSERT INTO journal_lines (journal_id, line_number, account_id, description, debit, credit, user_id)
+              INSERT INTO journal_lines (journal_id, line_number, account_id, description, debit_amount, credit_amount, user_id)
               VALUES ($1, $2, $3, $4, $5, $6, $7)
             `,
               [
@@ -514,24 +530,24 @@ export async function createBill(
                 lineNumber++,
                 accountId,
                 `${expenseAccountName} - ${line.description || "Expense"}`,
-                amount, // debit expense account
-                0, // credit
-                userId, // user_id for proper data isolation
+                amount,
+                0,
+                userId,
               ]
             );
           } else {
             await sql.query(
               `
-              INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, user_id)
+              INSERT INTO journal_lines (journal_id, account_id, description, debit_amount, credit_amount, user_id)
               VALUES ($1, $2, $3, $4, $5, $6)
             `,
               [
                 journalId,
                 accountId,
                 `${expenseAccountName} - ${line.description || "Expense"}`,
-                amount, // debit expense account
-                0, // credit
-                userId, // user_id for proper data isolation
+                amount,
+                0,
+                userId,
               ]
             );
           }
@@ -603,7 +619,7 @@ export async function updateBill(
   try {
     // Get the current bill to check status
     const currentBillQuery = `
-      SELECT * FROM bills WHERE id = $1 AND is_deleted = false
+      SELECT *, paid_amount as amount_paid FROM bills WHERE id = $1 AND is_deleted = false
     `;
 
     const currentBillResult = await sql.query(currentBillQuery, [id]);
@@ -645,14 +661,14 @@ export async function updateBill(
       values.push(bill.due_date);
     }
 
-    if (bill.terms !== undefined) {
-      setClause += `terms = $${paramIndex++}, `;
-      values.push(bill.terms || null);
+    if (bill.payment_terms !== undefined) {
+      setClause += `payment_terms = $${paramIndex++}, `;
+      values.push(bill.payment_terms || null);
     }
 
-    if (bill.memo !== undefined) {
-      setClause += `memo = $${paramIndex++}, `;
-      values.push(bill.memo || null);
+    if (bill.description !== undefined) {
+      setClause += `description = $${paramIndex++}, `;
+      values.push(bill.description || null);
     }
 
     if (bill.ap_account_id !== undefined) {
@@ -670,7 +686,7 @@ export async function updateBill(
     if (lines && lines.length > 0) {
       // Calculate new total amount from line items
       const totalAmount = lines.reduce(
-        (sum, line) => sum + parseFloat(line.amount),
+        (sum, line) => sum + parseFloat(line.line_total),
         0
       );
 
@@ -685,11 +701,11 @@ export async function updateBill(
         const lineQuery = `
           INSERT INTO bill_lines (
             bill_id,
-            expense_account_id,
+            account_id,
             description,
             quantity,
             unit_price,
-            amount,
+            line_total,
             category,
             location,
             funder,
@@ -699,11 +715,11 @@ export async function updateBill(
 
         await sql.query(lineQuery, [
           id,
-          line.expense_account_id,
+          line.account_id,
           line.description || null,
           line.quantity,
           line.unit_price,
-          line.amount,
+          line.line_total,
           line.category || null,
           line.location || null,
           line.funder || null,
@@ -749,7 +765,7 @@ export async function deleteBill(id: number): Promise<boolean> {
   try {
     // Check if the bill exists and is not already deleted
     const checkQuery = `
-      SELECT * FROM bills WHERE id = $1 AND is_deleted = false
+      SELECT *, paid_amount as amount_paid FROM bills WHERE id = $1 AND is_deleted = false
     `;
 
     const checkResult = await sql.query(checkQuery, [id]);
@@ -793,7 +809,7 @@ export async function createBillPayment(
   try {
     // Get the bill to check status and remaining amount
     const billQuery = `
-      SELECT * FROM bills WHERE id = $1 AND is_deleted = false
+      SELECT *, paid_amount as amount_paid FROM bills WHERE id = $1 AND is_deleted = false
     `;
 
     const billResult = await sql.query(billQuery, [payment.bill_id]);
@@ -803,7 +819,7 @@ export async function createBillPayment(
     }
 
     const bill = billResult.rows[0];
-    const remainingAmount = bill.total_amount - bill.amount_paid;
+    const remainingAmount = bill.total_amount - bill.paid_amount;
 
     if (payment.amount_paid > remainingAmount) {
       throw new Error(
@@ -823,7 +839,7 @@ export async function createBillPayment(
         journal_id,
         user_id
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING *
+      RETURNING *, amount_paid as paid_amount
     `;
 
     const paymentResult = await sql.query(paymentQuery, [
@@ -839,12 +855,12 @@ export async function createBillPayment(
 
     const newPayment = paymentResult.rows[0];
 
-    // Update the bill's amount_paid and status
+    // Update the bill's paid_amount and status
     // Ensure both values are converted to numbers to avoid string concatenation
     const currentAmountPaid =
-      typeof bill.amount_paid === "string"
-        ? parseFloat(bill.amount_paid)
-        : Number(bill.amount_paid) || 0;
+      typeof bill.paid_amount === "string"
+        ? parseFloat(bill.paid_amount)
+        : Number(bill.paid_amount) || 0;
     const paymentAmount =
       typeof payment.amount_paid === "number"
         ? payment.amount_paid
@@ -876,7 +892,7 @@ export async function createBillPayment(
     await sql.query(
       `
       UPDATE bills
-      SET amount_paid = $1, status = $2, updated_at = CURRENT_TIMESTAMP
+      SET paid_amount = $1, status = $2, updated_at = CURRENT_TIMESTAMP
       WHERE id = $3
     `,
       [newAmountPaid.toString(), newStatus, payment.bill_id]
@@ -1027,7 +1043,7 @@ export async function deleteBillPayment(id: number): Promise<boolean> {
 
     // Get the bill
     const billQuery = `
-      SELECT * FROM bills WHERE id = $1
+      SELECT *, paid_amount as amount_paid FROM bills WHERE id = $1
     `;
 
     const billResult = await sql.query(billQuery, [payment.bill_id]);
@@ -1041,7 +1057,7 @@ export async function deleteBillPayment(id: number): Promise<boolean> {
 
     // Calculate new amount paid
     // Ensure both values are parsed as numbers to avoid string concatenation
-    const currentAmountPaid = parseFloat(bill.amount_paid) || 0;
+    const currentAmountPaid = parseFloat(bill.paid_amount) || 0;
     const paymentAmount = parseFloat(payment.amount_paid) || 0;
 
     // Round to 2 decimal places to avoid floating point issues
@@ -1060,7 +1076,7 @@ export async function deleteBillPayment(id: number): Promise<boolean> {
     await sql.query(
       `
       UPDATE bills
-      SET amount_paid = $1, status = $2, updated_at = CURRENT_TIMESTAMP
+      SET paid_amount = $1, status = $2, updated_at = CURRENT_TIMESTAMP
       WHERE id = $3
     `,
       [newAmountPaid.toString(), newStatus, payment.bill_id]

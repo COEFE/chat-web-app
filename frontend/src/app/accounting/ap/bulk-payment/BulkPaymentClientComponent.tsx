@@ -119,7 +119,7 @@ export default function BulkPaymentClientComponent({
   // Calculate total remaining amount for selected bills
   const totalSelectedAmount = bills
     .filter(bill => selectedBillIds.has(bill.id!))
-    .reduce((sum, bill) => sum + (Number(bill.total_amount || 0) - Number(bill.amount_paid || 0)), 0);
+    .reduce((sum, bill) => sum + (Number(bill.total_amount || 0) - Number(bill.paid_amount || 0)), 0);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -153,7 +153,7 @@ export default function BulkPaymentClientComponent({
                   <TableCell>{bill.bill_number || 'N/A'}</TableCell>
                   <TableCell>{bill.bill_date ? new Date(bill.bill_date).toLocaleDateString() : 'N/A'}</TableCell>
                   <TableCell>{bill.due_date ? new Date(bill.due_date).toLocaleDateString() : 'N/A'}</TableCell>
-                  <TableCell className="text-right">${(Number(bill.total_amount || 0) - Number(bill.amount_paid || 0)).toFixed(2)}</TableCell>
+                  <TableCell className="text-right">${(Number(bill.total_amount || 0) - Number(bill.paid_amount || 0)).toFixed(2)}</TableCell>
                 </TableRow>
               ))}
               {bills.length === 0 && (

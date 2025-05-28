@@ -21,6 +21,12 @@ export function AccountingNav() {
   
   const links = [
     {
+      name: "Receipts",
+      href: "/dashboard/receipts",
+      icon: Receipt,
+      subLinks: []
+    },
+    {
       name: "Accounts Payable",
       href: "/dashboard/accounts-payable",
       icon: CreditCard,
@@ -34,7 +40,7 @@ export function AccountingNav() {
     {
       name: "Accounts Receivable",
       href: "/dashboard/accounts-receivable",
-      icon: Receipt,
+      icon: Users,
       subLinks: [
         { name: "Customers", href: "/dashboard/accounts-receivable/customers" },
         { name: "Invoices", href: "/dashboard/accounts-receivable/invoices" },

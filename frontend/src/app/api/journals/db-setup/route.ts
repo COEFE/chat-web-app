@@ -170,8 +170,8 @@ export async function POST(req: NextRequest) {
         total_credits NUMERIC;
       BEGIN
         SELECT 
-          COALESCE(SUM(debit), 0), 
-          COALESCE(SUM(credit), 0)
+          COALESCE(SUM(debit_amount), 0), 
+          COALESCE(SUM(credit_amount), 0)
         INTO 
           total_debits, 
           total_credits

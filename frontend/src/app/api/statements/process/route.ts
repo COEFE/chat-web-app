@@ -276,19 +276,19 @@ export async function POST(request: NextRequest) {
               due_date: transaction.date,
               total_amount: Math.abs(transaction.amount),
               status: 'Paid', // Credit card transactions are already paid
-              memo: `Credit card transaction: ${transaction.description}`,
+              description: `Credit card transaction: ${transaction.description}`,
               ap_account_id: existingAccountId,
-              terms: 'Net 0',
-              amount_paid: Math.abs(transaction.amount), // Set amount_paid equal to total_amount
+              payment_terms: 'Net 0',
+              paid_amount: Math.abs(transaction.amount), // Set paid_amount equal to total_amount
             };
             
             // Create the bill line
             const billLine = {
-              expense_account_id: expenseAccountId.toString(),
+              account_id: expenseAccountId.toString(),
               description: transaction.description,
               quantity: '1',
               unit_price: Math.abs(transaction.amount).toString(),
-              amount: Math.abs(transaction.amount).toString(),
+              line_total: Math.abs(transaction.amount).toString(),
               category: transaction.category || 'Uncategorized'
             };
             

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { RunMigrationButton } from "@/components/admin/RunMigrationButton";
+import CreateBillRefundsButton from "@/components/CreateBillRefundsButton";
 import {
   Card,
   CardContent,
@@ -160,6 +161,15 @@ export default function DatabaseAdminPage() {
                     </p>
                   </div>
                 )}
+              </div>
+              
+              {/* Create Bill Refunds */}
+              <div className="space-y-2 mt-4">
+                <h3 className="text-lg font-medium">Create Bill Refunds</h3>
+                <p className="text-muted-foreground mb-2">
+                  Creates the bill_refunds table for tracking refunds against paid vendor bills.
+                </p>
+                <CreateBillRefundsButton />
               </div>
             </CardContent>
           </Card>

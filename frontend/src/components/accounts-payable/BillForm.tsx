@@ -5,6 +5,7 @@ import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { format } from "date-fns";
+import { Bill } from "@/lib/accounting/billQueries";
 import {
   Dialog,
   DialogContent,
@@ -70,16 +71,16 @@ const billLineSchema = z.object({
 const billFormSchema = z.object({
   vendor_id: z.string().min(1, "Vendor is required"),
   bill_number: z.string().optional(),
-  bill_date: z.date({
-    required_error: "Bill date is required",
-  }),
-  due_date: z.date({
-    required_error: "Due date is required",
-  }),
-  terms: z.string().optional(),
-  memo: z.string().optional(),
+  bill_date: z.string().min(1, "Bill date is required"),
+  due_date: z.string().min(1, "Due date is required"),
+  total_amount: z.string().min(1, "Total amount is required").refine(
+    (val) => !isNaN(parseFloat(val)) && parseFloat(val) > 0,
+    "Total amount must be a positive number"
+  ),
+  status: z.string().min(1, "Status is required"),
+  payment_terms: z.string().optional(),
+  description: z.string().optional(),
   ap_account_id: z.string().min(1, "AP account is required"),
-  status: z.string().nonempty(),
   lines: z.array(billLineSchema).min(1, "At least one line item is required"),
 });
 
@@ -109,21 +110,6 @@ interface BillLine {
   category?: string;
   location?: string;
   funder?: string;
-}
-
-interface Bill {
-  id: number;
-  vendor_id: number;
-  bill_number?: string;
-  bill_date: string;
-  due_date: string;
-  total_amount: number;
-  amount_paid: number;
-  status: string;
-  terms?: string;
-  memo?: string;
-  ap_account_id: number;
-  lines?: BillLine[];
 }
 
 interface BillFormProps {
@@ -169,10 +155,10 @@ export function BillForm({ bill, onClose, isCreditNote = false, title = "Add Bil
     defaultValues: {
       vendor_id: bill?.vendor_id?.toString() || "",
       bill_number: bill?.bill_number || "",
-      bill_date: bill ? new Date(bill.bill_date) : new Date(),
-      due_date: bill ? new Date(bill.due_date) : new Date(),
-      terms: bill?.terms || "",
-      memo: bill?.memo || "",
+      bill_date: bill ? format(new Date(bill.bill_date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
+      due_date: bill ? format(new Date(bill.due_date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
+      payment_terms: bill?.payment_terms || "",
+      description: bill?.description || "",
       ap_account_id: bill?.ap_account_id?.toString() || defaultApAccountId,
       status: bill?.status || "Draft",
       lines: bill?.lines && Array.isArray(bill.lines) && bill.lines.length > 0
@@ -237,10 +223,10 @@ export function BillForm({ bill, onClose, isCreditNote = false, title = "Add Bil
           form.reset({
             vendor_id: bill.vendor_id?.toString() || "",
             bill_number: bill.bill_number || "",
-            bill_date: new Date(bill.bill_date),
-            due_date: new Date(bill.due_date),
-            terms: bill.terms || "",
-            memo: bill.memo || "",
+            bill_date: format(new Date(bill.bill_date), 'yyyy-MM-dd'),
+            due_date: format(new Date(bill.due_date), 'yyyy-MM-dd'),
+            payment_terms: bill.payment_terms || "",
+            description: bill.description || "",
             ap_account_id: bill.ap_account_id?.toString() || defaultApAccountId,
             status: bill.status || "Draft",
             lines: formattedLines
@@ -388,8 +374,8 @@ export function BillForm({ bill, onClose, isCreditNote = false, title = "Add Bil
         bill_number: data.bill_number || null,
         bill_date: format(data.bill_date, 'yyyy-MM-dd'),
         due_date: format(data.due_date, 'yyyy-MM-dd'),
-        terms: data.terms || null,
-        memo: (isCreditNote ? 'CREDIT NOTE: ' : '') + (data.memo || ''),
+        payment_terms: data.payment_terms || null,
+        description: (isCreditNote ? 'CREDIT NOTE: ' : '') + (data.description || ''),
         ap_account_id: parseInt(data.ap_account_id),
         status: data.status,
         total_amount: totalAmount,
@@ -572,7 +558,7 @@ export function BillForm({ bill, onClose, isCreditNote = false, title = "Add Bil
                               className="w-full pl-3 text-left font-normal"
                             >
                               {field.value ? (
-                                format(field.value, "MM/dd/yyyy")
+                                format(new Date(field.value), "MM/dd/yyyy")
                               ) : (
                                 <span>Pick a date</span>
                               )}
@@ -583,8 +569,8 @@ export function BillForm({ bill, onClose, isCreditNote = false, title = "Add Bil
                         <PopoverContent className="w-auto p-0" align="start">
                           <Calendar
                             mode="single"
-                            selected={field.value}
-                            onSelect={field.onChange}
+                            selected={field.value ? new Date(field.value) : undefined}
+                            onSelect={(date) => field.onChange(date ? format(date, 'yyyy-MM-dd') : '')}
                             disabled={(date) =>
                               date > new Date() || date < new Date("1900-01-01")
                             }
@@ -612,7 +598,7 @@ export function BillForm({ bill, onClose, isCreditNote = false, title = "Add Bil
                               className="w-full pl-3 text-left font-normal"
                             >
                               {field.value ? (
-                                format(field.value, "MM/dd/yyyy")
+                                format(new Date(field.value), "MM/dd/yyyy")
                               ) : (
                                 <span>Pick a date</span>
                               )}
@@ -623,8 +609,8 @@ export function BillForm({ bill, onClose, isCreditNote = false, title = "Add Bil
                         <PopoverContent className="w-auto p-0" align="start">
                           <Calendar
                             mode="single"
-                            selected={field.value}
-                            onSelect={field.onChange}
+                            selected={field.value ? new Date(field.value) : undefined}
+                            onSelect={(date) => field.onChange(date ? format(date, 'yyyy-MM-dd') : '')}
                             initialFocus
                           />
                         </PopoverContent>
@@ -638,7 +624,7 @@ export function BillForm({ bill, onClose, isCreditNote = false, title = "Add Bil
                 {/* Payment Terms */}
                 <FormField
                   control={form.control}
-                  name="terms"
+                  name="payment_terms"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Payment Terms</FormLabel>
@@ -646,31 +632,31 @@ export function BillForm({ bill, onClose, isCreditNote = false, title = "Add Bil
                         onValueChange={(value) => {
                           field.onChange(value);
                           
-                          // Auto-calculate due date based on selected payment terms
+                          // Auto-calculate due date based on payment terms
                           const billDate = form.getValues('bill_date');
                           if (billDate) {
                             let dueDate = new Date(billDate);
                             
                             // Simple calculation for common terms
                             if (value === 'Net 15') {
-                              dueDate.setDate(billDate.getDate() + 15);
-                              form.setValue('due_date', dueDate);
+                              dueDate.setDate(dueDate.getDate() + 15);
+                              form.setValue('due_date', format(dueDate, 'yyyy-MM-dd'));
                             } else if (value === 'Net 30') {
-                              dueDate.setDate(billDate.getDate() + 30);
-                              form.setValue('due_date', dueDate);
+                              dueDate.setDate(dueDate.getDate() + 30);
+                              form.setValue('due_date', format(dueDate, 'yyyy-MM-dd'));
                             } else if (value === 'Net 45') {
-                              dueDate.setDate(billDate.getDate() + 45);
-                              form.setValue('due_date', dueDate);
+                              dueDate.setDate(dueDate.getDate() + 45);
+                              form.setValue('due_date', format(dueDate, 'yyyy-MM-dd'));
                             } else if (value === 'Net 60') {
-                              dueDate.setDate(billDate.getDate() + 60);
-                              form.setValue('due_date', dueDate);
+                              dueDate.setDate(dueDate.getDate() + 60);
+                              form.setValue('due_date', format(dueDate, 'yyyy-MM-dd'));
                             } else if (value === 'COD' || value === 'Due on Receipt') {
                               // Due immediately
                               form.setValue('due_date', billDate);
                             } else if (value === '2/10 Net 30') {
                               // Net 30 with 2% discount if paid within 10 days
-                              dueDate.setDate(billDate.getDate() + 30);
-                              form.setValue('due_date', dueDate);
+                              dueDate.setDate(dueDate.getDate() + 30);
+                              form.setValue('due_date', format(dueDate, 'yyyy-MM-dd'));
                             }
                             // For other terms, the server-side AI will handle them
                           }
@@ -769,7 +755,7 @@ export function BillForm({ bill, onClose, isCreditNote = false, title = "Add Bil
               {/* Memo */}
               <FormField
                 control={form.control}
-                name="memo"
+                name="description"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Memo</FormLabel>
