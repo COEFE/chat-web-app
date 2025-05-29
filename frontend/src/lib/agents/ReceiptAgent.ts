@@ -886,7 +886,7 @@ For accountName:
 
       // Generate appropriate account code based on account type
       const existingAccounts = await sql`
-        SELECT id, name, notes FROM accounts 
+        SELECT id, name, account_code, notes FROM accounts 
         WHERE account_type = ${this.mapToGLAccountType(
           paymentAnalysis.accountType
         )}
@@ -901,6 +901,7 @@ For accountName:
           id: number;
           name: string;
           notes?: string;
+          account_code: string;
         }>
       );
 
@@ -1006,7 +1007,7 @@ For accountName:
 
       // First, get all existing expense accounts for AI analysis
       const existingAccountsQuery = await sql`
-        SELECT id, name, notes FROM accounts 
+        SELECT id, name, account_code, notes FROM accounts 
         WHERE account_type = 'expense' 
         AND user_id = ${context.userId || null}
         AND is_active = true
@@ -1025,6 +1026,7 @@ For accountName:
             id: number;
             name: string;
             notes?: string;
+            account_code: string;
           }>
         );
 
@@ -1054,6 +1056,7 @@ For accountName:
           id: number;
           name: string;
           notes?: string;
+          account_code: string;
         }>
       );
 
@@ -1077,6 +1080,7 @@ For accountName:
           id: number;
           name: string;
           notes?: string;
+          account_code: string;
         }>
       );
 
@@ -1119,7 +1123,7 @@ For accountName:
    */
   private async checkForDuplicateAccountName(
     accountName: string,
-    existingAccounts: Array<{ id: number; name: string; notes?: string }>
+    existingAccounts: Array<{ id: number; name: string; notes?: string; account_code: string }>
   ): Promise<{
     isDuplicate: boolean;
     suggestedName?: string;
@@ -1202,7 +1206,7 @@ IMPORTANT: Only suggest a duplicate if you're confident it's a match. When in do
    */
   private async findBestAccountMatch(
     category: string,
-    existingAccounts: Array<{ id: number; name: string; notes?: string }>
+    existingAccounts: Array<{ id: number; name: string; notes?: string; account_code: string }>
   ): Promise<{
     accountId?: number;
     accountName?: string;
@@ -1516,11 +1520,11 @@ RESPONSE: Return ONLY the bill number (e.g., "RECEIPT-20230804-PION58")`;
   private async generateIntelligentAccountCode(
     accountName: string,
     accountType: string,
-    existingAccounts: Array<{ id: number; name: string; notes?: string }>
+    existingAccounts: Array<{ id: number; name: string; notes?: string; account_code: string }>
   ): Promise<string> {
     try {
       // First, check if we have existing accounts to avoid duplicates
-      const existingCodes = existingAccounts.map(acc => acc.id.toString());
+      const existingCodes = existingAccounts.map(acc => acc.account_code);
       
       const prompt = `Generate a 5-digit GL account code for "${accountName}" (type: ${accountType})
 
@@ -1649,7 +1653,7 @@ RESPONSE: Return ONLY the 5-digit code (e.g., "52100")`;
 
       // Create new payment account if not found
       const existingAccounts = await sql`
-        SELECT id, name, notes FROM accounts 
+        SELECT id, name, account_code, notes FROM accounts 
         WHERE account_type = ${accountType}
         AND user_id = ${context.userId || null}
         AND is_active = true
@@ -1662,6 +1666,7 @@ RESPONSE: Return ONLY the 5-digit code (e.g., "52100")`;
           id: number;
           name: string;
           notes?: string;
+          account_code: string;
         }>
       );
 
