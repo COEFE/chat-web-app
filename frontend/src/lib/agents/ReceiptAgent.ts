@@ -1,3 +1,7 @@
+/**
+ * ReceiptAgent - AI-powered receipt processing and journal entry generation
+ * Updated: 2025-05-28 - Fixed account_code column references
+ */
 import { Agent, AgentContext } from "@/types/agents";
 import { ReceiptExtractor } from "./ReceiptExtractor";
 import {
